@@ -13,4 +13,3 @@ class RequestState(str, Enum):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     REJECTED = "REJECTED"
-

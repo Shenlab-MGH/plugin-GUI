@@ -74,4 +74,3 @@ class OpenEphysClient:
                 return last
             time.sleep(poll_seconds)
         return last
-
