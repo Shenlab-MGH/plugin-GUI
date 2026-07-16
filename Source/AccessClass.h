@@ -55,6 +55,9 @@ void setAudioComponent (AudioComponent*);
 /** Sets the object's ControlPanel */
 void setControlPanel (ControlPanel*);
 
+/** Clears the ControlPanel only when it matches the expected instance. */
+void clearControlPanel (ControlPanel* expected);
+
 /** Returns a pointer to the application's EditorViewport. */
 EditorViewport* getEditorViewport();
 

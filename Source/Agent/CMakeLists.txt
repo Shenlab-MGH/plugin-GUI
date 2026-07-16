@@ -3,10 +3,16 @@ add_sources(open-ephys
     AgentCommand.h
     AgentState.h
     AgentState.cpp
+    AgentStateSnapshotCache.h
+    AgentStateSnapshotCache.cpp
     AgentTransportPlanner.h
     AgentTransportPlanner.cpp
     AgentTransportCoordinator.h
     AgentTransportCoordinator.cpp
+    AgentTransportEndpoint.h
+    AgentTransportEndpoint.cpp
+    AgentTransportMailbox.h
+    AgentTransportMailbox.cpp
     TransportAccessibilityRegistry.h
     TransportAccessibilityRegistry.cpp
     ControlPanelCommandRouter.h

@@ -39,3 +39,23 @@ add_agent_core_test(
     ../../Source/Agent/AgentTransportCoordinator.cpp
     ../../Source/Agent/AgentTransportPlanner.cpp
 )
+
+add_agent_core_test(
+    AgentTransportMailboxTests
+    AgentTransportMailboxTests.cpp
+    ../../Source/Agent/AgentTransportMailbox.cpp
+)
+
+add_agent_core_test(
+    AgentTransportEndpointTests
+    AgentTransportEndpointTests.cpp
+    ../../Source/Agent/AgentTransportEndpoint.cpp
+    ../../Source/Agent/AgentTransportMailbox.cpp
+    ../../Source/Agent/AgentStateSnapshotCache.cpp
+)
+
+add_agent_core_test(
+    AgentStateSnapshotCacheTests
+    AgentStateSnapshotCacheTests.cpp
+    ../../Source/Agent/AgentStateSnapshotCache.cpp
+)

@@ -21,8 +21,10 @@ def main() -> None:
             "ControlPanel must include the verified coordinator",
         "private AgentTransportRuntime":
             "ControlPanel must implement the transport runtime privately",
-        "AgentStateSnapshot getAgentStateSnapshot();":
-            "Internal adapters need an authoritative state snapshot",
+        "getAgentTransportEndpoint() const;":
+            "Worker adapters need the shared lifetime-safe endpoint",
+        "std::shared_ptr<AgentTransportEndpoint> agentTransportEndpoint;":
+            "ControlPanel must retain the endpoint snapshot cache",
         "AgentTransportApplyResult applyAgentTransportRequest (":
             "Internal adapters need the coordinator entrypoint",
         "bool agentTransportTransactionActive = false;":
@@ -50,8 +52,10 @@ def main() -> None:
             "A concurrent or re-entrant transaction must fail closed",
         "AgentStateSnapshot ControlPanel::readState()":
             "ControlPanel must implement authoritative readback",
-        "AgentStateSnapshot ControlPanel::getAgentStateSnapshot()":
-            "The public state getter must have an explicit implementation",
+        "ControlPanel::getAgentTransportEndpoint() const":
+            "The shared endpoint getter must have an explicit implementation",
+        "agentTransportEndpoint->publish (state)":
+            "Message-thread readback must publish coherent snapshots",
         "audio->callbacksAreActive()":
             "Acquisition readback must inspect active audio callbacks",
         "node->getRecordingStatus()":
@@ -81,20 +85,6 @@ def main() -> None:
 
     for fragment, message in implementation_contract.items():
         require(fragment, IMPLEMENTATION, message)
-
-    snapshot_section = IMPLEMENTATION[
-        IMPLEMENTATION.find(
-            "AgentStateSnapshot ControlPanel::getAgentStateSnapshot()"
-        ):
-        IMPLEMENTATION.find(
-            "AgentTransportApplyResult ControlPanel::applyAgentTransportRequest"
-        )
-    ]
-    require(
-        "isThisTheMessageThread()",
-        snapshot_section,
-        "State snapshot reads must be restricted to the JUCE message thread",
-    )
 
     forbidden = {
         "CoreServices::setRecordingStatus":

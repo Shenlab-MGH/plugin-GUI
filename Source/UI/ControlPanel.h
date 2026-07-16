@@ -28,6 +28,7 @@
 #include "../AccessClass.h"
 #include "../Agent/ControlPanelCommandRouter.h"
 #include "../Agent/AgentTransportCoordinator.h"
+#include "../Agent/AgentTransportEndpoint.h"
 #include "../Audio/AudioComponent.h"
 #include "../Processors/AudioNode/AudioEditor.h"
 #include "../Processors/Editors/GenericEditor.h" // for UtilityButton
@@ -324,6 +325,7 @@ private:
 };
 
 class UtilityButton;
+class ControlPanelTransportExecutor;
 
 /**
 
@@ -488,12 +490,8 @@ public:
     /** Returns the record button component */
     Component* getRecordButton() { return recordButton.get(); }
 
-    /** Returns the authoritative Agent transport state and revision. */
-    AgentStateSnapshot getAgentStateSnapshot();
-
-    /** Applies an internal target-state request through verified coordination. */
-    AgentTransportApplyResult applyAgentTransportRequest (
-        const AgentTransportRequest& request);
+    /** Returns the shared endpoint that safely outlives this component. */
+    std::shared_ptr<AgentTransportEndpoint> getAgentTransportEndpoint() const;
 
     /** Pointers to owned components */
     std::unique_ptr<FilenameEditorButton> filenameText;
@@ -501,6 +499,12 @@ public:
     std::unique_ptr<Clock> clock;
 
 private:
+    friend class ControlPanelTransportExecutor;
+
+    /** Applies an internal target-state request through verified coordination. */
+    AgentTransportApplyResult applyAgentTransportRequest (
+        const AgentTransportRequest& request);
+
     /** Informs the Control Panel that recording has begun.*/
     void startRecording();
 
@@ -575,6 +579,8 @@ private:
     AudioEditor* audioEditor;
     ControlPanelCommandRouter commandRouter;
     AgentStateStore agentStateStore;
+    std::shared_ptr<AgentTransportEndpoint> agentTransportEndpoint;
+    std::shared_ptr<ControlPanelTransportExecutor> agentTransportExecutor;
     AgentTransportCoordinator agentTransportCoordinator;
     bool agentTransportTransactionActive = false;
 

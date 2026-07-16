@@ -85,6 +85,12 @@ void setControlPanel (ControlPanel* cp_)
     cp = cp_;
 }
 
+void clearControlPanel (ControlPanel* expected)
+{
+    if (cp == expected)
+        cp = nullptr;
+}
+
 void shutdownBroadcaster()
 {
     bc = nullptr;

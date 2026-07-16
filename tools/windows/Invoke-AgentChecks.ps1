@@ -12,7 +12,8 @@ if ($LASTEXITCODE -ne 0) {
 $contracts = @(
     'Tests\AgentContracts\test_transport_accessibility_source.py',
     'Tests\AgentContracts\test_transport_command_routing_source.py',
-    'Tests\AgentContracts\test_transport_coordinator_integration_source.py'
+    'Tests\AgentContracts\test_transport_coordinator_integration_source.py',
+    'Tests\AgentContracts\test_transport_mailbox_integration_source.py'
 )
 
 foreach ($contract in $contracts) {

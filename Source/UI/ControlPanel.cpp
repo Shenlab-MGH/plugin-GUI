@@ -30,7 +30,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FilenameConfigWindow.h"
 #include "UIComponent.h"
 #include <math.h>
+#include <mutex>
 #include <stdio.h>
+#include <utility>
 
 #include "LookAndFeel/CustomLookAndFeel.h"
 
@@ -73,7 +75,43 @@ void applyTransportAccessibilityMetadata (
     button.setHelpText (descriptor.helpText);
     button.setTooltip (descriptor.helpText);
 }
+
 }
+
+class ControlPanelTransportExecutor final
+    : public AgentTransportExecutor
+{
+public:
+    explicit ControlPanelTransportExecutor (ControlPanel& owner)
+        : controlPanel (&owner)
+    {
+    }
+
+    AgentTransportApplyResult apply (
+        const AgentTransportRequest& request) override
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        if (controlPanel == nullptr)
+        {
+            return makeRejectedTransportResult (
+                request,
+                AgentTransportApplyOutcome::rejected);
+        }
+
+        return controlPanel->applyAgentTransportRequest (request);
+    }
+
+    void detach (ControlPanel& expected)
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        if (controlPanel == &expected)
+            controlPanel = nullptr;
+    }
+
+private:
+    std::mutex mutex;
+    ControlPanel* controlPanel;
+};
 
 NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
 {
@@ -522,9 +560,24 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
       audio (audio_),
       commandRouter (*this),
       agentStateStore ("1.0.2-agent-v0.0.1"),
+      agentTransportEndpoint (AgentTransportEndpoint::create (
+          [] (AgentTransportEndpoint::ScheduledCallback callback)
+          {
+              return MessageManager::callAsync (
+                  std::move (callback));
+          },
+          {
+              "1.0.2-agent-v0.0.1",
+              AgentObservedMode::unknown,
+              0
+          })),
       isConsoleApp (isConsoleApp_)
 {
     AccessClass::setControlPanel (this);
+    agentTransportExecutor =
+        std::make_shared<ControlPanelTransportExecutor> (*this);
+    agentTransportEndpoint->attachExecutor (
+        agentTransportExecutor);
 
     recordButton = std::make_unique<RecordButton>();
     recordButton->addListener (this);
@@ -607,10 +660,22 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
 
         setWantsKeyboardFocus (true);
     }
+
+    readState();
 }
 
 ControlPanel::~ControlPanel()
 {
+    auto* messageManager = MessageManager::getInstance();
+    jassert (messageManager != nullptr
+             && messageManager->isThisTheMessageThread());
+
+    agentTransportEndpoint->detachExecutor (
+        agentTransportExecutor);
+    agentTransportExecutor->detach (*this);
+    agentTransportEndpoint->beginShutdown();
+    agentTransportExecutor.reset();
+    AccessClass::clearControlPanel (this);
 }
 
 void ControlPanel::setRecordingState (bool t, bool force)
@@ -1171,6 +1236,8 @@ void ControlPanel::dispatch (const AgentCommand& command)
             handleRecordingToggleRequest();
             break;
     }
+
+    readState();
 }
 
 void ControlPanel::handleAcquisitionToggleRequest()
@@ -1260,21 +1327,10 @@ void ControlPanel::handleRecordingToggleRequest()
     }
 }
 
-AgentStateSnapshot ControlPanel::getAgentStateSnapshot()
+std::shared_ptr<AgentTransportEndpoint>
+ControlPanel::getAgentTransportEndpoint() const
 {
-    auto* messageManager = MessageManager::getInstance();
-    if (messageManager == nullptr
-        || ! messageManager->isThisTheMessageThread())
-    {
-        jassertfalse;
-        return {
-            "1.0.2-agent-v0.0.1",
-            AgentObservedMode::unknown,
-            0
-        };
-    }
-
-    return readState();
+    return agentTransportEndpoint;
 }
 
 AgentTransportApplyResult ControlPanel::applyAgentTransportRequest (
@@ -1306,7 +1362,10 @@ AgentTransportApplyResult ControlPanel::applyAgentTransportRequest (
 
 AgentStateSnapshot ControlPanel::readState()
 {
-    return agentStateStore.observe (getAuthoritativeAgentMode());
+    const auto state = agentStateStore.observe (
+        getAuthoritativeAgentMode());
+    agentTransportEndpoint->publish (state);
+    return state;
 }
 
 AgentObservedMode ControlPanel::getAuthoritativeAgentMode()

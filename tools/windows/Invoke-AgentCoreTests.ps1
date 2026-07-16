@@ -76,3 +76,20 @@ Invoke-CompileAndRun -Name 'AgentTransportCoordinatorTests' -Sources @(
     'Source\Agent\AgentTransportCoordinator.cpp',
     'Source\Agent\AgentTransportPlanner.cpp'
 )
+
+Invoke-CompileAndRun -Name 'AgentTransportMailboxTests' -Sources @(
+    'Tests\AgentCore\AgentTransportMailboxTests.cpp',
+    'Source\Agent\AgentTransportMailbox.cpp'
+)
+
+Invoke-CompileAndRun -Name 'AgentTransportEndpointTests' -Sources @(
+    'Tests\AgentCore\AgentTransportEndpointTests.cpp',
+    'Source\Agent\AgentTransportEndpoint.cpp',
+    'Source\Agent\AgentTransportMailbox.cpp',
+    'Source\Agent\AgentStateSnapshotCache.cpp'
+)
+
+Invoke-CompileAndRun -Name 'AgentStateSnapshotCacheTests' -Sources @(
+    'Tests\AgentCore\AgentStateSnapshotCacheTests.cpp',
+    'Source\Agent\AgentStateSnapshotCache.cpp'
+)
