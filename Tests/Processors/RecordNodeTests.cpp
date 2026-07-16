@@ -17,12 +17,13 @@ class RecordNodeTests :  public testing::Test {
 protected:
     void SetUp() override {
         numChannels = 8;
-        tester = std::make_unique<ProcessorTester>(TestSourceNodeBuilder
-                                                   (FakeSourceNodeParams{
-            numChannels,
-            sampleRate,
-            bitVolts
-        }));
+        tester = std::make_unique<ProcessorTester>(
+            TestSourceNodeBuilder (FakeSourceNodeParams {
+                numChannels,
+                sampleRate,
+                bitVolts
+            }),
+            ProcessorTesterMode::FullApp);
 
         parentRecordingDir = std::filesystem::temp_directory_path() / "record_node_tests";
         if (std::filesystem::exists(parentRecordingDir)) {
@@ -220,14 +221,14 @@ protected:
 
 TEST_F(RecordNodeTests, TestInputOutput_Continuous_Single) {
     int numSamples = 100;
-    processor->startAcquisition();
+    tester->startAcquisition(true);
 
     auto inputBuffer = createBuffer(1000.0, 20.0, numChannels, numSamples);
     writeBlock(inputBuffer);
 
     // The record node always flushes its pending writes when stopping acquisition, so we don't need to sleep before
     // stopping.
-    processor->stopAcquisition();
+    tester->stopAcquisition();
 
     std::vector<int16_t> persistedData;
     loadContinuousDatFile(&persistedData);
@@ -245,7 +246,7 @@ TEST_F(RecordNodeTests, TestInputOutput_Continuous_Single) {
 }
 
 TEST_F(RecordNodeTests, TestInputOutput_Continuous_Multiple) {
-    processor->startAcquisition();
+    tester->startAcquisition(true);
 
     int numSamplesPerBlock = 100;
     int numBlocks = 8;
@@ -256,7 +257,7 @@ TEST_F(RecordNodeTests, TestInputOutput_Continuous_Multiple) {
         inputBuffers.push_back(inputBuffer);
     }
 
-    processor->stopAcquisition();
+    tester->stopAcquisition();
 
     std::vector<int16_t> persistedData;
     loadContinuousDatFile(&persistedData);
@@ -277,8 +278,8 @@ TEST_F(RecordNodeTests, TestInputOutput_Continuous_Multiple) {
 }
 
 TEST_F(RecordNodeTests, TestEmpty) {
-    processor->startAcquisition();
-    processor->stopAcquisition();
+    tester->startAcquisition(true);
+    tester->stopAcquisition();
 
     std::vector<int16_t> persistedData;
     loadContinuousDatFile(&persistedData);
@@ -287,7 +288,7 @@ TEST_F(RecordNodeTests, TestEmpty) {
 
 TEST_F(RecordNodeTests, TestClipsProperly) {
     int numSamples = 100;
-    processor->startAcquisition();
+    tester->startAcquisition(true);
 
     // The min value is actually -32767, not -32768 like the "true" min
     std::vector<AudioBuffer<float>> inputBuffers;
@@ -301,7 +302,7 @@ TEST_F(RecordNodeTests, TestClipsProperly) {
     writeBlock(inputBuffer);
     inputBuffers.push_back(inputBuffer);
 
-    processor->stopAcquisition();
+    tester->stopAcquisition();
 
     std::vector<int16_t> persistedData;
     loadContinuousDatFile(&persistedData);
@@ -341,10 +342,10 @@ class CustomBitVolts_RecordNodeTests : public RecordNodeTests {
 
 TEST_F(CustomBitVolts_RecordNodeTests, Test_RespectsBitVolts) {
     int numSamples = 100;
-    processor->startAcquisition();
+    tester->startAcquisition(true);
     auto inputBuffer = createBuffer(1000.0, 20.0, numChannels, numSamples);
     writeBlock(inputBuffer);
-    processor->stopAcquisition();
+    tester->stopAcquisition();
 
     std::vector<int16_t> persistedData;
     loadContinuousDatFile(&persistedData);
@@ -370,7 +371,7 @@ TEST_F(CustomBitVolts_RecordNodeTests, Test_RespectsBitVolts) {
 }
 
 TEST_F(RecordNodeTests, Test_PersistsSampleNumbersAndTimestamps) {
-    processor->startAcquisition();
+    tester->startAcquisition(true);
 
     int numSamples = 5;
     for (int i = 0; i < 3; i++) {
@@ -417,7 +418,7 @@ TEST_F(RecordNodeTests, Test_PersistsSampleNumbersAndTimestamps) {
 }
 
 TEST_F(RecordNodeTests, Test_PersistsStructureOeBin) {
-    processor->startAcquisition();
+    tester->startAcquisition(true);
 
     int numSamples = 5;
     for (int i = 0; i < 3; i++) {
@@ -479,7 +480,7 @@ TEST_F(RecordNodeTests, Test_PersistsEvents) {
     processor->setRecordEvents(true);
     processor->updateSettings();
 
-    processor->startAcquisition();
+    tester->startAcquisition(true);
     int numSamples = 5;
 
     auto streamId = processor->getDataStreams()[0]->getStreamId();
@@ -492,7 +493,7 @@ TEST_F(RecordNodeTests, Test_PersistsEvents) {
         true);
     auto inputBuffer = createBuffer(1000.0, 20.0, numChannels, numSamples);
     writeBlock(inputBuffer, eventPtr.get());
-    processor->stopAcquisition();
+    tester->stopAcquisition();
 
     std::filesystem::path sampleNumbersPath;
     ASSERT_TRUE(eventsPathFor("sample_numbers.npy", &sampleNumbersPath));
