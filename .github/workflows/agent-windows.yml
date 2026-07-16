@@ -1,0 +1,78 @@
+name: Agent Windows Build
+
+on:
+  push:
+    branches:
+      - agent/**
+      - baseline/**
+    paths:
+      - '.github/workflows/agent-windows.yml'
+      - 'JuceLibraryCode/**'
+      - 'Plugins/**'
+      - 'Resources/**'
+      - 'Source/**'
+      - 'Tests/**'
+      - 'tools/windows/**'
+      - 'CMakeLists.txt'
+      - 'HelperFunctions.cmake'
+  pull_request:
+    paths:
+      - '.github/workflows/agent-windows.yml'
+      - 'JuceLibraryCode/**'
+      - 'Plugins/**'
+      - 'Resources/**'
+      - 'Source/**'
+      - 'Tests/**'
+      - 'tools/windows/**'
+      - 'CMakeLists.txt'
+      - 'HelperFunctions.cmake'
+  workflow_dispatch:
+
+jobs:
+  release-build-and-unit-tests:
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Release tests
+        shell: pwsh
+        run: |
+          cmake -S . -B Build `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DBUILD_TESTS=ON
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build Build --config Release --parallel
+
+      - name: Run unit tests
+        shell: pwsh
+        run: ctest --test-dir Build -C Release --output-on-failure
+
+      - name: Capture provenance
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          git rev-parse HEAD | Set-Content evidence/source-commit.txt
+          git describe --tags --always --dirty |
+            Set-Content evidence/source-describe.txt
+          cmake --version | Set-Content evidence/cmake-version.txt
+          Get-FileHash Build/Release/open-ephys.exe -Algorithm SHA256 |
+            Format-List |
+            Out-String |
+            Set-Content evidence/open-ephys-sha256.txt
+
+      - name: Upload build and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-ephys-agent-windows-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            Build/Release/**
+            evidence/**

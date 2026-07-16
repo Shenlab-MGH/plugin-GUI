@@ -25,10 +25,10 @@
 ### Task 1: Reproducible Windows Toolchain and Baseline Evidence
 
 **Files:**
-- Create: `tools/build/Invoke-OeConfigure.ps1`
-- Create: `tools/build/Invoke-OeBuild.ps1`
-- Create: `tools/build/Invoke-OeTests.ps1`
-- Create: `tools/build/Get-BuildInventory.ps1`
+- Create: `tools/windows/Invoke-OeConfigure.ps1`
+- Create: `tools/windows/Invoke-OeBuild.ps1`
+- Create: `tools/windows/Invoke-OeTests.ps1`
+- Create: `tools/windows/Get-BuildInventory.ps1`
 - Create: `docs/build/baseline-v1.0.2.md`
 
 **Interfaces:**
@@ -104,7 +104,7 @@ and exits non-zero on failure.
 Run:
 
 ```powershell
-pwsh -File tools/build/Invoke-OeConfigure.ps1
+pwsh -File tools/windows/Invoke-OeConfigure.ps1
 ```
 
 Expected: `Build/open-ephys-GUI.sln` exists and configure exits 0.
@@ -114,7 +114,7 @@ Expected: `Build/open-ephys-GUI.sln` exists and configure exits 0.
 Run:
 
 ```powershell
-pwsh -File tools/build/Invoke-OeBuild.ps1
+pwsh -File tools/windows/Invoke-OeBuild.ps1
 ```
 
 Expected: `Build/Release/open-ephys.exe` exists and build exits 0.
@@ -124,7 +124,7 @@ Expected: `Build/Release/open-ephys.exe` exists and build exits 0.
 Run:
 
 ```powershell
-pwsh -File tools/build/Invoke-OeTests.ps1
+pwsh -File tools/windows/Invoke-OeTests.ps1
 ```
 
 Expected: CTest exits 0. Record exact test count; do not predict it.
@@ -141,7 +141,7 @@ Get-FileHash Build\Release\open-ephys.exe -Algorithm SHA256
 - [ ] **Step 9: Commit**
 
 ```powershell
-git add tools/build docs/build
+git add tools/windows docs/build
 git commit -m "build: add reproducible Windows baseline"
 ```
 
@@ -238,7 +238,7 @@ Expected: Agent tests pass.
 - [ ] **Step 5: Run the complete test suite**
 
 ```powershell
-pwsh -File tools/build/Invoke-OeTests.ps1
+pwsh -File tools/windows/Invoke-OeTests.ps1
 ```
 
 Expected: all registered tests pass.
@@ -299,7 +299,7 @@ current mode.
 ```powershell
 cmake --build Build --config Release --target Agent_tests
 ctest --test-dir Build -C Release -R Agent_tests --output-on-failure
-pwsh -File tools/build/Invoke-OeTests.ps1
+pwsh -File tools/windows/Invoke-OeTests.ps1
 ```
 
 Expected: all tests pass.
@@ -376,7 +376,7 @@ In `ControlPanel::buttonClicked`, Play and Record submit commands with
 ```powershell
 cmake --build Build --config Release --target Agent_tests
 ctest --test-dir Build -C Release -R Agent_tests --output-on-failure
-pwsh -File tools/build/Invoke-OeTests.ps1
+pwsh -File tools/windows/Invoke-OeTests.ps1
 ```
 
 Expected: all tests pass.
@@ -447,7 +447,7 @@ change event. Do not poll.
 ```powershell
 cmake --build Build --config Release --target Agent_tests
 ctest --test-dir Build -C Release -R Agent_tests --output-on-failure
-pwsh -File tools/build/Invoke-OeTests.ps1
+pwsh -File tools/windows/Invoke-OeTests.ps1
 ```
 
 Expected: all tests pass.
