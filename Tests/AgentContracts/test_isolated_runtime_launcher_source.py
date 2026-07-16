@@ -10,6 +10,10 @@ PACKAGER = (
     ROOT / "tools" / "windows" /
     "New-AgentRuntimePackage.ps1"
 ).read_text(encoding="utf-8")
+VERIFIER = (
+    ROOT / "tools" / "windows" /
+    "Test-IsolatedAgentRuntime.ps1"
+).read_text(encoding="utf-8")
 
 
 def require(source: str, fragment: str, message: str) -> None:
@@ -35,6 +39,12 @@ def main() -> None:
             "A strong per-launch token must be required",
         "Get-NetTCPConnection":
             "The requested Agent port must be checked",
+        "-LocalPort 37497":
+            "Any native Open Ephys listener must block launch",
+        "Global\\OpenEphysAgentV001Launcher":
+            "Concurrent launchers must be serialized",
+        "$secondProcessCheck":
+            "Open Ephys processes must be checked again before launch",
         "Start-Process":
             "The approved launcher must start the packaged executable",
         "if (-not $Launch)":
@@ -52,9 +62,26 @@ def main() -> None:
             "Package manifest must identify its source commit",
         "source_dirty":
             "Package manifest must disclose uncommitted source",
+        "Start-IsolatedAgentRuntime.ps1":
+            "Package must include its safe launcher",
+        "Test-IsolatedAgentRuntime.ps1":
+            "Package must include its read-only verifier",
     }
     for fragment, message in package_contract.items():
         require(PACKAGER, fragment, message)
+
+    verifier_contract = {
+        "Get-CimInstance Win32_Process":
+            "Verifier must inspect the actual command line",
+        "Get-NetTCPConnection":
+            "Verifier must inspect listeners owned by the runtime",
+        "LocalPort -eq 37497":
+            "Verifier must prove native HTTP is not owned",
+        "LocalAddress -in @('127.0.0.1', '::1')":
+            "Agent endpoint must be loopback-only",
+    }
+    for fragment, message in verifier_contract.items():
+        require(VERIFIER, fragment, message)
 
     print("PASS isolated runtime launcher source contract")
 

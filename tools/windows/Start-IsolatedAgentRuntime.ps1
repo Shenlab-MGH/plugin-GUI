@@ -99,6 +99,12 @@ $portInUse = [bool](
         -LocalPort $AgentPort `
         -ErrorAction SilentlyContinue
 )
+$nativePortInUse = [bool](
+    Get-NetTCPConnection `
+        -State Listen `
+        -LocalPort 37497 `
+        -ErrorAction SilentlyContinue
+)
 
 $arguments = @(
     '--state-dir', $statePath,
@@ -121,6 +127,11 @@ if (-not $tokenPresent) {
 }
 if ($portInUse) {
     $blockingReasons.Add("Agent port $AgentPort is already in use.")
+}
+if ($nativePortInUse) {
+    $blockingReasons.Add(
+        'Native Open Ephys port 37497 already has a listener.'
+    )
 }
 if ($Launch -and -not $MaintenanceWindowApproved) {
     $blockingReasons.Add(
@@ -156,6 +167,22 @@ if ($blockingReasons.Count -gt 0) {
     throw 'Isolated runtime launch blocked by preflight.'
 }
 
+$launcherMutex = [System.Threading.Mutex]::new(
+    $false,
+    'Global\OpenEphysAgentV001Launcher'
+)
+if (-not $launcherMutex.WaitOne(0)) {
+    throw 'Another Open Ephys Agent launcher is active.'
+}
+
+try {
+$secondProcessCheck = @(
+    Get-Process -Name 'open-ephys' -ErrorAction SilentlyContinue
+)
+if ($secondProcessCheck.Count -gt 0) {
+    throw 'Open Ephys appeared after preflight; launch blocked.'
+}
+
 New-Item -ItemType Directory -Force -Path $statePath | Out-Null
 $argumentLine = (
     $arguments |
@@ -169,3 +196,8 @@ $process = Start-Process `
 $result['process_id'] = $process.Id
 $result['started_at'] = (Get-Date).ToString('o')
 $result | ConvertTo-Json -Depth 6
+}
+finally {
+    $launcherMutex.ReleaseMutex()
+    $launcherMutex.Dispose()
+}

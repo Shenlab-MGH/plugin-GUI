@@ -21,6 +21,12 @@ Copy-Item -Path (Join-Path $release '*') `
     -Destination $destinationPath `
     -Recurse `
     -Force
+Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'Start-IsolatedAgentRuntime.ps1'
+) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'Test-IsolatedAgentRuntime.ps1'
+) -Destination $destinationPath -Force
 
 $files = @(
     Get-ChildItem -LiteralPath $destinationPath -File -Recurse |
