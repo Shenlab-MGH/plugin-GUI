@@ -91,14 +91,34 @@ bool AgentTransportMailbox::complete (
 }
 
 bool AgentTransportMailbox::cancelPending (
-    const std::string& requestId)
+    const std::string& requestId,
+    AgentMailboxTerminalReason reason)
 {
+    if (reason == AgentMailboxTerminalReason::none)
+        return false;
+
     const std::lock_guard<std::mutex> lock (mutex);
 
     if (! pending || pending->requestId != requestId)
         return false;
 
-    cancelled.insert (requestId);
+    cancelled.emplace (requestId, reason);
+    pending.reset();
+    return true;
+}
+
+bool AgentTransportMailbox::cancelPending (
+    AgentMailboxTerminalReason reason)
+{
+    if (reason == AgentMailboxTerminalReason::none)
+        return false;
+
+    const std::lock_guard<std::mutex> lock (mutex);
+
+    if (! pending)
+        return false;
+
+    cancelled.emplace (pending->requestId, reason);
     pending.reset();
     return true;
 }
@@ -109,25 +129,47 @@ AgentMailboxLookup AgentTransportMailbox::lookup (
     const std::lock_guard<std::mutex> lock (mutex);
 
     if (pending && pending->requestId == requestId)
-        return { AgentMailboxRequestState::pending, std::nullopt };
+        return {
+            AgentMailboxRequestState::pending,
+            AgentMailboxTerminalReason::none,
+            std::nullopt
+        };
 
     if (active && active->requestId == requestId)
-        return { AgentMailboxRequestState::active, std::nullopt };
+        return {
+            AgentMailboxRequestState::active,
+            AgentMailboxTerminalReason::none,
+            std::nullopt
+        };
 
     if (const auto found = completed.find (requestId);
         found != completed.end())
     {
         return {
             AgentMailboxRequestState::completed,
+            AgentMailboxTerminalReason::none,
             found->second
         };
     }
 
-    if (cancelled.find (requestId) != cancelled.end())
-        return { AgentMailboxRequestState::cancelled, std::nullopt };
+    if (const auto found = cancelled.find (requestId);
+        found != cancelled.end())
+    {
+        return {
+            AgentMailboxRequestState::cancelled,
+            found->second,
+            std::nullopt
+        };
+    }
 
     if (seen.find (requestId) != seen.end())
-        return { AgentMailboxRequestState::expired, std::nullopt };
+    {
+        return {
+            AgentMailboxRequestState::expired,
+            AgentMailboxTerminalReason::none,
+            std::nullopt
+        };
+    }
 
     return {};
 }
@@ -146,7 +188,9 @@ void AgentTransportMailbox::shutdown()
 
     if (pending)
     {
-        cancelled.insert (pending->requestId);
+        cancelled.emplace (
+            pending->requestId,
+            AgentMailboxTerminalReason::shutdown);
         pending.reset();
     }
 

@@ -26,7 +26,8 @@ They must never retain or call a raw `ControlPanel*`.
 
 The endpoint provides:
 
-- `snapshot()` for a coherent cached read;
+- `serviceSnapshot()` for `DETACHED`, `READY`, or `STOPPED` lifecycle plus
+  the coherent last transport observation;
 - `submit()` for non-blocking target-state submission;
 - `query()` for explicit request lifecycle and result lookup.
 
@@ -52,6 +53,8 @@ Request lookup distinguishes `UNKNOWN`, `PENDING`, `ACTIVE`, `COMPLETED`,
 an already active message-thread transaction may finish and publish its result.
 Executor exceptions are converted to a terminal result with
 `executionFailed`; they cannot leave the mailbox permanently active.
+Cancellation also retains a machine-readable reason:
+`dispatchUnavailable`, `executorDetached`, or `shutdown`.
 
 `AgentStateStore` is message-thread-owned. Every authoritative read publishes a
 complete snapshot into the endpoint's `AgentStateSnapshotCache`, which worker
@@ -136,9 +139,9 @@ quit, and other controls are outside the v0.0.1 accessibility allowlist.
   `AgentTransportEndpoint`, and must not be presented as the safe Agent API.
 - No HTTP, MCP, named-pipe, or UIA production adapter consumes the endpoint
   yet. The current work is the tested in-process coordination boundary.
-- Endpoint snapshots retain the last observed transport mode after shutdown;
-  a separate service lifecycle/offline field is still required for a remote
-  status contract.
+- A stopped endpoint retains the last observed transport mode as evidence, but
+  reports `STOPPED` separately. Remote clients must never interpret the retained
+  mode as proof that the application is still online.
 - Session-scoped idempotency tombstones are intentionally retained for the
   process lifetime. A network adapter must impose authentication, request-rate
   limits, ID-size limits, and a defined session restart policy.

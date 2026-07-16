@@ -41,8 +41,11 @@ void AgentTransportEndpoint::attachExecutor (
     const std::shared_ptr<AgentTransportExecutor>& next)
 {
     const std::lock_guard<std::mutex> lock (lifecycleMutex);
-    if (! shuttingDown)
+    if (! shuttingDown && next)
+    {
         executor = next;
+        phase = AgentEndpointPhase::ready;
+    }
 }
 
 void AgentTransportEndpoint::detachExecutor (
@@ -51,7 +54,12 @@ void AgentTransportEndpoint::detachExecutor (
     const std::lock_guard<std::mutex> lock (lifecycleMutex);
     const auto attached = executor.lock();
     if (attached && attached == current)
+    {
         executor.reset();
+        phase = AgentEndpointPhase::detached;
+        mailbox.cancelPending (
+            AgentMailboxTerminalReason::executorDetached);
+    }
 }
 
 AgentMailboxSubmitOutcome AgentTransportEndpoint::submit (
@@ -94,7 +102,9 @@ AgentMailboxSubmitOutcome AgentTransportEndpoint::submit (
 
     if (! scheduled)
     {
-        mailbox.cancelPending (request.requestId);
+        mailbox.cancelPending (
+            request.requestId,
+            AgentMailboxTerminalReason::dispatchUnavailable);
         return AgentMailboxSubmitOutcome::unavailable;
     }
 
@@ -117,10 +127,23 @@ AgentStateSnapshot AgentTransportEndpoint::snapshot() const
     return stateCache.snapshot();
 }
 
+AgentEndpointSnapshot
+AgentTransportEndpoint::serviceSnapshot() const
+{
+    const std::lock_guard<std::mutex> lock (lifecycleMutex);
+    const auto effectivePhase =
+        phase == AgentEndpointPhase::ready
+                && executor.expired()
+            ? AgentEndpointPhase::detached
+            : phase;
+    return { effectivePhase, stateCache.snapshot() };
+}
+
 void AgentTransportEndpoint::beginShutdown()
 {
     const std::lock_guard<std::mutex> lock (lifecycleMutex);
     shuttingDown = true;
+    phase = AgentEndpointPhase::stopped;
     executor.reset();
     mailbox.shutdown();
 }
@@ -139,7 +162,9 @@ void AgentTransportEndpoint::drain (
 
     if (! executorToUse)
     {
-        mailbox.cancelPending (requestId);
+        mailbox.cancelPending (
+            requestId,
+            AgentMailboxTerminalReason::executorDetached);
         return;
     }
 

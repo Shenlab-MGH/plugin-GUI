@@ -24,7 +24,6 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 
 enum class AgentMailboxSubmitOutcome
 {
@@ -47,10 +46,20 @@ enum class AgentMailboxRequestState
     cancelled
 };
 
+enum class AgentMailboxTerminalReason
+{
+    none,
+    dispatchUnavailable,
+    executorDetached,
+    shutdown
+};
+
 struct AgentMailboxLookup
 {
     AgentMailboxRequestState state =
         AgentMailboxRequestState::unknown;
+    AgentMailboxTerminalReason terminalReason =
+        AgentMailboxTerminalReason::none;
     std::optional<AgentTransportApplyResult> result;
 };
 
@@ -66,7 +75,11 @@ public:
         const std::string& requestId,
         const AgentTransportApplyResult& result);
 
-    bool cancelPending (const std::string& requestId);
+    bool cancelPending (
+        const std::string& requestId,
+        AgentMailboxTerminalReason reason);
+
+    bool cancelPending (AgentMailboxTerminalReason reason);
 
     AgentMailboxLookup lookup (
         const std::string& requestId) const;
@@ -88,7 +101,9 @@ private:
     std::optional<AgentTransportRequest> active;
     std::unordered_map<std::string, AgentTransportRequest> seen;
     std::unordered_map<std::string, AgentTransportApplyResult> completed;
-    std::unordered_set<std::string> cancelled;
+    std::unordered_map<
+        std::string,
+        AgentMailboxTerminalReason> cancelled;
     std::deque<std::string> completionOrder;
     bool stopped = false;
 };

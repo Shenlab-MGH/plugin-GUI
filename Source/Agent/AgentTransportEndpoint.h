@@ -32,6 +32,19 @@ public:
         const AgentTransportRequest& request) = 0;
 };
 
+enum class AgentEndpointPhase
+{
+    detached,
+    ready,
+    stopped
+};
+
+struct AgentEndpointSnapshot
+{
+    AgentEndpointPhase phase = AgentEndpointPhase::detached;
+    AgentStateSnapshot transport;
+};
+
 class AgentTransportEndpoint final
     : public std::enable_shared_from_this<AgentTransportEndpoint>
 {
@@ -57,6 +70,7 @@ public:
 
     void publish (AgentStateSnapshot state);
     AgentStateSnapshot snapshot() const;
+    AgentEndpointSnapshot serviceSnapshot() const;
 
     void beginShutdown();
 
@@ -71,6 +85,7 @@ private:
     Scheduler scheduler;
     std::weak_ptr<AgentTransportExecutor> executor;
     bool shuttingDown = false;
+    AgentEndpointPhase phase = AgentEndpointPhase::detached;
     AgentTransportMailbox mailbox;
     AgentStateSnapshotCache stateCache;
 };

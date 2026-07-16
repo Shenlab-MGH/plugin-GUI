@@ -130,9 +130,14 @@ int main()
                  == AgentMailboxSubmitOutcome::accepted,
              "Shutdown setup request must be accepted");
     shutdownMailbox.shutdown();
-    require (shutdownMailbox.lookup (first.requestId).state
+    const auto shutdownResult =
+        shutdownMailbox.lookup (first.requestId);
+    require (shutdownResult.state
                  == AgentMailboxRequestState::cancelled,
              "Shutdown must cancel a pending request");
+    require (shutdownResult.terminalReason
+                 == AgentMailboxTerminalReason::shutdown,
+             "Shutdown cancellation must retain its terminal reason");
     require (shutdownMailbox.submit (second)
                  == AgentMailboxSubmitOutcome::shuttingDown,
              "Shutdown must reject new requests");
