@@ -36,4 +36,3 @@ public:
 private:
     AgentCommandDispatcher& dispatcher;
 };
-

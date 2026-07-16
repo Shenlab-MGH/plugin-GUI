@@ -52,4 +52,3 @@ public:
 private:
     AgentStateSnapshot current;
 };
-
