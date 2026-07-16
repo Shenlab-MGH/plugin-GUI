@@ -120,10 +120,14 @@ FilenameEditorButton::FilenameEditorButton()
 PlayButton::PlayButton()
     : DrawableButton ("Play Button", DrawableButton::ImageRaw)
 {
+    setComponentID ("oe.transport.acquisition");
+    setTitle ("Acquisition");
+    setDescription ("Start or stop data acquisition");
+    setHelpText ("Starts or stops data acquisition without changing recording settings.");
     setColour (DrawableButton::backgroundColourId, Colours::darkgrey.withAlpha (0.0f));
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
-    setTooltip ("Start/stop acquisition");
+    setTooltip ("Starts or stops data acquisition without changing recording settings.");
 
     updateImages (false);
 }
@@ -158,10 +162,14 @@ void PlayButton::updateImages (bool acquisitionIsActive)
 RecordButton::RecordButton()
     : DrawableButton ("Record Button", DrawableButton::ImageRaw)
 {
+    setComponentID ("oe.transport.recording");
+    setTitle ("Recording");
+    setDescription ("Start or stop recording to disk");
+    setHelpText ("Starts or stops recording using the existing recording safety checks.");
     setColour (DrawableButton::backgroundColourId, Colours::darkgrey.withAlpha (0.0f));
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
-    setTooltip ("Start/stop writing to disk");
+    setTooltip ("Starts or stops recording using the existing recording safety checks.");
 
     updateImages (false);
 }
@@ -475,6 +483,7 @@ void Clock::mouseDown (const MouseEvent& e)
 ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool isConsoleApp_)
     : graph (graph_),
       audio (audio_),
+      commandRouter (*this),
       isConsoleApp (isConsoleApp_)
 {
     AccessClass::setControlPanel (this);
@@ -1112,6 +1121,107 @@ void ControlPanel::colourChanged()
     recordButton->updateImages (getRecordingState());
 }
 
+void ControlPanel::dispatch (const AgentCommand& command)
+{
+    switch (command.type)
+    {
+        case AgentCommandType::requestAcquisitionToggle:
+            handleAcquisitionToggleRequest();
+            break;
+
+        case AgentCommandType::requestRecordingToggle:
+            handleRecordingToggleRequest();
+            break;
+    }
+}
+
+void ControlPanel::handleAcquisitionToggleRequest()
+{
+    if (playButton->getToggleState())
+    {
+        startAcquisition();
+    }
+    else
+    {
+        stopAcquisition();
+    }
+}
+
+void ControlPanel::handleRecordingToggleRequest()
+{
+    if (recordButton->getToggleState())
+    {
+        if (! graph->hasRecordNode())
+        {
+            if (! isConsoleApp)
+            {
+                getLookAndFeel().playAlertSound();
+                AccessClass::getUIComponent()->showBubbleMessage (
+                    getRecordButton(),
+                    "Insert at least one Record Node to start recording");
+            }
+            CoreServices::sendStatusMessage (
+                "Insert at least one Record Node to start recording.");
+            recordButton->setToggleState (false, dontSendNotification);
+            return;
+        }
+
+        if (! graph->allRecordNodeDirectoriesAreValid()
+            && getAcquisitionState())
+        {
+            recordButton->setToggleState (false, dontSendNotification);
+
+            if (! isConsoleApp)
+            {
+                getLookAndFeel().playAlertSound();
+                AlertWindow::showMessageBox (
+                    AlertWindow::WarningIcon,
+                    "Recording could not start",
+                    "One or more Record Nodes have an invalid recording path. "
+                    "Please ensure all Record Nodes are configured with a valid path before starting the recording.");
+            }
+            CoreServices::sendStatusMessage (
+                "One or more Record Nodes have invalid recording path");
+            return;
+        }
+
+        if (! graph->allRecordNodesAreSynchronized() && ! forceRecording)
+        {
+            recordButton->setToggleState (false, dontSendNotification);
+
+            int response = AlertWindow::showOkCancelBox (
+                AlertWindow::WarningIcon,
+                "Data streams not synchronized",
+                "One or more data streams are not yet synchronized within "
+                "a Record Node. Are you sure want to start recording?",
+                "Yes",
+                "No");
+
+            if (! response)
+            {
+                CoreServices::sendStatusMessage ("Recording was cancelled.");
+                return;
+            }
+
+            recordButton->setToggleState (true, dontSendNotification);
+            forceRecording = false;
+        }
+
+        if (playButton->getToggleState())
+        {
+            startRecording();
+        }
+        else
+        {
+            startAcquisition (true);
+        }
+    }
+    else
+    {
+        stopRecording();
+    }
+}
+
 void ControlPanel::buttonClicked (Button* button)
 {
     if (button == showHideRecordingOptionsButton.get())
@@ -1161,87 +1271,16 @@ void ControlPanel::buttonClicked (Button* button)
 
     if (button == playButton.get())
     {
-        if (playButton->getToggleState())
-        {
-            startAcquisition();
-        }
-        else
-        {
-            stopAcquisition();
-        }
-
+        commandRouter.requestAcquisitionToggle (
+            AgentCommandOrigin::userInterface);
         return;
     }
 
     if (button == recordButton.get())
     {
-        if (recordButton->getToggleState())
-        {
-            if (! graph->hasRecordNode())
-            {
-                if (! isConsoleApp)
-                {
-                    getLookAndFeel().playAlertSound();
-                    AccessClass::getUIComponent()->showBubbleMessage (getRecordButton(),
-                                                                      "Insert at least one Record Node to start recording");
-                }
-                CoreServices::sendStatusMessage ("Insert at least one Record Node to start recording.");
-                recordButton->setToggleState (false, dontSendNotification);
-                return;
-            }
-            else
-            {
-                if (! graph->allRecordNodeDirectoriesAreValid() && getAcquisitionState())
-                {
-                    recordButton->setToggleState (false, dontSendNotification);
-
-                    if (! isConsoleApp)
-                    {
-                        getLookAndFeel().playAlertSound();
-                        AlertWindow::showMessageBox (AlertWindow::WarningIcon,
-                                                     "Recording could not start",
-                                                     "One or more Record Nodes have an invalid recording path. "
-                                                     "Please ensure all Record Nodes are configured with a valid path before starting the recording.");
-                    }
-                    CoreServices::sendStatusMessage ("One or more Record Nodes have invalid recording path");
-                    return;
-                }
-
-                if (! graph->allRecordNodesAreSynchronized() && ! forceRecording)
-                {
-                    recordButton->setToggleState (false, dontSendNotification);
-
-                    int response = AlertWindow::showOkCancelBox (AlertWindow::WarningIcon,
-                                                                 "Data streams not synchronized",
-                                                                 "One or more data streams are not yet synchronized within "
-                                                                 "a Record Node. Are you sure want to start recording?",
-                                                                 "Yes",
-                                                                 "No");
-
-                    if (! response)
-                    {
-                        CoreServices::sendStatusMessage ("Recording was cancelled.");
-                        return;
-                    }
-
-                    recordButton->setToggleState (true, dontSendNotification);
-                    forceRecording = false;
-                }
-            }
-
-            if (playButton->getToggleState())
-            {
-                startRecording();
-            }
-            else
-            {
-                startAcquisition (true);
-            }
-        }
-        else
-        {
-            stopRecording();
-        }
+        commandRouter.requestRecordingToggle (
+            AgentCommandOrigin::userInterface);
+        return;
     }
 
     if (button == recordOptionsButton.get())

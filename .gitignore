@@ -178,3 +178,7 @@ build/
 
 #14. IDE stuff
 .idea
+
+#15. Agent fork local build directories
+/Build-agent-core/
+/Build-clang*/

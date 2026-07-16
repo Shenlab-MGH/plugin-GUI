@@ -26,6 +26,7 @@
 
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "../AccessClass.h"
+#include "../Agent/ControlPanelCommandRouter.h"
 #include "../Audio/AudioComponent.h"
 #include "../Processors/AudioNode/AudioEditor.h"
 #include "../Processors/Editors/GenericEditor.h" // for UtilityButton
@@ -343,7 +344,8 @@ class TESTABLE ControlPanel : public Component,
                               public Label::Listener,
                               public ComboBox::Listener,
                               public ComponentListener,
-                              public FilenameComponentListener
+                              public FilenameComponentListener,
+                              private AgentCommandDispatcher
 
 {
 public:
@@ -511,6 +513,15 @@ private:
     /** Respond to button clicks */
     void buttonClicked (Button* button) override;
 
+    /** Routes typed transport commands to the existing control behavior. */
+    void dispatch (const AgentCommand& command) override;
+
+    /** Handles an acquisition toggle after typed command dispatch. */
+    void handleAcquisitionToggleRequest();
+
+    /** Handles a recording toggle after typed command dispatch. */
+    void handleRecordingToggleRequest();
+
     /** Respond to ComboBox changes */
     void comboBoxChanged (ComboBox* combo) override;
 
@@ -544,6 +555,7 @@ private:
     ProcessorGraph* graph;
     AudioComponent* audio;
     AudioEditor* audioEditor;
+    ControlPanelCommandRouter commandRouter;
 
     /** Internal state variables */
     bool initialize = true;

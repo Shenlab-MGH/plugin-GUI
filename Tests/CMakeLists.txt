@@ -10,6 +10,7 @@ set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS
 			)
 
 add_subdirectory(TestHelpers)
+add_subdirectory(AgentCore)
 add_subdirectory(Processors)
 add_subdirectory(UI)
 add_subdirectory(Juce)

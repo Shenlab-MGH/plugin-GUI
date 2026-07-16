@@ -38,6 +38,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Run agent source contracts
+        shell: pwsh
+        run: |
+          python Tests/AgentContracts/test_transport_accessibility_source.py
+          python Tests/AgentContracts/test_transport_command_routing_source.py
+
       - name: Configure Release tests
         shell: pwsh
         run: |

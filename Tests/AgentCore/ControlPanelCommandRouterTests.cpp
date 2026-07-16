@@ -32,14 +32,15 @@ int main()
     RecordingDispatcher dispatcher;
     ControlPanelCommandRouter router (dispatcher);
 
-    router.requestAcquisitionToggle (AgentCommandOrigin::mouse);
+    router.requestAcquisitionToggle (AgentCommandOrigin::userInterface);
     require (dispatcher.lastCommand.has_value(),
              "Acquisition request must dispatch a command");
     require (dispatcher.lastCommand->type
                  == AgentCommandType::requestAcquisitionToggle,
              "Acquisition request must use the acquisition command type");
-    require (dispatcher.lastCommand->origin == AgentCommandOrigin::mouse,
-             "Acquisition request must preserve mouse origin");
+    require (dispatcher.lastCommand->origin
+                 == AgentCommandOrigin::userInterface,
+             "Acquisition request must preserve user-interface origin");
 
     router.requestRecordingToggle (AgentCommandOrigin::accessibility);
     require (dispatcher.lastCommand->type

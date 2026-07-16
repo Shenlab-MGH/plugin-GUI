@@ -31,7 +31,7 @@ enum class AgentCommandType
 
 enum class AgentCommandOrigin
 {
-    mouse,
+    userInterface,
     keyboard,
     accessibility,
     internal

@@ -1,7 +1,5 @@
 [CmdletBinding()]
-param(
-    [switch] $AgentNativeFeatures
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -18,10 +16,6 @@ $arguments = @(
     '-A', 'x64',
     '-DBUILD_TESTS=ON'
 )
-
-if ($AgentNativeFeatures) {
-    $arguments += '-DOE_AGENT_NATIVE_FEATURES=ON'
-}
 
 & $cmake @arguments
 if ($LASTEXITCODE -ne 0) {

@@ -8,6 +8,26 @@
 
 **Tech Stack:** C++17, JUCE 8 bundled with Open Ephys, CMake 3.31.8, Visual Studio 2022 Build Tools 17.14.36, GoogleTest 1.12.1, Windows UI Automation through JUCE accessibility.
 
+## 2026-07-16 Safety Amendment
+
+Implementation review showed that changing the top-level window from
+`setAccessible(false)` to `setAccessible(true)` exposes the entire unaudited GUI
+tree, not only Play and Record. v0.0.1 therefore keeps the top-level tree
+disabled while adding stable internal transport IDs, semantic metadata, and the
+shared command seam. Runtime UIA control remains unimplemented until a
+transport-only allowlist provider, stable native AutomationId mapping, distinct
+origin attribution, and observe-only Windows verification exist.
+
+JUCE funnels native mouse, keyboard, and default accessibility activation into
+the same button listener. Commands emitted by that listener use the honest
+`userInterface` origin rather than claiming `mouse`. Future agent/API commands
+must use deterministic target states with revision/readback and must not reuse
+the toggle command as a retryable remote operation.
+
+The experimental fork currently compiles agent sources unconditionally.
+The planned `OE_AGENT_NATIVE_FEATURES` option is not yet implemented; build
+scripts must not advertise that switch until Task 6 is completed.
+
 ## Global Constraints
 
 - Base every change on official tag `v1.0.2`, commit `c91afebcfb0678a667fb93f6312ed33c56ec640f`.
@@ -204,7 +224,7 @@ enum class AgentCommandType
 
 enum class AgentCommandOrigin
 {
-    mouse,
+    userInterface,
     keyboard,
     accessibility,
     internal
@@ -334,9 +354,9 @@ git commit -m "feat: add read-only agent state model"
 Use a recording test dispatcher and prove:
 
 ```cpp
-router.requestAcquisitionToggle (AgentCommandOrigin::mouse);
+router.requestAcquisitionToggle (AgentCommandOrigin::userInterface);
 EXPECT_EQ (dispatcher.last.type, AgentCommandType::requestAcquisitionToggle);
-EXPECT_EQ (dispatcher.last.origin, AgentCommandOrigin::mouse);
+EXPECT_EQ (dispatcher.last.origin, AgentCommandOrigin::userInterface);
 ```
 
 Repeat for recording and accessibility origin.
@@ -369,7 +389,9 @@ Do not alter any validation, warning, toggle-state, or start/stop behavior.
 - [ ] **Step 5: Route mouse clicks through the seam**
 
 In `ControlPanel::buttonClicked`, Play and Record submit commands with
-`AgentCommandOrigin::mouse`. All other buttons remain unchanged.
+`AgentCommandOrigin::userInterface`, because JUCE funnels mouse, keyboard, and
+default accessibility activation into this same listener. All other buttons
+remain unchanged.
 
 - [ ] **Step 6: Run targeted and complete tests**
 
