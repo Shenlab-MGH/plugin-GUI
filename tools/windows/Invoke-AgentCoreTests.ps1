@@ -29,14 +29,16 @@ function Invoke-CompileAndRun {
         [string] $Name,
 
         [Parameter(Mandatory)]
-        [string[]] $Sources
+        [string[]] $Sources,
+
+        [string[]] $Libraries = @()
     )
 
     $executable = Join-Path $outputDirectory "$Name.exe"
     $sourcePaths = @($Sources | ForEach-Object { Join-Path $repoRoot $_ })
 
     & $compiler -std=c++17 -Wall -Wextra -Werror -static `
-        @sourcePaths -o $executable
+        @sourcePaths -o $executable @Libraries
     if ($LASTEXITCODE -ne 0) {
         throw "$Name compilation failed with exit code $LASTEXITCODE"
     }
@@ -87,6 +89,22 @@ Invoke-CompileAndRun -Name 'AgentTransportEndpointTests' -Sources @(
     'Source\Agent\AgentTransportEndpoint.cpp',
     'Source\Agent\AgentTransportMailbox.cpp',
     'Source\Agent\AgentStateSnapshotCache.cpp'
+)
+
+Invoke-CompileAndRun -Name 'AgentControlProtocolTests' -Sources @(
+    'Tests\AgentCore\AgentControlProtocolTests.cpp',
+    'Source\Agent\AgentControlProtocol.cpp'
+)
+
+Invoke-CompileAndRun -Name 'AgentLoopbackServerTests' -Sources @(
+    'Tests\AgentCore\AgentLoopbackServerTests.cpp',
+    'Source\Agent\AgentLoopbackServer.cpp',
+    'Source\Agent\AgentControlProtocol.cpp',
+    'Source\Agent\AgentTransportEndpoint.cpp',
+    'Source\Agent\AgentTransportMailbox.cpp',
+    'Source\Agent\AgentStateSnapshotCache.cpp'
+) -Libraries @(
+    '-lws2_32'
 )
 
 Invoke-CompileAndRun -Name 'AgentStateSnapshotCacheTests' -Sources @(

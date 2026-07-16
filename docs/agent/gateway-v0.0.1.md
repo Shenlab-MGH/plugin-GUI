@@ -41,8 +41,10 @@ Example request:
 
 The Gateway uses target states, not toggles. Every mutation step requires
 legacy REST state readback. A lost or timed-out response is never blindly
-retried. The custom C++ fork will replace this weaker readback with callbacks
-plus unanimous Record Node state through `AgentTransportEndpoint`.
+retried. The custom C++ fork now contains the first authenticated loopback
+adapter over `AgentTransportEndpoint`. It still requires a complete MSVC build
+and Source Sim acceptance before it can replace this observe-only monitor in
+operator workflows.
 
 ## Mutation gates
 

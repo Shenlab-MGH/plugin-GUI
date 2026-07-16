@@ -1,5 +1,9 @@
 # Experimental agent-native core. Keep these sources outside real-time callbacks.
 add_sources(open-ephys
+    AgentControlProtocol.h
+    AgentControlProtocol.cpp
+    AgentLoopbackServer.h
+    AgentLoopbackServer.cpp
     AgentCommand.h
     AgentState.h
     AgentState.cpp

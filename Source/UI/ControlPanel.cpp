@@ -1611,11 +1611,20 @@ void ControlPanel::disableCallbacks()
     recordSelector->setEnabled (true);
     clock->stopRecording();
     clock->stop();
+
+    // Hardware and graph fault paths arrive here without going through an
+    // Agent or button command. Publish the authoritative post-stop state so
+    // observe-only clients cannot retain a stale ACQUIRE or RECORD snapshot.
+    readState();
 }
 
 void ControlPanel::timerCallback()
 {
     refreshMeters();
+
+    // Reconcile manual and external state changes even when no command was
+    // routed through the Agent transport boundary.
+    readState();
 }
 
 void ControlPanel::refreshMeters()

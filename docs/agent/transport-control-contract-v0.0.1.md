@@ -60,7 +60,10 @@ Cancellation also retains a machine-readable reason:
 complete snapshot into the endpoint's `AgentStateSnapshotCache`, which worker
 threads may read without accessing buttons, graph objects, or Record Nodes.
 Ordinary GUI dispatch also performs authoritative readback, so manual takeover
-updates the same snapshot observed by agents.
+updates the same snapshot observed by agents. Hardware/graph fault shutdown
+publishes immediately from `disableCallbacks()`, and the ControlPanel timer
+periodically reconciles changes that did not pass through an Agent or button
+command.
 
 ## Planning and execution
 
@@ -137,14 +140,82 @@ quit, and other controls are outside the v0.0.1 accessibility allowlist.
 - The legacy Open Ephys HTTP server still calls `CoreServices` and the global
   ControlPanel access path. It is not yet migrated to
   `AgentTransportEndpoint`, and must not be presented as the safe Agent API.
-- No HTTP, MCP, named-pipe, or UIA production adapter consumes the endpoint
-  yet. The current work is the tested in-process coordination boundary.
+- The fork now contains an authenticated HTTP adapter that consumes the shared
+  endpoint directly. It binds only to `127.0.0.1:37498`, remains disabled
+  unless `OE_AGENT_TOKEN` contains at least 32 characters, accepts explicit
+  target-state request documents, and exposes request-result lookup. The
+  MainWindow integration deliberately starts it in observe-only mode, so POST
+  returns `403 MUTATION_NOT_ARMED`. Mutation is exercised only against a fake
+  executor in the isolated C++ HTTP integration test. The adapter is not
+  approved for research acquisition because the complete Open Ephys
+  application has not been built with MSVC or accepted against Source Sim.
+- The in-process adapter currently has no rate limiter, browser dashboard,
+  operator approval exchange, or durable audit writer. Treat its bearer token
+  as a local development credential and do not expose port 37498 beyond the
+  loopback interface.
+- Status is an event-driven and periodically reconciled transport snapshot. It
+  does not yet include an observation timestamp or prove first-block arrival,
+  sustained file growth, disk flush, or writer health; it must not be treated
+  as experiment-quality recording evidence.
+- No MCP, named-pipe, or production UIA adapter consumes the endpoint yet.
 - A stopped endpoint retains the last observed transport mode as evidence, but
   reports `STOPPED` separately. Remote clients must never interpret the retained
   mode as proof that the application is still online.
 - Session-scoped idempotency tombstones are intentionally retained for the
   process lifetime. A network adapter must impose authentication, request-rate
   limits, ID-size limits, and a defined session restart policy.
-- Full MSVC Release build, CTest, Windows UIA discovery, and no-hardware GUI
+- Full MSVC Release build, CTest, Windows UIA discovery, and Source Sim GUI
   runtime verification remain blocked until Visual Studio Build Tools is
   installed.
+
+## In-process HTTP adapter
+
+Set a fresh per-launch token before starting the custom fork:
+
+```powershell
+$alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+$env:OE_AGENT_TOKEN = -join ((1..48) | ForEach-Object {
+    $alphabet[(Get-Random -Maximum $alphabet.Length)]
+})
+```
+
+The server is not started when the token is absent or shorter than 32
+characters. Every route requires:
+
+```text
+Authorization: Bearer <OE_AGENT_TOKEN>
+```
+
+The preview schema is `oe-agent-control-preview/v0.0.1`; it intentionally does
+not claim wire compatibility with the Python sidecar's
+`oe-agent-gateway/v1`. Every server process generates a new `session_id`.
+Mutation documents must echo it as `expected_session_id`, preventing an old
+request from a prior Open Ephys process from executing after revision counters
+reset.
+
+The v0.0.1 preview routes are:
+
+- `GET /v1/status`
+- `POST /v1/transport/requests`
+- `GET /v1/transport/requests/{request_id}`
+
+The server is owned by `MainWindow` and is stopped before legacy HTTP, audio,
+or processor-graph teardown. It never calls `CoreServices`, `AccessClass`, or a
+raw `ControlPanel*`; all reads and mutations go through the shared
+`AgentTransportEndpoint`.
+
+The preview request body is:
+
+```json
+{
+  "request_id": "demo-001",
+  "expected_session_id": "<session_id from GET /v1/status>",
+  "target_mode": "ACQUIRE",
+  "expected_revision": 4
+}
+```
+
+`request_id` and `expected_session_id` are restricted to 1-128 ASCII
+alphanumeric characters plus `.`, `_`, `:`, and `-`. The MainWindow-hosted
+server currently rejects this POST regardless of body because v0.0.1 is
+observe-only.

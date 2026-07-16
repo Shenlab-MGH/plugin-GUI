@@ -34,6 +34,7 @@
 #include "Utils/OpenEphysHttpServer.h"
 
 class OpenEphysHttpServer;
+class AgentLoopbackServer;
 
 /**
     Custom DocumentWindow class
@@ -156,6 +157,9 @@ private:
 
     /** A pointer to the application's HttpServer (owned by the MainWindow). */
     std::unique_ptr<OpenEphysHttpServer> http_server_thread;
+
+    /** Loopback-only authenticated Agent API. */
+    std::unique_ptr<AgentLoopbackServer> agentServer;
 
     /** Set to true if the application is running in console mode */
     bool isConsoleApp;

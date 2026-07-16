@@ -27,6 +27,7 @@
 #include "UI/EditorViewport.h"
 #include "UI/UIComponent.h"
 #include "Utils/OpenEphysHttpServer.h"
+#include "Agent/AgentLoopbackServer.h"
 #include <stdio.h>
 
 MainDocumentWindow::MainDocumentWindow()
@@ -240,6 +241,28 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
 
     http_server_thread = std::make_unique<OpenEphysHttpServer> (processorGraph.get());
 
+    const auto agentToken =
+        SystemStats::getEnvironmentVariable ("OE_AGENT_TOKEN", "");
+    if (agentToken.length() >= 32)
+    {
+        agentServer = std::make_unique<AgentLoopbackServer> (
+            controlPanel->getAgentTransportEndpoint(),
+            agentToken.toStdString(),
+            37498,
+            false);
+        if (! agentServer->start())
+        {
+            LOGC ("Agent loopback server failed to bind "
+                  "127.0.0.1:37498.");
+            agentServer = nullptr;
+        }
+    }
+    else
+    {
+        LOGC ("Agent loopback server disabled; "
+              "OE_AGENT_TOKEN must contain at least 32 characters.");
+    }
+
     if (shouldEnableHttpServer)
     {
         enableHttpServer();
@@ -266,6 +289,12 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
 
 MainWindow::~MainWindow()
 {
+    if (agentServer)
+        agentServer->stop();
+
+    if (http_server_thread)
+        disableHttpServer();
+
     if (audioComponent->callbacksAreActive())
     {
         audioComponent->endCallbacks();
@@ -297,10 +326,6 @@ MainWindow::~MainWindow()
     saveProcessorGraph (lastConfig);
     saveProcessorGraph (recoveryConfig);
 
-    if (http_server_thread)
-    {
-        disableHttpServer();
-    }
 }
 
 void MainWindow::enableHttpServer()
