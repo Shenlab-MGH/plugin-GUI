@@ -75,7 +75,7 @@ class PluginManager
 {
 public:
     /** Constructor */
-    PluginManager();
+    explicit PluginManager (bool includeUserPlugins = true);
 
     /** Destructor */
     ~PluginManager();
@@ -88,6 +88,11 @@ public:
 
     /** Loads a plugin at a particular path*/
     int loadPlugin (const String&);
+
+    bool allowsUserPlugins() const
+    {
+        return includeUserPlugins;
+    }
 
     /** Unloads a plugin (not implemented yet) */
     //void unloadPlugin(Plugin *);
@@ -144,6 +149,8 @@ public:
     bool removePlugin (String libName);
 
 private:
+    const bool includeUserPlugins;
+
     Array<LoadedLibInfo> libArray;
     Array<LoadedPluginInfo<Plugin::ProcessorInfo>> processorPlugins;
     Array<LoadedPluginInfo<Plugin::DataThreadInfo>> dataThreadPlugins;

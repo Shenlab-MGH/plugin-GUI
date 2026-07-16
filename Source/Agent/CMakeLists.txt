@@ -21,4 +21,6 @@ add_sources(open-ephys
     TransportAccessibilityRegistry.cpp
     ControlPanelCommandRouter.h
     ControlPanelCommandRouter.cpp
+    RuntimeOptions.h
+    RuntimeOptions.cpp
 )

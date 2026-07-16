@@ -201,6 +201,13 @@ PLUGIN_API File getDefaultUserSaveDirectory();
 /** Gets the save directory for GUI-related file saving/loading */
 PLUGIN_API File getSavedStateDirectory();
 
+/** Installs a process-lifetime override for GUI state storage.
+ *  The first non-empty path wins; later changes are rejected. */
+bool setSavedStateDirectoryOverride (const File& directory);
+
+/** Returns true after a process-lifetime state directory override is installed. */
+bool isSavedStateDirectoryOverridden();
+
 /** Gets the GUI version */
 PLUGIN_API String getGUIVersion();
 

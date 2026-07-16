@@ -29,6 +29,7 @@
 #include "Utils/OpenEphysHttpServer.h"
 #include "Agent/AgentLoopbackServer.h"
 #include <stdio.h>
+#include <utility>
 
 MainDocumentWindow::MainDocumentWindow()
     : DocumentWindow (JUCEApplication::getInstance()->getApplicationName(),
@@ -47,7 +48,13 @@ MainDocumentWindow::MainDocumentWindow()
     setAccessible (false);
 }
 
-MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleApp (isConsoleApp_)
+MainWindow::MainWindow (
+    const File& fileToLoad,
+    bool isConsoleApp_,
+    RuntimeIsolationOptions runtimeOptions_)
+    : runtimeOptions (std::move (runtimeOptions_)),
+      nativeHttpLockedOff (runtimeOptions.disableNativeHttp),
+      isConsoleApp (isConsoleApp_)
 {
     customLookAndFeel = std::make_unique<CustomLookAndFeel>();
     LookAndFeel::setDefaultLookAndFeel (customLookAndFeel.get());
@@ -74,7 +81,8 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
     }
 
     configsDir = CoreServices::getSavedStateDirectory();
-    if (! configsDir.getFullPathName().contains ("plugin-GUI" + File::getSeparatorString() + "Build"))
+    if (! CoreServices::isSavedStateDirectoryOverridden()
+        && ! configsDir.getFullPathName().contains ("plugin-GUI" + File::getSeparatorString() + "Build"))
         configsDir = configsDir.getChildFile ("configs-api" + String (PLUGIN_API_VER));
 
     if (! configsDir.isDirectory())
@@ -97,7 +105,7 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
     std::cout << std::endl;
 
     shouldReloadOnStartup = true;
-    shouldEnableHttpServer = true;
+    shouldEnableHttpServer = ! nativeHttpLockedOff;
     openDefaultConfigWindow = false;
     automaticVersionChecking = true;
 
@@ -108,7 +116,9 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
     audioComponent = std::make_unique<AudioComponent>();
 
     LOGD ("Creating processor graph...");
-    processorGraph = std::make_unique<ProcessorGraph> (isConsoleApp);
+    processorGraph = std::make_unique<ProcessorGraph> (
+        isConsoleApp,
+        ! runtimeOptions.disableUserPlugins);
 
     LOGD ("Connecting audio component to processor graph...");
     audioComponent->connectToProcessorGraph (processorGraph.get());
@@ -248,13 +258,31 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
         agentServer = std::make_unique<AgentLoopbackServer> (
             controlPanel->getAgentTransportEndpoint(),
             agentToken.toStdString(),
-            37498,
+            runtimeOptions.agentPort,
             false);
         if (! agentServer->start())
         {
             LOGC ("Agent loopback server failed to bind "
-                  "127.0.0.1:37498.");
+                  "127.0.0.1:",
+                  runtimeOptions.agentPort,
+                  ".");
             agentServer = nullptr;
+            if (runtimeOptions.agentPortExplicit)
+            {
+                initializationError =
+                    "Explicit Agent loopback port failed to bind.";
+                return;
+            }
+        }
+        else if (runtimeOptions.agentPortExplicit
+                 && agentServer->getBoundPort()
+                        != runtimeOptions.agentPort)
+        {
+            agentServer->stop();
+            agentServer = nullptr;
+            initializationError =
+                "Agent loopback bound an unexpected port.";
+            return;
         }
     }
     else
@@ -281,7 +309,8 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
     if (! isConsoleApp)
     {
         UIComponent* ui = (UIComponent*) documentWindow->getContentComponent();
-        ui->checkForPluginUpdates();
+        if (! runtimeOptions.disableUserPlugins)
+            ui->checkForPluginUpdates();
     }
 
     Process::setPriority (Process::HighPriority);
@@ -330,6 +359,13 @@ MainWindow::~MainWindow()
 
 void MainWindow::enableHttpServer()
 {
+    if (nativeHttpLockedOff)
+    {
+        shouldEnableHttpServer = false;
+        LOGC ("Native HTTP server is locked off for this process.");
+        return;
+    }
+
     http_server_thread->start();
 }
 
@@ -381,7 +417,8 @@ void MainWindow::handleCrash (void* input)
     std::flush (std::cout);
 
     File crashLogDir = CoreServices::getSavedStateDirectory();
-    if (! crashLogDir.getFullPathName().contains ("plugin-GUI" + File::getSeparatorString() + "Build"))
+    if (! CoreServices::isSavedStateDirectoryOverridden()
+        && ! crashLogDir.getFullPathName().contains ("plugin-GUI" + File::getSeparatorString() + "Build"))
         crashLogDir = crashLogDir.getChildFile ("configs-api" + String (PLUGIN_API_VER));
 
     File activityLog = crashLogDir.getChildFile ("activity.log");
@@ -508,6 +545,8 @@ void MainWindow::loadWindowBounds()
 
         shouldReloadOnStartup = xml->getBoolAttribute ("shouldReloadOnStartup", false);
         shouldEnableHttpServer = xml->getBoolAttribute ("shouldEnableHttpServer", false);
+        if (nativeHttpLockedOff)
+            shouldEnableHttpServer = false;
         automaticVersionChecking = xml->getBoolAttribute ("automaticVersionChecking", true);
 
         for (auto* e : xml->getChildIterator())

@@ -22,7 +22,9 @@ $contracts = @(
     'Tests\AgentContracts\test_agent_loopback_server_source.py',
     'Tests\AgentContracts\test_official_baseline_verifier_source.py',
     'Tests\AgentContracts\test_official_build_wrapper_source.py',
-    'Tests\AgentContracts\test_build_tools_installer_source.py'
+    'Tests\AgentContracts\test_build_tools_installer_source.py',
+    'Tests\AgentContracts\test_runtime_isolation_wiring_source.py'
+    'Tests\AgentContracts\test_isolated_runtime_launcher_source.py'
 )
 
 foreach ($contract in $contracts) {

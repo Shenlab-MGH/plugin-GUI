@@ -25,6 +25,7 @@
 #define __MAINWINDOW_H_BA75E17__
 
 #include "../JuceLibraryCode/JuceHeader.h"
+#include "Agent/RuntimeOptions.h"
 #include "Audio/AudioComponent.h"
 #include "Processors/ProcessorGraph/ProcessorGraph.h"
 #include "UI/ControlPanel.h"
@@ -74,7 +75,10 @@ class MainWindow
 public:
     /** Initializes the MainWindow, creates the AudioComponent, ProcessorGraph,
         and UIComponent, and sets the window boundaries. */
-    MainWindow (const File& fileToLoad = File(), bool isConsoleApp = false);
+    MainWindow (
+        const File& fileToLoad = File(),
+        bool isConsoleApp = false,
+        RuntimeIsolationOptions runtimeOptions = {});
 
     /** Destroys the AudioComponent, ProcessorGraph, and UIComponent, and saves the window boundaries. */
     ~MainWindow();
@@ -106,6 +110,24 @@ public:
 
     /** Stop thread which listens to remote commands to control the GUI */
     void disableHttpServer();
+
+    /** Returns true when user-installed plugins are allowed in this process. */
+    bool allowsUserPlugins() const
+    {
+        return ! runtimeOptions.disableUserPlugins;
+    }
+
+    /** Returns true when the native HTTP server may be enabled. */
+    bool allowsNativeHttp() const
+    {
+        return ! nativeHttpLockedOff;
+    }
+
+    /** Describes a fail-closed initialization error, if one occurred. */
+    const String& getInitializationError() const
+    {
+        return initializationError;
+    }
 
     /** Sets the size of the Main Window */
     void centreWithSize (int, int);
@@ -160,6 +182,15 @@ private:
 
     /** Loopback-only authenticated Agent API. */
     std::unique_ptr<AgentLoopbackServer> agentServer;
+
+    /** Command-line isolation policy for this process. */
+    RuntimeIsolationOptions runtimeOptions;
+
+    /** Non-empty when construction completed in a fail-closed state. */
+    String initializationError;
+
+    /** Prevents saved state or UI actions from enabling native port 37497. */
+    bool nativeHttpLockedOff;
 
     /** Set to true if the application is running in console mode */
     bool isConsoleApp;

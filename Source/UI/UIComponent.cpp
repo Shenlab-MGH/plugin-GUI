@@ -711,7 +711,8 @@ void UIComponent::getCommandInfo (CommandID commandID, ApplicationCommandInfo& r
 
         case toggleHttpServer:
             result.setInfo ("Enable HTTP Server", "Enable the HTTP server on port 37497.", "General", 0);
-            result.setActive (! acquisitionStarted);
+            result.setActive (! acquisitionStarted
+                              && mainWindow->allowsNativeHttp());
             result.setTicked (mainWindow->shouldEnableHttpServer);
             break;
 
@@ -841,6 +842,7 @@ void UIComponent::getCommandInfo (CommandID commandID, ApplicationCommandInfo& r
         case openPluginInstaller:
             result.setInfo ("Plugin Installer", "Launch the plugin installer.", "General", 0);
             result.addDefaultKeypress ('P', ModifierKeys::commandModifier);
+            result.setActive (mainWindow->allowsUserPlugins());
             break;
 
         case openDefaultConfigWindow:
@@ -997,6 +999,9 @@ bool UIComponent::perform (const InvocationInfo& info)
         break;
 
         case toggleHttpServer:
+
+            if (! mainWindow->allowsNativeHttp())
+                break;
 
             mainWindow->shouldEnableHttpServer = ! mainWindow->shouldEnableHttpServer;
 
@@ -1175,6 +1180,9 @@ bool UIComponent::perform (const InvocationInfo& info)
 
         case openPluginInstaller:
         {
+            if (! mainWindow->allowsUserPlugins())
+                break;
+
             if (pluginInstaller != nullptr)
             {
                 delete pluginInstaller;

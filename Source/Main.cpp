@@ -28,10 +28,60 @@
 #define _MAIN
 #endif
 #include "../JuceLibraryCode/JuceHeader.h"
+#include "Agent/RuntimeOptions.h"
 #include "MainWindow.h"
 
 #include <fstream>
+#include <memory>
 #include <stdio.h>
+#include <string>
+#include <vector>
+
+namespace
+{
+File canonicalDirectory (const File& directory)
+{
+#ifdef _WIN32
+    if (! directory.exists())
+    {
+        const auto parent = directory.getParentDirectory();
+        if (parent != directory)
+            return canonicalDirectory (parent)
+                .getChildFile (directory.getFileName());
+    }
+
+    const auto handle = CreateFileW (
+        directory.getFullPathName().toWideCharPointer(),
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE)
+        return directory;
+
+    std::vector<wchar_t> path (32768);
+    const auto length = GetFinalPathNameByHandleW (
+        handle,
+        path.data(),
+        static_cast<DWORD> (path.size()),
+        FILE_NAME_NORMALIZED);
+    CloseHandle (handle);
+    if (length == 0 || length >= path.size())
+        return directory;
+
+    String finalPath (path.data(), length);
+    if (finalPath.startsWith ("\\\\?\\UNC\\"))
+        finalPath = "\\\\" + finalPath.substring (8);
+    else if (finalPath.startsWith ("\\\\?\\"))
+        finalPath = finalPath.substring (4);
+    return File (finalPath);
+#else
+    return directory;
+#endif
+}
+}
 
 /**
  * This function is called when the console window is closed.
@@ -99,46 +149,202 @@ public:
 
 #endif
 
-        SystemStats::setApplicationCrashHandler (handleCrash);
+        std::vector<std::string> arguments;
+        arguments.reserve (static_cast<std::size_t> (parameters.size()));
+        for (const auto& parameter : parameters)
+            arguments.push_back (parameter.toStdString());
 
-        // Parse parameters
-        if (! parameters.isEmpty())
+        const auto parsed = RuntimeOptions::parse (arguments);
+        if (! parsed.ok())
         {
-            bool isConsoleApp = false;
-            File fileToLoad;
+            std::cerr << "Invalid runtime options: "
+                      << parsed.error << std::endl;
+            setApplicationReturnValue (2);
+            quit();
+            return;
+        }
 
-            for (auto param : parameters)
+        auto runtimeOptions = parsed.options;
+        if (! runtimeOptions.stateDirectory.empty())
+        {
+            const String stateDirectory (
+                runtimeOptions.stateDirectory);
+            if (! File::isAbsolutePath (stateDirectory))
             {
-                if (param.equalsIgnoreCase ("--headless"))
-                {
-                    isConsoleApp = true;
-                }
-                else if (fileToLoad.getFullPathName().isEmpty())
-                {
-                    File localPath (File::getCurrentWorkingDirectory().getChildFile (param));
-
-                    if (localPath.existsAsFile())
-                    {
-                        fileToLoad = localPath;
-                        continue;
-                    }
-
-                    File globalPath (param);
-
-                    if (globalPath.existsAsFile())
-                        fileToLoad = globalPath;
-                }
+                std::cerr << "--state-dir must be an absolute path."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
             }
 
-            mainWindow = std::make_unique<MainWindow> (fileToLoad, isConsoleApp);
+            File stateDirectoryFile (stateDirectory);
+            if (stateDirectoryFile.getParentDirectory()
+                == stateDirectoryFile)
+            {
+                std::cerr << "--state-dir must not be a filesystem root."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+
+            stateDirectoryFile =
+                canonicalDirectory (stateDirectoryFile);
+            const auto officialStateRoot = canonicalDirectory (
+                File::getSpecialLocation (File::windowsLocalAppData)
+                    .getChildFile ("Open Ephys"));
+            if (stateDirectoryFile == officialStateRoot
+                || stateDirectoryFile.isAChildOf (officialStateRoot))
+            {
+                std::cerr << "--state-dir must be outside the official "
+                             "Open Ephys state directory."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+
+            if (stateDirectoryFile.exists()
+                && ! stateDirectoryFile.isDirectory())
+            {
+                std::cerr << "--state-dir exists but is not a directory."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+
+            const auto stateDirectoryResult =
+                stateDirectoryFile.createDirectory();
+            if (stateDirectoryResult.failed())
+            {
+                std::cerr << "Unable to create --state-dir: "
+                          << stateDirectoryResult.getErrorMessage()
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+
+            auto lockIdentity =
+                stateDirectoryFile.getFullPathName();
+#ifdef _WIN32
+            lockIdentity = lockIdentity.toLowerCase();
+#endif
+            const auto lockName =
+                "open-ephys-agent-state-"
+                + String::toHexString (
+                    lockIdentity.hashCode64());
+            stateDirectoryLock =
+                std::make_unique<InterProcessLock> (lockName);
+            if (! stateDirectoryLock->enter (0))
+            {
+                std::cerr << "--state-dir is already in use."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+
+            const auto writeProbe =
+                stateDirectoryFile.getNonexistentChildFile (
+                    ".oe-agent-write-probe",
+                    ".tmp",
+                    false);
+            if (! writeProbe.create().wasOk()
+                || ! writeProbe.deleteFile())
+            {
+                std::cerr << "--state-dir is not writable."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                stateDirectoryLock.reset();
+                quit();
+                return;
+            }
+
+            if (! CoreServices::setSavedStateDirectoryOverride (
+                    stateDirectoryFile))
+            {
+                std::cerr << "Unable to install --state-dir override."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
         }
-        else
+
+        File fileToLoad;
+        if (! runtimeOptions.configurationFile.empty())
         {
-            mainWindow = std::make_unique<MainWindow>();
+            const String configurationPath (
+                runtimeOptions.configurationFile);
+            fileToLoad = File::isAbsolutePath (configurationPath)
+                             ? File (configurationPath)
+                             : File::getCurrentWorkingDirectory()
+                                   .getChildFile (configurationPath);
+            if (! fileToLoad.existsAsFile())
+            {
+                std::cerr << "Configuration file does not exist: "
+                          << fileToLoad.getFullPathName()
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+        }
+
+        if (runtimeOptions.agentPortExplicit)
+        {
+            const auto token =
+                SystemStats::getEnvironmentVariable (
+                    "OE_AGENT_TOKEN",
+                    "");
+            if (token.length() < 32)
+            {
+                std::cerr << "Explicit --agent-port requires "
+                             "OE_AGENT_TOKEN with at least 32 characters."
+                          << std::endl;
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+        }
+
+        SystemStats::setApplicationCrashHandler (handleCrash);
+
+        try
+        {
+            mainWindow = std::make_unique<MainWindow> (
+                fileToLoad,
+                runtimeOptions.headless,
+                runtimeOptions);
+            if (! mainWindow->getInitializationError().isEmpty())
+            {
+                const auto error =
+                    mainWindow->getInitializationError();
+                mainWindow.reset();
+                std::cerr << "Open Ephys initialization failed: "
+                          << error << std::endl;
+                setApplicationReturnValue (2);
+                stateDirectoryLock.reset();
+                quit();
+            }
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "Open Ephys initialization failed: "
+                      << error.what() << std::endl;
+            setApplicationReturnValue (2);
+            quit();
         }
     }
 
-    void shutdown() {}
+    void shutdown()
+    {
+        mainWindow.reset();
+        stateDirectoryLock.reset();
+    }
 
     static void handleCrash (void* input)
     {
@@ -147,6 +353,12 @@ public:
 
     void systemRequestedQuit()
     {
+        if (! mainWindow)
+        {
+            quit();
+            return;
+        }
+
         bool shouldQuit = true;
 
         if (CoreServices::getAcquisitionStatus())
@@ -198,6 +410,7 @@ public:
     }
 
 private:
+    std::unique_ptr<InterProcessLock> stateDirectoryLock;
     std::unique_ptr<MainWindow> mainWindow;
 };
 

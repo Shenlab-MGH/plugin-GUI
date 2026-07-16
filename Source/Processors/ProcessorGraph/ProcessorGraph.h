@@ -75,7 +75,9 @@ public:
     };
 
     /* Constructor*/
-    ProcessorGraph (bool isConsoleApp);
+    ProcessorGraph (
+        bool isConsoleApp,
+        bool includeUserPlugins = true);
 
     /* Destructor */
     ~ProcessorGraph();

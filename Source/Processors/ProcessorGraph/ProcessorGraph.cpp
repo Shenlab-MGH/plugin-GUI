@@ -47,9 +47,12 @@
 #include "../PluginManager/PluginManager.h"
 #include "../ProcessorManager/ProcessorManager.h"
 
-ProcessorGraph::ProcessorGraph (bool isConsoleApp_) : isConsoleApp (isConsoleApp_),
-                                                      currentNodeId (100),
-                                                      isLoadingSignalChain (false)
+ProcessorGraph::ProcessorGraph (
+    bool isConsoleApp_,
+    bool includeUserPlugins)
+    : isConsoleApp (isConsoleApp_),
+      currentNodeId (100),
+      isLoadingSignalChain (false)
 {
     // The ProcessorGraph will always have 0 inputs (all content is generated within graph)
     // but it will have N outputs, where N is the number of channels for the audio monitor
@@ -58,7 +61,8 @@ ProcessorGraph::ProcessorGraph (bool isConsoleApp_) : isConsoleApp (isConsoleApp
                           44100.0, // sampleRate
                           1024); // blockSize
 
-    pluginManager = std::make_unique<PluginManager>();
+    pluginManager =
+        std::make_unique<PluginManager> (includeUserPlugins);
     LOGD ("Created plugin manager");
 
     undoManager = std::make_unique<UndoManager>();

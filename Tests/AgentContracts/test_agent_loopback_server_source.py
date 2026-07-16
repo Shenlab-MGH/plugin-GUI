@@ -65,7 +65,7 @@ def main() -> None:
             "MainWindow must start the server explicitly",
         "agentServer->stop();":
             "MainWindow teardown must stop the server explicitly",
-        "37498,\n            false":
+        "runtimeOptions.agentPort,\n            false":
             "The v0.0.1 host integration must remain observe-only",
     }
     combined_main = MAIN_HEADER + MAIN_IMPLEMENTATION

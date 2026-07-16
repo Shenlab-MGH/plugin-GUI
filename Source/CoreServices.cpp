@@ -26,6 +26,7 @@
 
 #include "Processors/Events/Event.h"
 #include "Processors/MessageCenter/MessageCenterEditor.h"
+#include "Processors/PluginManager/PluginManager.h"
 #include "Processors/ProcessorGraph/ProcessorGraph.h"
 #include "Processors/RecordNode/RecordNode.h"
 #include "UI/ControlPanel.h"
@@ -37,6 +38,11 @@ using namespace AccessClass;
 
 namespace CoreServices
 {
+namespace
+{
+File savedStateDirectoryOverride;
+}
+
 void updateSignalChain (GenericProcessor* source)
 {
     getProcessorGraph()->updateSettings (source);
@@ -50,7 +56,8 @@ void updateSignalChain (GenericEditor* source)
 void saveRecoveryConfig()
 {
     File configsDir = getSavedStateDirectory();
-    if (! configsDir.getFullPathName().contains ("plugin-GUI" + File::getSeparatorString() + "Build"))
+    if (! isSavedStateDirectoryOverridden()
+        && ! configsDir.getFullPathName().contains ("plugin-GUI" + File::getSeparatorString() + "Build"))
         configsDir = configsDir.getChildFile ("configs-api" + String (PLUGIN_API_VER));
 
     EditorViewport* ev = getEditorViewport();
@@ -466,6 +473,9 @@ File getDefaultUserSaveDirectory()
 
 File getSavedStateDirectory()
 {
+    if (savedStateDirectoryOverride != File())
+        return savedStateDirectoryOverride;
+
 #if defined(__APPLE__)
     File dir = File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Application Support/open-ephys");
 #elif _WIN32
@@ -490,6 +500,23 @@ File getSavedStateDirectory()
     return std::move (dir);
 }
 
+bool setSavedStateDirectoryOverride (const File& directory)
+{
+    if (directory == File())
+        return false;
+
+    if (savedStateDirectoryOverride != File())
+        return savedStateDirectoryOverride == directory;
+
+    savedStateDirectoryOverride = directory;
+    return true;
+}
+
+bool isSavedStateDirectoryOverridden()
+{
+    return savedStateDirectoryOverride != File();
+}
+
 String getGUIVersion()
 {
 #define XSTR_DEF(s) #s
@@ -511,6 +538,12 @@ namespace PluginInstaller
 {
     bool installPlugin (String plugin, String version)
     {
+        if (! getPluginManager()->allowsUserPlugins())
+        {
+            LOGE ("Plugin installation is disabled for this process.");
+            return false;
+        }
+
         getUIComponent()->getPluginInstaller()->installPluginAndDependency (plugin, version);
 
         return true;

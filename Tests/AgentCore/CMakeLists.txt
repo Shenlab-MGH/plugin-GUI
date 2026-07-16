@@ -78,3 +78,9 @@ add_agent_core_test(
     AgentStateSnapshotCacheTests.cpp
     ../../Source/Agent/AgentStateSnapshotCache.cpp
 )
+
+add_agent_core_test(
+    RuntimeOptionsTests
+    RuntimeOptionsTests.cpp
+    ../../Source/Agent/RuntimeOptions.cpp
+)

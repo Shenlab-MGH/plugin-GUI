@@ -93,7 +93,8 @@ static void errorMsg (const char* file, int line, const char* msg)
 
 #define ERROR_MSG(msg) errorMsg (__FILE__, __LINE__, msg)
 
-PluginManager::PluginManager()
+PluginManager::PluginManager (bool includeUserPlugins_)
+    : includeUserPlugins (includeUserPlugins_)
 {
 #ifdef _WIN32
 
@@ -111,7 +112,8 @@ PluginManager::PluginManager()
     AddDllDirectory (sharedPath.getFullPathName().toWideCharPointer());
 
     // Add LOCALAPPDATA level shared directory to DLL search path
-    if (! appDir.contains ("plugin-GUI\\Build\\"))
+    if (includeUserPlugins
+        && ! appDir.contains ("plugin-GUI\\Build\\"))
     {
         if (! installSharedPath.isDirectory())
         {
@@ -126,7 +128,8 @@ PluginManager::PluginManager()
                                  .getChildFile ("open-ephys")
                                  .getChildFile ("shared-api" + String (PLUGIN_API_VER));
 
-    if (! installSharedPath.isDirectory())
+    if (includeUserPlugins
+        && ! installSharedPath.isDirectory())
     {
         installSharedPath.createDirectory();
     }
@@ -135,7 +138,8 @@ PluginManager::PluginManager()
                                  .getChildFile ("Application Support/open-ephys")
                                  .getChildFile ("shared-api" + String (PLUGIN_API_VER));
 
-    if (! installSharedPath.isDirectory())
+    if (includeUserPlugins
+        && ! installSharedPath.isDirectory())
     {
         installSharedPath.createDirectory();
     }
@@ -152,14 +156,16 @@ void PluginManager::loadAllPlugins()
 
 #ifdef __APPLE__
     paths.add (File::getSpecialLocation (File::currentApplicationFile).getChildFile ("Contents/PlugIns"));
-    paths.add (File::getSpecialLocation (File::userApplicationDataDirectory)
-                   .getChildFile ("Application Support/open-ephys")
-                   .getChildFile ("plugins-api" + String (PLUGIN_API_VER)));
+    if (includeUserPlugins)
+        paths.add (File::getSpecialLocation (File::userApplicationDataDirectory)
+                       .getChildFile ("Application Support/open-ephys")
+                       .getChildFile ("plugins-api" + String (PLUGIN_API_VER)));
 #elif _WIN32
     paths.add (File::getSpecialLocation (File::currentApplicationFile).getParentDirectory().getChildFile ("plugins"));
 
     String appDir = File::getSpecialLocation (File::currentApplicationFile).getFullPathName();
-    if (! appDir.contains ("plugin-GUI\\Build\\"))
+    if (includeUserPlugins
+        && ! appDir.contains ("plugin-GUI\\Build\\"))
     {
         paths.add (File::getSpecialLocation (File::windowsLocalAppData)
                        .getChildFile ("Open Ephys")
@@ -169,7 +175,8 @@ void PluginManager::loadAllPlugins()
     paths.add (File::getSpecialLocation (File::currentApplicationFile).getParentDirectory().getChildFile ("plugins"));
 
     String appDir = File::getSpecialLocation (File::currentApplicationFile).getFullPathName();
-    if (! appDir.contains ("plugin-GUI/Build/"))
+    if (includeUserPlugins
+        && ! appDir.contains ("plugin-GUI/Build/"))
     {
         paths.add (File::getSpecialLocation (File::userApplicationDataDirectory)
                        .getChildFile ("open-ephys")
@@ -236,6 +243,27 @@ void PluginManager::loadPlugins (const File& pluginPath)
 
 int PluginManager::loadPlugin (const String& pluginLoc)
 {
+    if (! includeUserPlugins)
+    {
+#ifdef __APPLE__
+        const auto bundledPluginDirectory =
+            File::getSpecialLocation (File::currentApplicationFile)
+                .getChildFile ("Contents/PlugIns");
+#else
+        const auto bundledPluginDirectory =
+            File::getSpecialLocation (File::currentApplicationFile)
+                .getParentDirectory()
+                .getChildFile ("plugins");
+#endif
+        const File pluginFile (pluginLoc);
+        if (! pluginFile.isAChildOf (bundledPluginDirectory))
+        {
+            LOGE ("Refusing plugin outside bundled directory: ",
+                  pluginLoc);
+            return -1;
+        }
+    }
+
 #ifdef _WIN32
     HINSTANCE handle;
     const wchar_t* processorLocLPCWSTR = pluginLoc.toWideCharPointer();
