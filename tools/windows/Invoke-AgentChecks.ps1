@@ -9,6 +9,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Agent core tests failed with exit code $LASTEXITCODE"
 }
 
+& (Join-Path $PSScriptRoot 'Invoke-AgentGatewayTests.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Agent Gateway tests failed with exit code $LASTEXITCODE"
+}
+
 $contracts = @(
     'Tests\AgentContracts\test_transport_accessibility_source.py',
     'Tests\AgentContracts\test_transport_command_routing_source.py',

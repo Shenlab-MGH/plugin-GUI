@@ -12,6 +12,7 @@ on:
       - 'Resources/**'
       - 'Source/**'
       - 'Tests/**'
+      - 'tools/agent_gateway/**'
       - 'tools/windows/**'
       - 'CMakeLists.txt'
       - 'HelperFunctions.cmake'
@@ -23,6 +24,7 @@ on:
       - 'Resources/**'
       - 'Source/**'
       - 'Tests/**'
+      - 'tools/agent_gateway/**'
       - 'tools/windows/**'
       - 'CMakeLists.txt'
       - 'HelperFunctions.cmake'
@@ -45,6 +47,12 @@ jobs:
           python Tests/AgentContracts/test_transport_command_routing_source.py
           python Tests/AgentContracts/test_transport_coordinator_integration_source.py
           python Tests/AgentContracts/test_transport_mailbox_integration_source.py
+
+      - name: Run Agent Gateway tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Resolve-Path tools/agent_gateway).Path
+          python -m unittest discover -s Tests/AgentGateway -v
 
       - name: Configure Release tests
         shell: pwsh

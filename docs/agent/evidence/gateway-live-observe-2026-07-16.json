@@ -1,0 +1,36 @@
+{
+  "scope": "live installed Open Ephys observe-only acceptance",
+  "gateway": {
+    "bind": "127.0.0.1:37598",
+    "schema_version": "oe-agent-gateway/v1",
+    "backend": "open-ephys-rest-v1.0.2",
+    "online": true,
+    "mode_before": "IDLE",
+    "revision": 1,
+    "simulated_config_detected": true,
+    "mutation_allowed": false,
+    "mutation_disabled_reason": "NATIVE_API_EXPOSED"
+  },
+  "native_api_safety": {
+    "listener_addresses": [
+      "0.0.0.0"
+    ],
+    "owner_paths": [
+      "C:\\Program Files\\Open Ephys\\open-ephys.exe"
+    ],
+    "public_firewall_allow": true,
+    "reasons": [
+      "NATIVE_API_WILDCARD_LISTENER",
+      "NATIVE_API_PUBLIC_FIREWALL_ALLOW"
+    ]
+  },
+  "request": {
+    "request_id": "live-final-block-001",
+    "target_mode": "ACQUIRE",
+    "state": "REJECTED",
+    "reason": "NATIVE_API_EXPOSED"
+  },
+  "mode_after": "IDLE",
+  "mutation_sent_to_open_ephys": false,
+  "gateway_process_stopped_after_test": true
+}
