@@ -20,3 +20,22 @@ add_agent_core_test(
     ControlPanelCommandRouterTests.cpp
     ../../Source/Agent/ControlPanelCommandRouter.cpp
 )
+
+add_agent_core_test(
+    AgentTransportPlannerTests
+    AgentTransportPlannerTests.cpp
+    ../../Source/Agent/AgentTransportPlanner.cpp
+)
+
+add_agent_core_test(
+    TransportAccessibilityRegistryTests
+    TransportAccessibilityRegistryTests.cpp
+    ../../Source/Agent/TransportAccessibilityRegistry.cpp
+)
+
+add_agent_core_test(
+    AgentTransportCoordinatorTests
+    AgentTransportCoordinatorTests.cpp
+    ../../Source/Agent/AgentTransportCoordinator.cpp
+    ../../Source/Agent/AgentTransportPlanner.cpp
+)

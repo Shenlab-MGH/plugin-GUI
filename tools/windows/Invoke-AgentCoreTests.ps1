@@ -60,3 +60,19 @@ Invoke-CompileAndRun -Name 'ControlPanelCommandRouterTests' -Sources @(
     'Tests\AgentCore\ControlPanelCommandRouterTests.cpp',
     'Source\Agent\ControlPanelCommandRouter.cpp'
 )
+
+Invoke-CompileAndRun -Name 'AgentTransportPlannerTests' -Sources @(
+    'Tests\AgentCore\AgentTransportPlannerTests.cpp',
+    'Source\Agent\AgentTransportPlanner.cpp'
+)
+
+Invoke-CompileAndRun -Name 'TransportAccessibilityRegistryTests' -Sources @(
+    'Tests\AgentCore\TransportAccessibilityRegistryTests.cpp',
+    'Source\Agent\TransportAccessibilityRegistry.cpp'
+)
+
+Invoke-CompileAndRun -Name 'AgentTransportCoordinatorTests' -Sources @(
+    'Tests\AgentCore\AgentTransportCoordinatorTests.cpp',
+    'Source\Agent\AgentTransportCoordinator.cpp',
+    'Source\Agent\AgentTransportPlanner.cpp'
+)

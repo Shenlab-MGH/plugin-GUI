@@ -23,7 +23,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ControlPanel.h"
 #include "../AccessClass.h"
+#include "../Agent/TransportAccessibilityRegistry.h"
 #include "../Processors/PluginManager/PluginManager.h"
+#include "../Processors/RecordNode/RecordNode.h"
 #include "../Processors/RecordNode/RecordEngine.h"
 #include "FilenameConfigWindow.h"
 #include "UIComponent.h"
@@ -33,6 +35,45 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "LookAndFeel/CustomLookAndFeel.h"
 
 const int SIZE_AUDIO_EDITOR_MAX_WIDTH = 500;
+
+namespace
+{
+AgentTransportApplyResult makeRejectedTransportResult (
+    const AgentTransportRequest& request,
+    AgentTransportApplyOutcome outcome)
+{
+    return {
+        outcome,
+        {
+            AgentTransportPlanOutcome::invalidRequest,
+            request.requestId,
+            AgentObservedMode::unknown,
+            request.targetMode,
+            request.expectedRevision,
+            {}
+        },
+        {
+            "1.0.2-agent-v0.0.1",
+            AgentObservedMode::unknown,
+            0
+        }
+    };
+}
+
+void applyTransportAccessibilityMetadata (
+    Button& button,
+    TransportControlKind kind)
+{
+    static const TransportAccessibilityRegistry registry;
+    const auto& descriptor = registry.get (kind);
+
+    button.setComponentID (descriptor.automationId);
+    button.setTitle (descriptor.name);
+    button.setDescription (descriptor.description);
+    button.setHelpText (descriptor.helpText);
+    button.setTooltip (descriptor.helpText);
+}
+}
 
 NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
 {
@@ -120,14 +161,12 @@ FilenameEditorButton::FilenameEditorButton()
 PlayButton::PlayButton()
     : DrawableButton ("Play Button", DrawableButton::ImageRaw)
 {
-    setComponentID ("oe.transport.acquisition");
-    setTitle ("Acquisition");
-    setDescription ("Start or stop data acquisition");
-    setHelpText ("Starts or stops data acquisition without changing recording settings.");
+    applyTransportAccessibilityMetadata (
+        *this,
+        TransportControlKind::acquisition);
     setColour (DrawableButton::backgroundColourId, Colours::darkgrey.withAlpha (0.0f));
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
-    setTooltip ("Starts or stops data acquisition without changing recording settings.");
 
     updateImages (false);
 }
@@ -162,14 +201,12 @@ void PlayButton::updateImages (bool acquisitionIsActive)
 RecordButton::RecordButton()
     : DrawableButton ("Record Button", DrawableButton::ImageRaw)
 {
-    setComponentID ("oe.transport.recording");
-    setTitle ("Recording");
-    setDescription ("Start or stop recording to disk");
-    setHelpText ("Starts or stops recording using the existing recording safety checks.");
+    applyTransportAccessibilityMetadata (
+        *this,
+        TransportControlKind::recording);
     setColour (DrawableButton::backgroundColourId, Colours::darkgrey.withAlpha (0.0f));
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
-    setTooltip ("Starts or stops recording using the existing recording safety checks.");
 
     updateImages (false);
 }
@@ -484,6 +521,7 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
     : graph (graph_),
       audio (audio_),
       commandRouter (*this),
+      agentStateStore ("1.0.2-agent-v0.0.1"),
       isConsoleApp (isConsoleApp_)
 {
     AccessClass::setControlPanel (this);
@@ -1220,6 +1258,151 @@ void ControlPanel::handleRecordingToggleRequest()
     {
         stopRecording();
     }
+}
+
+AgentStateSnapshot ControlPanel::getAgentStateSnapshot()
+{
+    auto* messageManager = MessageManager::getInstance();
+    if (messageManager == nullptr
+        || ! messageManager->isThisTheMessageThread())
+    {
+        jassertfalse;
+        return {
+            "1.0.2-agent-v0.0.1",
+            AgentObservedMode::unknown,
+            0
+        };
+    }
+
+    return readState();
+}
+
+AgentTransportApplyResult ControlPanel::applyAgentTransportRequest (
+    const AgentTransportRequest& request)
+{
+    auto* messageManager = MessageManager::getInstance();
+    if (messageManager == nullptr
+        || ! messageManager->isThisTheMessageThread())
+    {
+        jassertfalse;
+        return makeRejectedTransportResult (
+            request,
+            AgentTransportApplyOutcome::wrongThread);
+    }
+
+    if (agentTransportTransactionActive)
+    {
+        return makeRejectedTransportResult (
+            request,
+            AgentTransportApplyOutcome::busy);
+    }
+
+    const ScopedValueSetter<bool> transactionGuard (
+        agentTransportTransactionActive,
+        true);
+
+    return agentTransportCoordinator.apply (request, *this);
+}
+
+AgentStateSnapshot ControlPanel::readState()
+{
+    return agentStateStore.observe (getAuthoritativeAgentMode());
+}
+
+AgentObservedMode ControlPanel::getAuthoritativeAgentMode()
+{
+    const bool callbacksActive = audio->callbacksAreActive();
+    const auto recordNodes = graph->getRecordNodes();
+    int recordingNodeCount = 0;
+
+    for (auto* node : recordNodes)
+        if (node->getRecordingStatus())
+            ++recordingNodeCount;
+
+    if (recordingNodeCount > 0)
+    {
+        const bool allNodesRecording =
+            recordingNodeCount == recordNodes.size();
+
+        if (! callbacksActive || ! allNodesRecording)
+            return AgentObservedMode::unknown;
+
+        return AgentObservedMode::record;
+    }
+
+    return callbacksActive
+        ? AgentObservedMode::acquire
+        : AgentObservedMode::idle;
+}
+
+bool ControlPanel::execute (AgentTransportAction action)
+{
+    switch (action)
+    {
+        case AgentTransportAction::startAcquisition:
+            playButton->setToggleState (
+                true,
+                dontSendNotification);
+            startAcquisition();
+            if (! audio->callbacksAreActive())
+                playButton->setToggleState (
+                    false,
+                    dontSendNotification);
+            return audio->callbacksAreActive();
+
+        case AgentTransportAction::stopAcquisition:
+            playButton->setToggleState (
+                false,
+                dontSendNotification);
+            stopAcquisition();
+            return ! audio->callbacksAreActive();
+
+        case AgentTransportAction::requestSafeRecordingStart:
+            forceRecording = false;
+
+            if (! graph->hasRecordNode()
+                || ! graph->allRecordNodeDirectoriesAreValid()
+                || ! graph->allRecordNodesAreSynchronized())
+            {
+                recordButton->setToggleState (
+                    false,
+                    dontSendNotification);
+                CoreServices::sendStatusMessage (
+                    "Agent recording preflight failed.");
+                return false;
+            }
+
+            recordButton->setToggleState (
+                true,
+                dontSendNotification);
+
+            if (audio->callbacksAreActive())
+                startRecording();
+            else
+                startAcquisition (true);
+
+            if (getAuthoritativeAgentMode()
+                != AgentObservedMode::record)
+            {
+                recordButton->setToggleState (
+                    false,
+                    dontSendNotification);
+                playButton->setToggleState (
+                    audio->callbacksAreActive(),
+                    dontSendNotification);
+                return false;
+            }
+            return true;
+
+        case AgentTransportAction::stopRecording:
+            stopRecording();
+            for (auto* node : graph->getRecordNodes())
+                if (node->getRecordingStatus())
+                    return false;
+            return true;
+    }
+
+    return false;
 }
 
 void ControlPanel::buttonClicked (Button* button)

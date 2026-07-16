@@ -27,6 +27,7 @@
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "../AccessClass.h"
 #include "../Agent/ControlPanelCommandRouter.h"
+#include "../Agent/AgentTransportCoordinator.h"
 #include "../Audio/AudioComponent.h"
 #include "../Processors/AudioNode/AudioEditor.h"
 #include "../Processors/Editors/GenericEditor.h" // for UtilityButton
@@ -345,7 +346,8 @@ class TESTABLE ControlPanel : public Component,
                               public ComboBox::Listener,
                               public ComponentListener,
                               public FilenameComponentListener,
-                              private AgentCommandDispatcher
+                              private AgentCommandDispatcher,
+                              private AgentTransportRuntime
 
 {
 public:
@@ -486,6 +488,13 @@ public:
     /** Returns the record button component */
     Component* getRecordButton() { return recordButton.get(); }
 
+    /** Returns the authoritative Agent transport state and revision. */
+    AgentStateSnapshot getAgentStateSnapshot();
+
+    /** Applies an internal target-state request through verified coordination. */
+    AgentTransportApplyResult applyAgentTransportRequest (
+        const AgentTransportRequest& request);
+
     /** Pointers to owned components */
     std::unique_ptr<FilenameEditorButton> filenameText;
     std::unique_ptr<FilenameConfigWindow> filenameConfigWindow;
@@ -522,6 +531,15 @@ private:
     /** Handles a recording toggle after typed command dispatch. */
     void handleRecordingToggleRequest();
 
+    /** Reads authoritative transport state for Agent coordination. */
+    AgentStateSnapshot readState() override;
+
+    /** Reads callbacks and Record Nodes rather than button intent. */
+    AgentObservedMode getAuthoritativeAgentMode();
+
+    /** Executes one high-level transport action for Agent coordination. */
+    bool execute (AgentTransportAction action) override;
+
     /** Respond to ComboBox changes */
     void comboBoxChanged (ComboBox* combo) override;
 
@@ -556,6 +574,9 @@ private:
     AudioComponent* audio;
     AudioEditor* audioEditor;
     ControlPanelCommandRouter commandRouter;
+    AgentStateStore agentStateStore;
+    AgentTransportCoordinator agentTransportCoordinator;
+    bool agentTransportTransactionActive = false;
 
     /** Internal state variables */
     bool initialize = true;
