@@ -15,6 +15,7 @@ add_sources(open-ephys
 )
 
 #add nested directories
+add_subdirectory(Agent)
 add_subdirectory(Audio)
 add_subdirectory(Processors)
 add_subdirectory(UI)
