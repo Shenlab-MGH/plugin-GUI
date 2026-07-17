@@ -58,6 +58,15 @@ AgentTransportPlan AgentTransportPlanner::plan (
             request);
     }
 
+    if (request.expectedMode != AgentObservedMode::unknown
+        && current.mode != request.expectedMode)
+    {
+        return result (
+            AgentTransportPlanOutcome::modeConflict,
+            current,
+            request);
+    }
+
     if (current.mode == request.targetMode)
     {
         return result (

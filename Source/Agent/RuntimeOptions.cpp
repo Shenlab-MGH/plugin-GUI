@@ -38,6 +38,7 @@ RuntimeOptionsParseResult RuntimeOptions::parse (
     bool sawNoHttp = false;
     bool sawNoUserPlugins = false;
     bool sawAgentUiaReadOnly = false;
+    bool sawAgentMutation = false;
     bool sawStateDirectory = false;
     bool sawAgentPort = false;
 
@@ -82,6 +83,15 @@ RuntimeOptionsParseResult RuntimeOptions::parse (
                     "--agent-uia-readonly"))
                 return result;
             result.options.enableAgentUiaReadOnly = true;
+        }
+        else if (argument == "--agent-mutation")
+        {
+            if (! consumeOnce (
+                    sawAgentMutation,
+                    result,
+                    "--agent-mutation"))
+                return result;
+            result.options.enableAgentMutation = true;
         }
         else if (argument == "--state-dir")
         {

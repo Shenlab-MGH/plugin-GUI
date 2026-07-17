@@ -13,7 +13,11 @@ param(
 
     [switch] $Launch,
 
-    [switch] $MaintenanceWindowApproved
+    [switch] $MaintenanceWindowApproved,
+
+    [switch] $EnableAgentMutation,
+
+    [string] $ApprovalId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -113,6 +117,9 @@ $arguments = @(
     '--no-user-plugins',
     '--agent-uia-readonly'
 )
+if ($EnableAgentMutation) {
+    $arguments += '--agent-mutation'
+}
 if ($configPath) {
     $arguments += $configPath
 }
@@ -139,6 +146,20 @@ if ($Launch -and -not $MaintenanceWindowApproved) {
         'Launch requires -MaintenanceWindowApproved.'
     )
 }
+if ($EnableAgentMutation -and -not $MaintenanceWindowApproved) {
+    $blockingReasons.Add(
+        'Agent mutation requires -MaintenanceWindowApproved.'
+    )
+}
+if ($EnableAgentMutation -and (
+    -not $ApprovalId -or
+    $ApprovalId.Length -gt 128 -or
+    $ApprovalId -notmatch '^[A-Za-z0-9._:-]+$'
+)) {
+    $blockingReasons.Add(
+        'Agent mutation requires a bounded URL-safe -ApprovalId.'
+    )
+}
 
 $result = [ordered]@{
     mode = if ($Launch) { 'launch' } else { 'inspect-only' }
@@ -153,6 +174,8 @@ $result = [ordered]@{
     native_http_locked_off = $true
     user_plugins_locked_off = $true
     agent_uia_readonly = $true
+    agent_mutation_enabled = [bool]$EnableAgentMutation
+    approval_id = if ($EnableAgentMutation) { $ApprovalId } else { $null }
     token_present = $tokenPresent
     running_open_ephys = $running
     blocking_reasons = @($blockingReasons)
@@ -190,10 +213,27 @@ $argumentLine = (
     $arguments |
         ForEach-Object { ConvertTo-ProcessArgument $_ }
 ) -join ' '
-$process = Start-Process `
-    -FilePath $executablePath `
-    -ArgumentList $argumentLine `
-    -PassThru
+$previousApprovalId = $env:OE_AGENT_APPROVAL_ID
+try {
+    if ($EnableAgentMutation) {
+        $env:OE_AGENT_APPROVAL_ID = $ApprovalId
+    }
+    else {
+        Remove-Item Env:OE_AGENT_APPROVAL_ID -ErrorAction SilentlyContinue
+    }
+    $process = Start-Process `
+        -FilePath $executablePath `
+        -ArgumentList $argumentLine `
+        -PassThru
+}
+finally {
+    if ($null -eq $previousApprovalId) {
+        Remove-Item Env:OE_AGENT_APPROVAL_ID -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:OE_AGENT_APPROVAL_ID = $previousApprovalId
+    }
+}
 
 $result['process_id'] = $process.Id
 $result['started_at'] = (Get-Date).ToString('o')

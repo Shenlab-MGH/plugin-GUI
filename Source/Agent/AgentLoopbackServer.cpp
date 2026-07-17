@@ -31,13 +31,15 @@ AgentLoopbackServer::AgentLoopbackServer (
     int portToUse,
     bool mutationEnabledToUse,
     std::shared_ptr<AgentExperimentDirectoryEndpoint>
-        directoryEndpointToUse)
+        directoryEndpointToUse,
+    std::string approvedMutationIdToUse)
     : endpoint (std::move (endpointToUse)),
       directoryEndpoint (std::move (directoryEndpointToUse)),
       bearerToken (std::move (tokenToUse)),
       sessionId (createSessionId()),
       requestedPort (portToUse),
-      mutationEnabled (mutationEnabledToUse)
+      mutationEnabled (mutationEnabledToUse),
+      approvedMutationId (std::move (approvedMutationIdToUse))
 {
     configureRoutes();
 }
@@ -56,6 +58,9 @@ bool AgentLoopbackServer::start()
         worker.join();
 
     if (! endpoint || bearerToken.size() < 32
+        || (mutationEnabled
+            && (approvedMutationId.empty()
+                || approvedMutationId.size() > 128))
         || requestedPort < 0 || requestedPort > 65535)
     {
         return false;
@@ -320,6 +325,18 @@ void AgentLoopbackServer::configureRoutes()
                              response,
                              409,
                              R"({"error":"SESSION_MISMATCH"})");
+                         return;
+                     }
+
+                     if (approvedMutationId.empty()
+                         || ! constantTimeEqual (
+                             parsed.request->approvalId,
+                             approvedMutationId))
+                     {
+                         setJson (
+                             response,
+                             403,
+                             R"({"error":"APPROVAL_MISMATCH"})");
                          return;
                      }
 

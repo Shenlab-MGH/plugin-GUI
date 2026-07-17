@@ -20,13 +20,39 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct AgentTransportRequest
 {
+    AgentTransportRequest (
+        std::string requestIdToUse,
+        AgentObservedMode targetModeToUse,
+        std::uint64_t expectedRevisionToUse,
+        AgentObservedMode expectedModeToUse = AgentObservedMode::unknown,
+        std::string runIdToUse = {},
+        std::string idempotencyKeyToUse = {},
+        std::string approvalIdToUse = {},
+        std::string actionParametersHashToUse = {})
+        : requestId (std::move (requestIdToUse)),
+          targetMode (targetModeToUse),
+          expectedRevision (expectedRevisionToUse),
+          expectedMode (expectedModeToUse),
+          runId (std::move (runIdToUse)),
+          idempotencyKey (std::move (idempotencyKeyToUse)),
+          approvalId (std::move (approvalIdToUse)),
+          actionParametersHash (std::move (actionParametersHashToUse))
+    {
+    }
+
     std::string requestId;
     AgentObservedMode targetMode;
     std::uint64_t expectedRevision;
+    AgentObservedMode expectedMode = AgentObservedMode::unknown;
+    std::string runId;
+    std::string idempotencyKey;
+    std::string approvalId;
+    std::string actionParametersHash;
 };
 
 enum class AgentTransportAction
@@ -51,6 +77,7 @@ enum class AgentTransportPlanOutcome
     alreadySatisfied,
     revisionConflict,
     stateUnknown,
+    modeConflict,
     invalidRequest
 };
 

@@ -41,7 +41,8 @@ public:
         int port = 37498,
         bool mutationEnabled = false,
         std::shared_ptr<AgentExperimentDirectoryEndpoint>
-            directoryEndpoint = nullptr);
+            directoryEndpoint = nullptr,
+        std::string approvedMutationId = {});
 
     ~AgentLoopbackServer();
 
@@ -75,6 +76,7 @@ private:
     std::string sessionId;
     int requestedPort;
     bool mutationEnabled;
+    std::string approvedMutationId;
     std::atomic<int> boundPort { -1 };
     httplib::Server server;
     std::thread worker;

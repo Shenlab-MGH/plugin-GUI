@@ -1253,7 +1253,7 @@ void ControlPanel::dispatch (const AgentCommand& command)
             break;
 
         case AgentCommandType::requestRecordingToggle:
-            handleRecordingToggleRequest();
+            handleRecordingToggleRequest (command.origin);
             break;
     }
 
@@ -1272,9 +1272,45 @@ void ControlPanel::handleAcquisitionToggleRequest()
     }
 }
 
-void ControlPanel::handleRecordingToggleRequest()
+void ControlPanel::handleRecordingToggleRequest (
+    AgentCommandOrigin origin)
 {
     if (recordButton->getToggleState())
+    {
+        const AgentRecordingGateContext context {
+            false,
+            0
+        };
+        requestValidatedRecordingStart (origin, context);
+    }
+    else
+    {
+        stopRecording();
+    }
+}
+
+bool ControlPanel::requestValidatedRecordingStart (
+    AgentCommandOrigin origin,
+    const AgentRecordingGateContext& context)
+{
+    const auto state = readState();
+    const auto directory = getAgentRecordingDirectorySnapshot();
+    const bool recordingDirectoriesReady =
+        graph->allRecordNodeDirectoriesAreValid()
+        || (! context.agentInitiated && ! getAcquisitionState());
+    const AgentRecordingGateObservation observation {
+        graph->hasRecordNode(),
+        recordingDirectoriesReady,
+        graph->allRecordNodesAreSynchronized(),
+        directory.prepared && ! directory.targetExists,
+        state.mode,
+        state.revision
+    };
+    const AgentRecordingSafety safety;
+    const auto decision = safety.evaluate (context, observation);
+
+    if (decision.outcome
+        == AgentRecordingGateOutcome::recordNodesNotReady)
     {
         if (! graph->hasRecordNode())
         {
@@ -1288,11 +1324,10 @@ void ControlPanel::handleRecordingToggleRequest()
             CoreServices::sendStatusMessage (
                 "Insert at least one Record Node to start recording.");
             recordButton->setToggleState (false, dontSendNotification);
-            return;
+            return false;
         }
 
-        if (! graph->allRecordNodeDirectoriesAreValid()
-            && getAcquisitionState())
+        if (! graph->allRecordNodeDirectoriesAreValid())
         {
             recordButton->setToggleState (false, dontSendNotification);
 
@@ -1307,12 +1342,23 @@ void ControlPanel::handleRecordingToggleRequest()
             }
             CoreServices::sendStatusMessage (
                 "One or more Record Nodes have invalid recording path");
-            return;
+            return false;
         }
+    }
 
-        if (! graph->allRecordNodesAreSynchronized() && ! forceRecording)
+    if (decision.outcome == AgentRecordingGateOutcome::syncBlocked)
+    {
+        const bool agentInitiated = context.agentInitiated;
+        if (agentInitiated || ! forceRecording)
         {
             recordButton->setToggleState (false, dontSendNotification);
+
+            if (agentInitiated)
+            {
+                CoreServices::sendStatusMessage (
+                    "Agent recording blocked: data streams not synchronized.");
+                return false;
+            }
 
             int response = AlertWindow::showOkCancelBox (
                 AlertWindow::WarningIcon,
@@ -1325,26 +1371,35 @@ void ControlPanel::handleRecordingToggleRequest()
             if (! response)
             {
                 CoreServices::sendStatusMessage ("Recording was cancelled.");
-                return;
+                return false;
             }
 
             recordButton->setToggleState (true, dontSendNotification);
             forceRecording = false;
         }
+    }
+    else if (decision.outcome != AgentRecordingGateOutcome::ready)
+    {
+        recordButton->setToggleState (false, dontSendNotification);
+        const char* reason = "state or revision conflict";
+        if (decision.outcome
+            == AgentRecordingGateOutcome::directoryNotPrepared)
+            reason = "exact recording directory not prepared";
+        CoreServices::sendStatusMessage (
+            String ("Agent recording blocked: ") + reason + ".");
+        return false;
+    }
 
-        if (playButton->getToggleState())
-        {
-            startRecording();
-        }
-        else
-        {
-            startAcquisition (true);
-        }
+    if (playButton->getToggleState())
+    {
+        startRecording();
     }
     else
     {
-        stopRecording();
+        startAcquisition (true);
     }
+    (void) origin;
+    return getAuthoritativeAgentMode() == AgentObservedMode::record;
 }
 
 std::shared_ptr<AgentTransportEndpoint>
@@ -1402,6 +1457,8 @@ ControlPanel::getAgentRecordingDirectorySnapshot()
             File (String::fromUTF8 (
                 agentDirectorySnapshot.targetPath.c_str()))
                 .exists();
+        if (agentDirectorySnapshot.targetExists)
+            agentDirectorySnapshot.prepared = false;
     }
     return agentDirectorySnapshot;
 }
@@ -1515,6 +1572,10 @@ AgentTransportApplyResult ControlPanel::applyAgentTransportRequest (
         agentTransportTransactionActive,
         true);
 
+    const ScopedValueSetter<std::uint64_t> revisionGuard (
+        agentActiveExpectedRevision,
+        request.expectedRevision);
+
     return agentTransportCoordinator.apply (request, *this);
 }
 
@@ -1576,40 +1637,12 @@ bool ControlPanel::execute (AgentTransportAction action)
 
         case AgentTransportAction::requestSafeRecordingStart:
             forceRecording = false;
-
-            if (! graph->hasRecordNode()
-                || ! graph->allRecordNodeDirectoriesAreValid()
-                || ! graph->allRecordNodesAreSynchronized())
-            {
-                recordButton->setToggleState (
-                    false,
-                    dontSendNotification);
-                CoreServices::sendStatusMessage (
-                    "Agent recording preflight failed.");
-                return false;
-            }
-
             recordButton->setToggleState (
                 true,
                 dontSendNotification);
-
-            if (audio->callbacksAreActive())
-                startRecording();
-            else
-                startAcquisition (true);
-
-            if (getAuthoritativeAgentMode()
-                != AgentObservedMode::record)
-            {
-                recordButton->setToggleState (
-                    false,
-                    dontSendNotification);
-                playButton->setToggleState (
-                    audio->callbacksAreActive(),
-                    dontSendNotification);
-                return false;
-            }
-            return true;
+            return requestValidatedRecordingStart (
+                AgentCommandOrigin::internal,
+                { true, agentActiveExpectedRevision });
 
         case AgentTransportAction::stopRecording:
             stopRecording();

@@ -94,6 +94,12 @@ add_agent_core_test(
 )
 
 add_agent_core_test(
+    AgentRecordingSafetyTests
+    AgentRecordingSafetyTests.cpp
+    ../../Source/Agent/AgentRecordingSafety.cpp
+)
+
+add_agent_core_test(
     RuntimeOptionsTests
     RuntimeOptionsTests.cpp
     ../../Source/Agent/RuntimeOptions.cpp

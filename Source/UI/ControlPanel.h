@@ -30,6 +30,7 @@
 #include "../Agent/AgentTransportCoordinator.h"
 #include "../Agent/AgentTransportEndpoint.h"
 #include "../Agent/AgentExperimentDirectoryEndpoint.h"
+#include "../Agent/AgentRecordingSafety.h"
 #include "../Audio/AudioComponent.h"
 #include "../Processors/AudioNode/AudioEditor.h"
 #include "../Processors/Editors/GenericEditor.h" // for UtilityButton
@@ -546,7 +547,11 @@ private:
     void handleAcquisitionToggleRequest();
 
     /** Handles a recording toggle after typed command dispatch. */
-    void handleRecordingToggleRequest();
+    void handleRecordingToggleRequest (AgentCommandOrigin origin);
+
+    bool requestValidatedRecordingStart (
+        AgentCommandOrigin origin,
+        const AgentRecordingGateContext& context);
 
     /** Reads authoritative transport state for Agent coordination. */
     AgentStateSnapshot readState() override;
@@ -600,6 +605,7 @@ private:
         agentExperimentDirectoryAdapter;
     AgentTransportCoordinator agentTransportCoordinator;
     bool agentTransportTransactionActive = false;
+    std::uint64_t agentActiveExpectedRevision = 0;
     AgentRecordingDirectorySnapshot agentDirectorySnapshot;
 
     /** Internal state variables */

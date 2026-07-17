@@ -22,7 +22,12 @@ bool AgentTransportMailbox::samePayload (
 {
     return lhs.requestId == rhs.requestId
         && lhs.targetMode == rhs.targetMode
-        && lhs.expectedRevision == rhs.expectedRevision;
+        && lhs.expectedRevision == rhs.expectedRevision
+        && lhs.expectedMode == rhs.expectedMode
+        && lhs.runId == rhs.runId
+        && lhs.idempotencyKey == rhs.idempotencyKey
+        && lhs.approvalId == rhs.approvalId
+        && lhs.actionParametersHash == rhs.actionParametersHash;
 }
 
 AgentMailboxSubmitOutcome AgentTransportMailbox::submit (
@@ -47,10 +52,24 @@ AgentMailboxSubmitOutcome AgentTransportMailbox::submit (
             : AgentMailboxSubmitOutcome::idConflict;
     }
 
+    if (! request.idempotencyKey.empty())
+    {
+        if (const auto found = seenIdempotencyKeys.find (
+                request.idempotencyKey);
+            found != seenIdempotencyKeys.end())
+        {
+            return samePayload (found->second, request)
+                ? AgentMailboxSubmitOutcome::duplicate
+                : AgentMailboxSubmitOutcome::idConflict;
+        }
+    }
+
     if (pending || active)
         return AgentMailboxSubmitOutcome::busy;
 
     seen.emplace (request.requestId, request);
+    if (! request.idempotencyKey.empty())
+        seenIdempotencyKeys.emplace (request.idempotencyKey, request);
     pending = request;
     return AgentMailboxSubmitOutcome::accepted;
 }

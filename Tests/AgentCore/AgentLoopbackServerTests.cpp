@@ -141,7 +141,7 @@ int main()
     observeOnlyServer.stop();
 
     AgentLoopbackServer server (
-        endpoint, token, 0, true, directoryEndpoint);
+        endpoint, token, 0, true, directoryEndpoint, "approval-1");
     require (server.start(),
              "The loopback server must bind for integration testing");
     const auto port = server.getBoundPort();
@@ -173,9 +173,9 @@ int main()
         "/v1/transport/requests",
         authorized,
         std::string (
-            R"({"request_id":"http-cpp-1","expected_session_id":")")
+            R"({"run_id":"run-1","command_id":"http-cpp-1","idempotency_key":"idem-http-1","expected_session_id":")")
             + server.getSessionId()
-            + R"(","target_mode":"ACQUIRE","expected_revision":1})",
+            + R"(","expected_mode":"IDLE","target_mode":"ACQUIRE","expected_revision":1,"approval_id":"approval-1","action_parameters_hash":"sha256-acquire"})",
         "application/json");
     require (receipt && receipt->status == 202,
              "A valid target-state request must be accepted");
@@ -188,10 +188,21 @@ int main()
     const auto wrongSession = client.Post (
         "/v1/transport/requests",
         authorized,
-        R"({"request_id":"wrong-session","expected_session_id":"old-session","target_mode":"IDLE","expected_revision":1})",
+        R"({"run_id":"run-1","command_id":"wrong-session","idempotency_key":"idem-wrong","expected_session_id":"old-session","expected_mode":"IDLE","target_mode":"ACQUIRE","expected_revision":1,"approval_id":"approval-1","action_parameters_hash":"sha256-acquire"})",
         "application/json");
     require (wrongSession && wrongSession->status == 409,
              "A request from a different process session must be rejected");
+
+    const auto wrongApproval = client.Post (
+        "/v1/transport/requests",
+        authorized,
+        std::string (
+            R"({"run_id":"run-1","command_id":"wrong-approval","idempotency_key":"idem-wrong-approval","expected_session_id":")")
+            + server.getSessionId()
+            + R"(","expected_mode":"IDLE","target_mode":"ACQUIRE","expected_revision":1,"approval_id":"approval-wrong","action_parameters_hash":"sha256-acquire"})",
+        "application/json");
+    require (wrongApproval && wrongApproval->status == 403,
+             "A transport request outside the process approval must fail");
 
     scheduled.front()();
 

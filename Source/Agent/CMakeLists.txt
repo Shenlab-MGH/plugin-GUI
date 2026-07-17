@@ -19,6 +19,8 @@ add_sources(open-ephys
     AgentExperimentDirectoryEndpoint.cpp
     ControlPanelExperimentAdapter.h
     ControlPanelExperimentAdapter.cpp
+    AgentRecordingSafety.h
+    AgentRecordingSafety.cpp
     AgentTransportPlanner.h
     AgentTransportPlanner.cpp
     AgentTransportCoordinator.h

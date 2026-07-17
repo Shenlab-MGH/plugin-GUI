@@ -100,6 +100,8 @@ private:
     std::optional<AgentTransportRequest> pending;
     std::optional<AgentTransportRequest> active;
     std::unordered_map<std::string, AgentTransportRequest> seen;
+    std::unordered_map<std::string, AgentTransportRequest>
+        seenIdempotencyKeys;
     std::unordered_map<std::string, AgentTransportApplyResult> completed;
     std::unordered_map<
         std::string,

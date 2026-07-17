@@ -196,7 +196,10 @@ The v0.0.1 preview routes are:
 
 - `GET /v1/status`
 - `POST /v1/transport/requests`
-- `GET /v1/transport/requests/{request_id}`
+- `GET /v1/transport/requests/{command_id}`
+- `GET /v1/experiment/directory`
+- `PUT /v1/experiment/directory`
+- `GET /v1/experiment/directory/requests/{command_id}`
 
 The server is owned by `MainWindow` and is stopped before legacy HTTP, audio,
 or processor-graph teardown. It never calls `CoreServices`, `AccessClass`, or a
@@ -207,14 +210,20 @@ The preview request body is:
 
 ```json
 {
-  "request_id": "demo-001",
+  "run_id": "run-001",
+  "command_id": "command-001",
+  "idempotency_key": "run-001-acquire-001",
   "expected_session_id": "<session_id from GET /v1/status>",
+  "expected_mode": "IDLE",
   "target_mode": "ACQUIRE",
-  "expected_revision": 4
+  "expected_revision": 4,
+  "approval_id": "approval-001",
+  "action_parameters_hash": "sha256-acquire-parameters"
 }
 ```
 
-`request_id` and `expected_session_id` are restricted to 1-128 ASCII
+The parser rejects missing and unknown fields. Command, run, idempotency,
+approval, parameter-hash, and session identifiers are restricted to 1-128 ASCII
 alphanumeric characters plus `.`, `_`, `:`, and `-`. The MainWindow-hosted
 server currently rejects this POST regardless of body because v0.0.1 is
 observe-only.

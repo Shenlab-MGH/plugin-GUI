@@ -25,7 +25,7 @@ def main() -> None:
             "ControlPanel must implement typed command dispatch",
         "void handleAcquisitionToggleRequest();":
             "Acquisition behavior must have a focused dispatch handler",
-        "void handleRecordingToggleRequest();":
+        "void handleRecordingToggleRequest (AgentCommandOrigin origin);":
             "Recording behavior must have a focused dispatch handler",
         "ControlPanelCommandRouter commandRouter;":
             "ControlPanel must own one command router",
@@ -42,7 +42,7 @@ def main() -> None:
             "ControlPanel must dispatch typed commands",
         "void ControlPanel::handleAcquisitionToggleRequest()":
             "The existing acquisition branch must live behind the dispatcher",
-        "void ControlPanel::handleRecordingToggleRequest()":
+        "void ControlPanel::handleRecordingToggleRequest (":
             "The existing recording branch must live behind the dispatcher",
     }
 

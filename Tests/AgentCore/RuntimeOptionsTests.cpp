@@ -29,6 +29,8 @@ int main()
              "User plugins must retain official default behavior");
     require (! defaults.options.enableAgentUiaReadOnly,
              "Agent UIA must remain disabled by default");
+    require (! defaults.options.enableAgentMutation,
+             "Agent mutation must remain disabled by default");
     require (defaults.options.agentPort == 37498,
              "Agent loopback must retain its default port");
     require (! defaults.options.agentPortExplicit,
@@ -70,6 +72,12 @@ int main()
     require (uia.options.enableAgentUiaReadOnly,
              "The read-only UIA option must be preserved");
 
+    const auto mutation = RuntimeOptions::parse ({
+        "--agent-mutation"
+    });
+    require (mutation.ok() && mutation.options.enableAgentMutation,
+             "Explicit Agent mutation authorization must parse");
+
     require (! RuntimeOptions::parse ({ "--state-dir" }).ok(),
              "A missing state directory must fail closed");
     require (! RuntimeOptions::parse ({
@@ -97,6 +105,11 @@ int main()
                    "--agent-uia-readonly"
                }).ok(),
              "Duplicate UIA switches must fail closed");
+    require (! RuntimeOptions::parse ({
+                   "--agent-mutation",
+                   "--agent-mutation"
+               }).ok(),
+             "Duplicate mutation switches must fail closed");
     require (! RuntimeOptions::parse ({
                    "--unknown-isolation-switch"
                }).ok(),

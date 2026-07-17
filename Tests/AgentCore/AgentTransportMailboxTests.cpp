@@ -39,6 +39,33 @@ int main()
              "The same request ID and payload must be idempotent");
     require (mailbox.submit ({
                  "mailbox-1",
+                 AgentObservedMode::acquire,
+                 4,
+                 AgentObservedMode::idle,
+                 "run-1",
+                 "idem-1",
+                 "different-approval",
+                 "sha256-abc123"
+             }) == AgentMailboxSubmitOutcome::idConflict,
+             "Changed authorization under one command ID must conflict");
+
+    AgentTransportMailbox idempotencyMailbox;
+    const AgentTransportRequest authorized {
+        "command-1", AgentObservedMode::acquire, 4,
+        AgentObservedMode::idle, "run-1", "idem-shared",
+        "approval-1", "sha256-acquire"
+    };
+    require (idempotencyMailbox.submit (authorized)
+                 == AgentMailboxSubmitOutcome::accepted,
+             "First scoped idempotency key must be accepted");
+    require (idempotencyMailbox.submit ({
+                 "command-2", AgentObservedMode::acquire, 4,
+                 AgentObservedMode::idle, "run-1", "idem-shared",
+                 "approval-1", "sha256-acquire"
+             }) == AgentMailboxSubmitOutcome::idConflict,
+             "One idempotency key must never execute under another command");
+    require (mailbox.submit ({
+                 "mailbox-1",
                  AgentObservedMode::record,
                  4
              }) == AgentMailboxSubmitOutcome::idConflict,

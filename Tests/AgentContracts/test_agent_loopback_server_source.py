@@ -65,8 +65,10 @@ def main() -> None:
             "MainWindow must start the server explicitly",
         "agentServer->stop();":
             "MainWindow teardown must stop the server explicitly",
-        "runtimeOptions.agentPort,\n            false":
-            "The v0.0.1 host integration must remain observe-only",
+        "runtimeOptions.enableAgentMutation":
+            "Host mutation must require an explicit default-off runtime flag",
+        '"OE_AGENT_APPROVAL_ID"':
+            "Host mutation must bind requests to a process approval",
     }
     combined_main = MAIN_HEADER + MAIN_IMPLEMENTATION
     for fragment, message in main_contract.items():

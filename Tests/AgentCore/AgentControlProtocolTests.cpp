@@ -34,7 +34,7 @@ int main()
              "Unknown directory fields must fail closed");
 
     const auto parsed = AgentControlProtocol::parseTransportRequest (
-        R"({"request_id":"cpp-1","expected_session_id":"session-1","target_mode":"RECORD","expected_revision":7})");
+        R"({"run_id":"run-1","command_id":"cpp-1","idempotency_key":"idem-1","expected_session_id":"session-1","expected_mode":"ACQUIRE","target_mode":"RECORD","expected_revision":7,"approval_id":"approval-1","action_parameters_hash":"sha256-abc123"})");
     require (parsed.request.has_value(),
              "A valid transport request must parse");
     require (parsed.request->requestId == "cpp-1",
@@ -43,6 +43,13 @@ int main()
              "The target mode must parse as RECORD");
     require (parsed.request->expectedRevision == 7,
              "The expected revision must be preserved");
+    require (parsed.request->expectedMode
+                 == AgentObservedMode::acquire,
+             "The expected mode must be preserved");
+    require (parsed.request->runId == "run-1"
+                 && parsed.request->idempotencyKey == "idem-1"
+                 && parsed.request->approvalId == "approval-1",
+             "Scoped authorization identity must be preserved");
     require (parsed.expectedSessionId == "session-1",
              "The expected session must be preserved");
 
@@ -63,9 +70,9 @@ int main()
                    .request.has_value(),
              "Request IDs must use the URL-safe ASCII allowlist");
     require (! AgentControlProtocol::parseTransportRequest (
-                   R"({"request_id":"cpp-1","target_mode":"IDLE","expected_revision":0})")
+                   R"({"command_id":"cpp-1","target_mode":"IDLE","expected_revision":0})")
                    .request.has_value(),
-             "Every mutation must be scoped to an expected session");
+             "Legacy unscoped mutations must fail closed");
     require (! AgentControlProtocol::parseTransportRequest ("not-json")
                    .request.has_value(),
              "Malformed JSON must fail closed");

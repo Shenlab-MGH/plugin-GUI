@@ -91,6 +91,16 @@ int main()
     require (recordPlan.steps[0].requiresRecordingSafetyGate,
              "A recording proposal must explicitly require safety checks");
 
+    const AgentTransportRequest wrongExpectedMode {
+        "request-mode-conflict",
+        AgentObservedMode::record,
+        7,
+        AgentObservedMode::idle
+    };
+    require (planner.plan (acquiring, wrongExpectedMode).outcome
+                 == AgentTransportPlanOutcome::modeConflict,
+             "A mismatched explicit expected mode must fail closed");
+
     const AgentStateSnapshot idle {
         "1.0.2-agent",
         AgentObservedMode::idle,

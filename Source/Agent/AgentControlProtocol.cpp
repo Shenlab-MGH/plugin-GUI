@@ -261,15 +261,25 @@ AgentControlProtocol::parseTransportRequest (
     try
     {
         const auto value = json::parse (body);
-        if (! value.is_object()
-            || ! value.contains ("request_id")
+        if (! value.is_object() || value.size() != 9
+            || ! value.contains ("run_id")
+            || ! value.contains ("command_id")
+            || ! value.contains ("idempotency_key")
             || ! value.contains ("expected_session_id")
+            || ! value.contains ("expected_mode")
             || ! value.contains ("target_mode")
             || ! value.contains ("expected_revision")
-            || ! value["request_id"].is_string()
+            || ! value.contains ("approval_id")
+            || ! value.contains ("action_parameters_hash")
+            || ! value["run_id"].is_string()
+            || ! value["command_id"].is_string()
+            || ! value["idempotency_key"].is_string()
             || ! value["expected_session_id"].is_string()
+            || ! value["expected_mode"].is_string()
             || ! value["target_mode"].is_string()
-            || ! value["expected_revision"].is_number_integer())
+            || ! value["expected_revision"].is_number_integer()
+            || ! value["approval_id"].is_string()
+            || ! value["action_parameters_hash"].is_string())
         {
             return {
                 std::nullopt,
@@ -278,17 +288,29 @@ AgentControlProtocol::parseTransportRequest (
             };
         }
 
-        const auto requestId =
-            value["request_id"].get<std::string>();
+        const auto runId = value["run_id"].get<std::string>();
+        const auto requestId = value["command_id"].get<std::string>();
+        const auto idempotencyKey =
+            value["idempotency_key"].get<std::string>();
         const auto expectedSessionId =
             value["expected_session_id"].get<std::string>();
         const auto target =
             value["target_mode"].get<std::string>();
+        const auto expected =
+            value["expected_mode"].get<std::string>();
         const auto revision =
             value["expected_revision"].get<std::int64_t>();
+        const auto approvalId =
+            value["approval_id"].get<std::string>();
+        const auto actionParametersHash =
+            value["action_parameters_hash"].get<std::string>();
 
-        if (! isSafeIdentifier (requestId)
+        if (! isSafeIdentifier (runId)
+            || ! isSafeIdentifier (requestId)
+            || ! isSafeIdentifier (idempotencyKey)
             || ! isSafeIdentifier (expectedSessionId)
+            || ! isSafeIdentifier (approvalId)
+            || ! isSafeIdentifier (actionParametersHash)
             || revision < 0)
         {
             return {
@@ -312,11 +334,26 @@ AgentControlProtocol::parseTransportRequest (
                 "INVALID_TARGET_MODE"
             };
 
+        AgentObservedMode expectedMode = AgentObservedMode::unknown;
+        if (expected == "IDLE")
+            expectedMode = AgentObservedMode::idle;
+        else if (expected == "ACQUIRE")
+            expectedMode = AgentObservedMode::acquire;
+        else if (expected == "RECORD")
+            expectedMode = AgentObservedMode::record;
+        else
+            return { std::nullopt, {}, "INVALID_EXPECTED_MODE" };
+
         return {
             AgentTransportRequest {
                 requestId,
                 mode,
-                static_cast<std::uint64_t> (revision)
+                static_cast<std::uint64_t> (revision),
+                expectedMode,
+                runId,
+                idempotencyKey,
+                approvalId,
+                actionParametersHash
             },
             expectedSessionId,
             {}

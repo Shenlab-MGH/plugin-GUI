@@ -265,14 +265,28 @@ MainWindow::MainWindow (
 
     const auto agentToken =
         SystemStats::getEnvironmentVariable ("OE_AGENT_TOKEN", "");
+    const auto agentApprovalId =
+        SystemStats::getEnvironmentVariable (
+            "OE_AGENT_APPROVAL_ID", "");
+    if (runtimeOptions.enableAgentMutation
+        && (agentToken.length() < 32
+            || agentApprovalId.isEmpty()
+            || agentApprovalId.length() > 128))
+    {
+        initializationError =
+            "Agent mutation requires a token and a bounded "
+            "OE_AGENT_APPROVAL_ID.";
+        return;
+    }
     if (agentToken.length() >= 32)
     {
         agentServer = std::make_unique<AgentLoopbackServer> (
             controlPanel->getAgentTransportEndpoint(),
             agentToken.toStdString(),
             runtimeOptions.agentPort,
-            false,
-            controlPanel->getAgentExperimentDirectoryEndpoint());
+            runtimeOptions.enableAgentMutation,
+            controlPanel->getAgentExperimentDirectoryEndpoint(),
+            agentApprovalId.toStdString());
         if (! agentServer->start())
         {
             LOGC ("Agent loopback server failed to bind "
