@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "product": "open-ephys-agent",
+  "version": "0.0.1",
+  "tested_source_commit": "5ad5f1df08a87414ea76a435309fc20d3caebbdb",
+  "release_executable_sha256": "7372F47050B2478BD8BE1B5210B300243C1A437C7E79963594FC9D6AB0695823",
+  "platform": "Windows x64",
+  "positive_acceptance": {
+    "window_title_during_test": "Load a Default Configuration",
+    "arguments": [
+      "--state-dir",
+      "D:\\cong\\runtime-state\\open-ephys-agent-v0.0.1-uia-live4",
+      "--no-http",
+      "--agent-port",
+      "38498",
+      "--no-user-plugins",
+      "--agent-uia-readonly"
+    ],
+    "listener": "127.0.0.1:38498",
+    "native_37497_not_owned": true,
+    "root_count": 1,
+    "root_children": [
+      "oe.transport.acquisition",
+      "oe.transport.recording"
+    ],
+    "acquisition": {
+      "value": "OFF",
+      "value_read_only": true,
+      "invoke_available": false,
+      "toggle_available": false
+    },
+    "recording": {
+      "value": "OFF",
+      "value_read_only": true,
+      "invoke_available": false,
+      "toggle_available": false
+    },
+    "read_iterations": 10000,
+    "pre_mode": "IDLE",
+    "post_mode": "IDLE",
+    "pre_revision": 1,
+    "post_revision": 1,
+    "pass": true
+  },
+  "negative_acceptance": {
+    "window_title_during_test": "Load a Default Configuration",
+    "agent_uia_argument_present": false,
+    "agent_automation_ids": [],
+    "listener": "127.0.0.1:38498",
+    "native_37497_not_owned": true,
+    "pass": true
+  },
+  "cleanup": {
+    "remaining_open_ephys_processes": 0,
+    "remaining_target_listeners": 0
+  }
+}

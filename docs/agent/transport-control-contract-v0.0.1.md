@@ -117,20 +117,18 @@ Each descriptor is schema-versioned and declares its semantic control kind,
 required UIA pattern, and whether recording preflight is mandatory. Button
 metadata is populated from this single registry by strong control kind.
 
-The main Open Ephys accessibility tree remains disabled. The registry is only
-the policy and metadata foundation; it is not proof that Windows UI Automation
-can currently discover or invoke these controls.
+The ordinary Open Ephys accessibility tree remains disabled in Agent mode.
+The explicit `--agent-uia-readonly` option exposes one `oe.agent.root` group
+with exactly the two allowlisted transport nodes as direct children. Each node
+implements a read-only ValuePattern backed by the cached authoritative state.
+Neither node exposes InvokePattern or TogglePattern, so UIA cannot mutate the
+transport in v0.0.1.
 
-A Windows provider is acceptable only when it:
-
-1. exposes exactly the allowlisted transport controls;
-2. maps the stable IDs to native UIA `AutomationId`;
-3. exposes controlled Invoke without default TogglePattern bypass;
-4. identifies UIA-originated requests separately from ordinary UI events;
-5. reads the cached authoritative state and forms an explicit target request;
-6. submits through the shared endpoint, mailbox, and coordinator;
-7. performs independent runtime readback;
-8. passes observe-only and controlled Source Sim verification.
+The provider deliberately remains enumerable while an Open Ephys modal dialog
+is open. It uses stable ComponentID-backed native AutomationId values and is
+enabled by the isolated launcher. `Test-AgentAccessibility.ps1` verifies the
+exact hierarchy, read-only patterns, 10,000 repeated reads, and unchanged
+native mode/revision before and after observation.
 
 Signal-chain editing, plugin parameters, recording paths, plugin installation,
 quit, and other controls are outside the v0.0.1 accessibility allowlist.
@@ -157,16 +155,17 @@ quit, and other controls are outside the v0.0.1 accessibility allowlist.
   does not yet include an observation timestamp or prove first-block arrival,
   sustained file growth, disk flush, or writer health; it must not be treated
   as experiment-quality recording evidence.
-- No MCP, named-pipe, or production UIA adapter consumes the endpoint yet.
+- The native UIA adapter is observe-only. No UIA mutation, MCP server, or
+  named-pipe adapter consumes the endpoint yet.
 - A stopped endpoint retains the last observed transport mode as evidence, but
   reports `STOPPED` separately. Remote clients must never interpret the retained
   mode as proof that the application is still online.
 - Session-scoped idempotency tombstones are intentionally retained for the
   process lifetime. A network adapter must impose authentication, request-rate
   limits, ID-size limits, and a defined session restart policy.
-- Full MSVC Release build, CTest, Windows UIA discovery, and Source Sim GUI
-  runtime verification remain blocked until Visual Studio Build Tools is
-  installed.
+- The fork has passed a full MSVC Release build and live Windows UIA discovery
+  in an isolated process. Source Sim acquisition/recording and record-file
+  integrity verification remain pending and are required before research use.
 
 ## In-process HTTP adapter
 
