@@ -11,12 +11,13 @@ address a device. Evidence was generated from committed harnesses at
 Run from the repository root with PowerShell 7:
 
 ```powershell
-py -3.12 -m uv run --frozen --project integrations\mcp python tools\qualification\run_qualification_batch.py --output docs\agent\evidence\channel-c-qualification-2026-07-17.json --force
-pwsh -NoProfile -File tools\windows\Invoke-ChannelCAgentChecks.ps1 -OutputDirectory docs\agent\evidence\channel-c-logs\final
+py -3.12 -m uv run --frozen --project integrations\mcp python tools\qualification\run_qualification_batch.py --output docs\agent\evidence\channel-c-qualification-rerun.json
+pwsh -NoProfile -File tools\windows\Invoke-ChannelCAgentChecks.ps1 -OutputDirectory docs\agent\evidence\channel-c-logs\rerun
 ```
 
-The qualification runner refuses to overwrite without the explicit `--force`
-flag. The AgentChecks wrapper always refuses to overwrite logs or its summary,
+These examples deliberately use new output paths. The qualification runner
+refuses to overwrite without the explicit `--force` flag. The AgentChecks
+wrapper always refuses to overwrite logs or its summary,
 restricts output to `docs\agent\evidence`, and rejects existing Windows
 reparse points along the output path. Use a new evidence subdirectory for a
 new run; do not replace or relabel a failed run.
