@@ -1,0 +1,76 @@
+{
+  "pass": true,
+  "official_commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f",
+  "changed_production_files": 54,
+  "registered_changed_files": 54
+}
+PASS AgentCommandTests
+PASS RuntimeOptionsTests
+PASS AgentStateTests
+PASS AgentAccessibilityStateTests
+PASS ControlPanelCommandRouterTests
+PASS AgentTransportPlannerTests
+PASS TransportAccessibilityRegistryTests
+PASS AgentTransportCoordinatorTests
+PASS AgentTransportMailboxTests
+PASS AgentTransportEndpointTests
+PASS AgentControlProtocolTests
+PASS AgentLoopbackServerTests
+PASS AgentStateSnapshotCacheTests
+PASS AgentExperimentDirectoryTests
+PASS AgentExperimentDirectoryEndpointTests
+PASS AgentRecordingSafetyTests
+PASS AgentRecordingWatchdogTests
+test_audit_log_does_not_store_bearer_token (test_gateway_core.GatewayCoreTests.test_audit_log_does_not_store_bearer_token) ... ok
+test_duplicate_id_is_idempotent_and_conflict_is_rejected (test_gateway_core.GatewayCoreTests.test_duplicate_id_is_idempotent_and_conflict_is_rejected) ... ok
+test_dynamic_safety_is_rechecked_before_mutation (test_gateway_core.GatewayCoreTests.test_dynamic_safety_is_rechecked_before_mutation) ... ok
+test_exposure_gate_rejects_mutation_without_backend_put (test_gateway_core.GatewayCoreTests.test_exposure_gate_rejects_mutation_without_backend_put) ... ok
+test_human_state_change_before_commit_aborts_without_put (test_gateway_core.GatewayCoreTests.test_human_state_change_before_commit_aborts_without_put) ... ok
+test_lost_put_response_uses_readback_without_retry (test_gateway_core.GatewayCoreTests.test_lost_put_response_uses_readback_without_retry) ... ok
+test_lost_put_response_with_wrong_readback_fails_without_retry (test_gateway_core.GatewayCoreTests.test_lost_put_response_with_wrong_readback_fails_without_retry) ... ok
+test_malformed_unhashable_request_returns_structured_rejection (test_gateway_core.GatewayCoreTests.test_malformed_unhashable_request_returns_structured_rejection) ... ok
+test_post_mutation_audit_failure_reaches_terminal_fault (test_gateway_core.GatewayCoreTests.test_post_mutation_audit_failure_reaches_terminal_fault) ... ok
+test_record_preflight_requires_nodes_sync_and_writable_directory (test_gateway_core.GatewayCoreTests.test_record_preflight_requires_nodes_sync_and_writable_directory) ... ok
+test_record_to_idle_verifies_intermediate_acquire (test_gateway_core.GatewayCoreTests.test_record_to_idle_verifies_intermediate_acquire) ... ok
+test_request_id_has_a_strict_size_limit (test_gateway_core.GatewayCoreTests.test_request_id_has_a_strict_size_limit) ... ok
+test_revision_changes_only_when_observed_mode_changes (test_gateway_core.GatewayCoreTests.test_revision_changes_only_when_observed_mode_changes) ... ok
+test_stale_revision_is_rejected (test_gateway_core.GatewayCoreTests.test_stale_revision_is_rejected) ... ok
+test_dashboard_is_available_but_does_not_embed_token (test_http_server.HttpServerTests.test_dashboard_is_available_but_does_not_embed_token) ... ok
+test_requires_bearer_token (test_http_server.HttpServerTests.test_requires_bearer_token) ... ok
+test_status_and_fail_closed_request_are_real_http (test_http_server.HttpServerTests.test_status_and_fail_closed_request_are_real_http) ... ok
+test_backend_url_must_be_loopback_http (test_security.SecurityTests.test_backend_url_must_be_loopback_http) ... ok
+test_firewall_script_is_inspect_only_without_apply (test_security.SecurityTests.test_firewall_script_is_inspect_only_without_apply) ... ok
+test_numeric_windows_firewall_enums_are_recognized (test_security.SecurityTests.test_numeric_windows_firewall_enums_are_recognized) ... ok
+test_probe_failure_is_never_treated_as_safe (test_security.SecurityTests.test_probe_failure_is_never_treated_as_safe) ... ok
+test_simulated_config_detection_is_explicit (test_security.SecurityTests.test_simulated_config_detection_is_explicit) ... ok
+test_wildcard_listener_and_public_allow_fail_closed (test_security.SecurityTests.test_wildcard_listener_and_public_allow_fail_closed) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 1.703s
+
+OK
+........................................................................ [ 18%]
+........................................................................ [ 36%]
+........................................................................ [ 54%]
+........................................................................ [ 72%]
+........................................................................ [ 90%]
+......................................                                   [100%]
+398 passed in 5.69s
+PASS Open Ephys MCP and Skill tests
+PASS transport accessibility source contract
+PASS Windows AutomationId source contract
+PASS Windows UIA verifier source contract
+PASS transport command routing source contract
+PASS transport coordinator integration source contract
+PASS transport mailbox integration source contract
+PASS agent loopback server source contract
+PASS official baseline verifier source contract
+PASS official build wrapper source contract
+PASS build tools installer source contract
+PASS runtime isolation wiring source contract
+PASS isolated runtime launcher source contract
+PASS MCP and Skill packaging source contract
+PASS ControlPanel experiment adapter source contract
+PASS recording safety integration source contract
+PASS preset capability probe source contract
+PASS agent fork local checks
