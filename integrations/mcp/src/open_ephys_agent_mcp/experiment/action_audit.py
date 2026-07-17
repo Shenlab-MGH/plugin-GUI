@@ -132,6 +132,26 @@ class ActionRecord:
     def recompute_hash(self) -> str:
         return hashlib.sha256(_canonical_json(self.content()).encode("utf-8")).hexdigest()
 
+    @classmethod
+    def from_canonical_json(cls, serialized: str) -> "ActionRecord":
+        value = json.loads(serialized)
+        return cls(
+            schema_version=value["schema_version"],
+            event_id=value["event_id"],
+            session_id=value["session_id"],
+            run_id=value["run_id"],
+            sequence=value["sequence"],
+            timestamp_utc=value["timestamp_utc"],
+            monotonic_ns=value["monotonic_ns"],
+            actor=ActionActor(value["actor"]),
+            kind=ActionKind(value["kind"]),
+            correlation_id=value["correlation_id"],
+            causation_id=value["causation_id"],
+            payload=value["payload"],
+            previous_hash=value["previous_hash"],
+            event_hash=value["event_hash"],
+        )
+
 
 class ActionAuditBuilder:
     """Builds one ordered chain; durable persistence is supplied by the caller."""
@@ -142,6 +162,19 @@ class ActionAuditBuilder:
         self.session_id = session_id
         self.run_id = run_id
         self._records: list[ActionRecord] = []
+
+    @classmethod
+    def resume(cls, records: Iterable[ActionRecord]) -> "ActionAuditBuilder":
+        materialized = list(records)
+        if not materialized:
+            raise ValueError("cannot infer identity from an empty audit chain")
+        verify_action_chain(materialized)
+        builder = cls(
+            session_id=materialized[0].session_id,
+            run_id=materialized[0].run_id,
+        )
+        builder._records.extend(materialized)
+        return builder
 
     @property
     def next_sequence(self) -> int:
@@ -268,4 +301,3 @@ def verify_action_chain(
     if unique_violations and raise_on_error:
         raise AuditChainError(",".join(unique_violations))
     return report
-

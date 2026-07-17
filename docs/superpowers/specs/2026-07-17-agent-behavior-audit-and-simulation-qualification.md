@@ -293,10 +293,16 @@ Already present:
 - immutable experiment events and deterministic reducer;
 - initial in-memory `ActionRecord` hash-chain builder and verifier with recursive
   secret redaction, takeover enforcement, and mutation intent/readback checks.
+- a tested single-process SQLite WAL prototype that commits canonical events,
+  resumes the hash chain after restart, rejects detected record tampering,
+  reports unresolved mutation correlations, and stores verified
+  content-addressed artifacts. It is not yet the integrated authoritative
+  multi-producer collector and has no protected checkpoint signature.
 
 Not yet complete:
 
-1. authoritative SQLite WAL collector and multi-producer sequence allocation;
+1. integration and hardening of the SQLite WAL collector, multi-producer
+   sequence allocation, crash-cut recovery, and access control;
 2. DPAPI/CNG-protected checkpoints, artifact CAS, sealing, and offline verifier;
 3. integration of every MCP/native/UIA/human/video/filesystem producer;
 4. crash reconciliation and deterministic reference replay engine;
@@ -309,4 +315,3 @@ Implementation order is durable collector -> reference replay oracle ->
 producer integrations -> UIA/GUI recorder -> video correlation -> large-scale
 qualification. Video does not precede the semantic ledger because it cannot
 provide a reliable replay oracle by itself.
-
