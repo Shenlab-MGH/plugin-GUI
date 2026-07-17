@@ -25,6 +25,7 @@
 #define __MAINWINDOW_H_BA75E17__
 
 #include "../JuceLibraryCode/JuceHeader.h"
+#include "Agent/AgentAccessibilityBridge.h"
 #include "Agent/RuntimeOptions.h"
 #include "Audio/AudioComponent.h"
 #include "Processors/ProcessorGraph/ProcessorGraph.h"
@@ -44,7 +45,7 @@ class MainDocumentWindow : public DocumentWindow
 {
 public:
     /** Constructor */
-    MainDocumentWindow();
+    explicit MainDocumentWindow (bool enableAgentUiaReadOnly = false);
 
     /** Destructor */
     virtual ~MainDocumentWindow() {}
@@ -161,6 +162,10 @@ private:
 
     /** A pointer to the DocumentWindow (only instantiated if running in GUI mode). */
     std::unique_ptr<MainDocumentWindow> documentWindow;
+
+    /** Narrow, read-only Agent accessibility branch. */
+    std::unique_ptr<AgentAccessibilityBridge>
+        agentAccessibilityBridge;
 
     /** A pointer to the CustomLookAndFeel object (only instantiated if running in GUI mode). */
     std::unique_ptr<CustomLookAndFeel> customLookAndFeel;

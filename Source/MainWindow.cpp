@@ -31,7 +31,7 @@
 #include <stdio.h>
 #include <utility>
 
-MainDocumentWindow::MainDocumentWindow()
+MainDocumentWindow::MainDocumentWindow (bool enableAgentUiaReadOnly)
     : DocumentWindow (JUCEApplication::getInstance()->getApplicationName(),
                       Colour (25, 25, 25),
                       DocumentWindow::allButtons,
@@ -45,7 +45,7 @@ MainDocumentWindow::MainDocumentWindow()
     Image titleBarIcon = ImageCache::getFromFile (iconDir.getChildFile ("icon-small.png"));
     setIcon (titleBarIcon);
 
-    setAccessible (false);
+    setAccessible (enableAgentUiaReadOnly);
 }
 
 MainWindow::MainWindow (
@@ -63,7 +63,8 @@ MainWindow::MainWindow (
 
     if (! isConsoleApp)
     {
-        documentWindow = std::make_unique<MainDocumentWindow>();
+        documentWindow = std::make_unique<MainDocumentWindow> (
+            runtimeOptions.enableAgentUiaReadOnly);
 
         documentWindow->setResizable (true, // isResizable
                                       false); // useBottomCornerRisizer -- doesn't work very well
@@ -132,6 +133,17 @@ MainWindow::MainWindow (
         documentWindow->setContentOwned (new UIComponent (this, processorGraph.get(), audioComponent.get(), controlPanel.get(), consoleViewer, customLookAndFeel.get()), true);
 
         UIComponent* ui = (UIComponent*) documentWindow->getContentComponent();
+
+        if (runtimeOptions.enableAgentUiaReadOnly)
+        {
+            ui->setAccessible (false);
+            agentAccessibilityBridge =
+                std::make_unique<AgentAccessibilityBridge> (
+                    controlPanel->getAgentTransportEndpoint());
+            documentWindow->addAndMakeVisible (
+                agentAccessibilityBridge.get());
+            agentAccessibilityBridge->setBounds (0, 0, 1, 1);
+        }
 
 #if JUCE_MAC
         MenuBarModel::setMacMainMenu (ui);

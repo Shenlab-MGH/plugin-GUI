@@ -9,6 +9,12 @@ CONTROL_PANEL = (ROOT / "Source" / "UI" / "ControlPanel.cpp").read_text(
 REGISTRY = (
     ROOT / "Source" / "Agent" / "TransportAccessibilityRegistry.cpp"
 ).read_text(encoding="utf-8")
+BRIDGE_PATH = ROOT / "Source" / "Agent" / "AgentAccessibilityBridge.cpp"
+BRIDGE = (
+    BRIDGE_PATH.read_text(encoding="utf-8")
+    if BRIDGE_PATH.exists()
+    else ""
+)
 
 
 def require(fragment: str, source: str, message: str) -> None:
@@ -17,11 +23,23 @@ def require(fragment: str, source: str, message: str) -> None:
 
 
 def main() -> None:
-    require(
-        "setAccessible (false);",
-        MAIN_WINDOW,
-        "The unaudited full GUI accessibility tree must remain disabled until an allowlist provider exists",
-    )
+    require('"oe.agent.root"', BRIDGE,
+            "The bridge must expose one stable root")
+    require("AccessibilityActions {}", BRIDGE,
+            "The bridge must expose no actions")
+    require("AccessibilityTextValueInterface", BRIDGE,
+            "Transport nodes must provide a read-only value")
+    require("isReadOnly() const override", BRIDGE,
+            "The UIA value must reject writes")
+    require("enableAgentUiaReadOnly", MAIN_WINDOW,
+            "The branch must be explicitly enabled")
+    require("ui->setAccessible (false)", MAIN_WINDOW,
+            "The ordinary editor subtree must remain hidden")
+
+    if BRIDGE.count("addAndMakeVisible") != 2:
+        raise AssertionError(
+            "The Agent accessibility root must expose exactly two children"
+        )
 
     expected_registry_metadata = {
         '"oe.transport.acquisition"':

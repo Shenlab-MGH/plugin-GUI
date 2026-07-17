@@ -2,6 +2,8 @@
 add_sources(open-ephys
     AgentControlProtocol.h
     AgentControlProtocol.cpp
+    AgentAccessibilityBridge.h
+    AgentAccessibilityBridge.cpp
     AgentLoopbackServer.h
     AgentLoopbackServer.cpp
     AgentCommand.h
