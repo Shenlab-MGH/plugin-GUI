@@ -37,6 +37,7 @@ RuntimeOptionsParseResult RuntimeOptions::parse (
     bool sawHeadless = false;
     bool sawNoHttp = false;
     bool sawNoUserPlugins = false;
+    bool sawAgentUiaReadOnly = false;
     bool sawStateDirectory = false;
     bool sawAgentPort = false;
 
@@ -72,6 +73,15 @@ RuntimeOptionsParseResult RuntimeOptions::parse (
                     "--no-user-plugins"))
                 return result;
             result.options.disableUserPlugins = true;
+        }
+        else if (argument == "--agent-uia-readonly")
+        {
+            if (! consumeOnce (
+                    sawAgentUiaReadOnly,
+                    result,
+                    "--agent-uia-readonly"))
+                return result;
+            result.options.enableAgentUiaReadOnly = true;
         }
         else if (argument == "--state-dir")
         {

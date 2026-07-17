@@ -27,6 +27,8 @@ int main()
              "Native HTTP must retain official default behavior");
     require (! defaults.options.disableUserPlugins,
              "User plugins must retain official default behavior");
+    require (! defaults.options.enableAgentUiaReadOnly,
+             "Agent UIA must remain disabled by default");
     require (defaults.options.agentPort == 37498,
              "Agent loopback must retain its default port");
     require (! defaults.options.agentPortExplicit,
@@ -61,6 +63,13 @@ int main()
                  == "D:\\configs\\source-sim.xml",
              "The configuration file must be preserved");
 
+    const auto uia = RuntimeOptions::parse ({
+        "--agent-uia-readonly"
+    });
+    require (uia.ok(), "The read-only UIA option must parse");
+    require (uia.options.enableAgentUiaReadOnly,
+             "The read-only UIA option must be preserved");
+
     require (! RuntimeOptions::parse ({ "--state-dir" }).ok(),
              "A missing state directory must fail closed");
     require (! RuntimeOptions::parse ({
@@ -83,6 +92,11 @@ int main()
                    "--no-http"
                }).ok(),
              "Duplicate isolation switches must fail closed");
+    require (! RuntimeOptions::parse ({
+                   "--agent-uia-readonly",
+                   "--agent-uia-readonly"
+               }).ok(),
+             "Duplicate UIA switches must fail closed");
     require (! RuntimeOptions::parse ({
                    "--unknown-isolation-switch"
                }).ok(),

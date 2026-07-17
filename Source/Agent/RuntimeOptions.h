@@ -17,6 +17,7 @@ struct RuntimeIsolationOptions
     bool headless = false;
     bool disableNativeHttp = false;
     bool disableUserPlugins = false;
+    bool enableAgentUiaReadOnly = false;
     bool agentPortExplicit = false;
     int agentPort = 37498;
     std::string stateDirectory;

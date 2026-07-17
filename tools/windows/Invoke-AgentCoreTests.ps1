@@ -53,6 +53,11 @@ Invoke-CompileAndRun -Name 'AgentCommandTests' -Sources @(
     'Tests\AgentCore\AgentCommandTests.cpp'
 )
 
+Invoke-CompileAndRun -Name 'RuntimeOptionsTests' -Sources @(
+    'Tests\AgentCore\RuntimeOptionsTests.cpp',
+    'Source\Agent\RuntimeOptions.cpp'
+)
+
 Invoke-CompileAndRun -Name 'AgentStateTests' -Sources @(
     'Tests\AgentCore\AgentStateTests.cpp',
     'Source\Agent\AgentState.cpp'
