@@ -85,6 +85,67 @@ def test_reports_unresolved_mutation_for_reconciliation_after_restart(tmp_path: 
         assert store.pending_mutation_correlations() == ("start-part-4",)
 
 
+def test_reused_correlation_does_not_hide_a_newer_pending_mutation(
+    tmp_path: Path,
+) -> None:
+    with SqliteActionAuditStore(
+        tmp_path / "audit.db", session_id="session-1", run_id="run-1"
+    ) as store:
+        completed_mutation(store)
+        append(
+            store,
+            ActionKind.TOOL_INTENT,
+            correlation_id="start-part-1",
+            payload={"tool": "oe_start_part", "mutating": True},
+        )
+
+        assert store.pending_mutation_correlations() == ("start-part-1",)
+
+
+def test_gui_intent_requires_gui_result_and_fresh_readback(tmp_path: Path) -> None:
+    with SqliteActionAuditStore(
+        tmp_path / "audit.db", session_id="session-1", run_id="run-1"
+    ) as store:
+        append(
+            store,
+            ActionKind.GUI_ACTION_INTENT,
+            correlation_id="click-record",
+            payload={"mutating": True},
+        )
+        append(
+            store,
+            ActionKind.NATIVE_READBACK,
+            actor=ActionActor.OPEN_EPHYS,
+            correlation_id="click-record",
+            payload={"recording_state": "ACTIVE"},
+        )
+        append(
+            store,
+            ActionKind.TOOL_RESULT,
+            actor=ActionActor.MCP,
+            correlation_id="click-record",
+            payload={"status": "CONFIRMED", "mutating": True},
+        )
+
+        assert store.pending_mutation_correlations() == ("click-record",)
+
+
+def test_store_rejects_nonincreasing_monotonic_time_without_changing_db(
+    tmp_path: Path,
+) -> None:
+    with SqliteActionAuditStore(
+        tmp_path / "audit.db", session_id="session-1", run_id="run-1"
+    ) as store:
+        first = append(store, ActionKind.OBSERVATION, monotonic_ns=100)
+        with pytest.raises(AuditChainError, match="MONOTONIC_TIME_REGRESSION"):
+            append(store, ActionKind.DECISION, monotonic_ns=100)
+
+        assert store.event_count == 1
+        assert store.records() == [first]
+        second = append(store, ActionKind.DECISION, monotonic_ns=101)
+        assert second.sequence == 2
+
+
 def test_content_addressed_artifact_is_atomic_and_verified(tmp_path: Path) -> None:
     artifacts = ContentAddressedArtifacts(tmp_path / "artifacts")
     reference = artifacts.put_bytes(b"frame-data", media_type="image/png")
@@ -190,6 +251,31 @@ def test_seal_requires_caller_key_of_at_least_32_bytes(tmp_path: Path) -> None:
                 hmac_key=b"too-short",
                 key_id="key-1",
                 created_utc="2026-07-17T01:02:03Z",
+            )
+
+
+@pytest.mark.parametrize(
+    "created_utc",
+    [
+        "2026-07-17T01:02:03+00:00",
+        "2026-07-17t01:02:03Z",
+        "2026-07-17T01:02:03.120Z",
+        "not-a-time",
+    ],
+)
+def test_seal_rejects_noncanonical_rfc3339_utc(
+    tmp_path: Path, created_utc: str
+) -> None:
+    with SqliteActionAuditStore(
+        tmp_path / "audit.db", session_id="session-1", run_id="run-1"
+    ) as store:
+        append(store, ActionKind.OBSERVATION)
+        with pytest.raises(ValueError, match="canonical RFC3339 UTC"):
+            store.seal(
+                tmp_path / "audit.seal.json",
+                hmac_key=b"k" * 32,
+                key_id="key-1",
+                created_utc=created_utc,
             )
 
 
@@ -331,3 +417,28 @@ def test_verify_seal_rejects_noncanonical_json_even_when_fields_are_unchanged(
                 hmac_key=key,
                 records=store.records(),
             )
+
+
+def test_atomic_seal_write_fails_closed_when_durable_replace_fails(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "audit.seal.json"
+    destination.write_text("original", encoding="utf-8")
+
+    def fail_replace(source: Path, target: Path) -> None:
+        assert source.is_file()
+        assert target == destination
+        raise OSError("injected durable replacement failure")
+
+    with pytest.raises(
+        durable_audit.AuditSealError,
+        match="SEAL_DURABLE_REPLACE_FAILED",
+    ):
+        durable_audit._write_atomic_fsynced(
+            destination,
+            "replacement",
+            durable_replace=fail_replace,
+        )
+
+    assert destination.read_text(encoding="utf-8") == "original"
+    assert not list(tmp_path.glob(".audit.seal.json.*.tmp"))

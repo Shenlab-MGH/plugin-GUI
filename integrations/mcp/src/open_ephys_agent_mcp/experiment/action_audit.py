@@ -194,6 +194,8 @@ class ActionAuditBuilder:
     ) -> ActionRecord:
         if not correlation_id:
             raise ValueError("correlation_id is required")
+        if self._records and monotonic_ns <= self._records[-1].monotonic_ns:
+            raise AuditChainError("MONOTONIC_TIME_REGRESSION")
         sequence = self.next_sequence
         previous_hash = self._records[-1].event_hash if self._records else GENESIS_HASH
         record = ActionRecord(

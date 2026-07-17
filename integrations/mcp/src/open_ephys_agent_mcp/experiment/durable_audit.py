@@ -11,8 +11,9 @@ import sqlite3
 import tempfile
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .action_audit import (
     ActionActor,
@@ -35,6 +36,10 @@ class AuditSealError(ValueError):
 
 SEAL_SCHEMA_VERSION = "oe-agent-audit-seal/v0.0.1"
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_CANONICAL_UTC_PATTERN = re.compile(
+    r"^(?P<seconds>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})"
+    r"(?P<fraction>\.\d{1,9})?Z$"
+)
 _SEAL_FIELDS = frozenset(
     {
         "artifact_root",
@@ -65,6 +70,22 @@ def _validated_hmac_key(hmac_key: bytes) -> bytes:
     if len(hmac_key) < 32:
         raise ValueError("hmac_key must contain at least 32 bytes")
     return hmac_key
+
+
+def _validated_created_utc(created_utc: str) -> str:
+    if not isinstance(created_utc, str):
+        raise ValueError("created_utc must be canonical RFC3339 UTC")
+    match = _CANONICAL_UTC_PATTERN.fullmatch(created_utc)
+    if match is None:
+        raise ValueError("created_utc must be canonical RFC3339 UTC")
+    fraction = match.group("fraction")
+    if fraction is not None and fraction.endswith("0"):
+        raise ValueError("created_utc must be canonical RFC3339 UTC")
+    try:
+        datetime.strptime(match.group("seconds"), "%Y-%m-%dT%H:%M:%S")
+    except ValueError as error:
+        raise ValueError("created_utc must be canonical RFC3339 UTC") from error
+    return created_utc
 
 
 def _artifact_root(artifacts: Iterable["ArtifactReference"]) -> str:
@@ -130,8 +151,10 @@ class AuditSeal:
                 value[field]
             ):
                 raise AuditSealError(f"SEAL_{field.upper()}_INVALID")
-        if not isinstance(value["created_utc"], str) or not value["created_utc"]:
-            raise AuditSealError("SEAL_CREATED_UTC_INVALID")
+        try:
+            _validated_created_utc(value["created_utc"])
+        except ValueError as error:
+            raise AuditSealError("SEAL_CREATED_UTC_INVALID") from error
         if not isinstance(value["key_id"], str) or not value["key_id"]:
             raise AuditSealError("SEAL_KEY_ID_INVALID")
         return cls(**value)
@@ -145,29 +168,66 @@ def _seal_hmac(content: Mapping[str, Any], hmac_key: bytes) -> str:
     ).hexdigest()
 
 
-def _write_atomic_fsynced(destination: Path, content: str) -> None:
+DurableReplace = Callable[[Path, Path], None]
+
+
+def _windows_durable_replace(source: Path, destination: Path) -> None:
+    import ctypes
+
+    move_file_replace_existing = 0x1
+    move_file_write_through = 0x8
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    move_file = kernel32.MoveFileExW
+    move_file.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    move_file.restype = ctypes.c_int
+    if not move_file(
+        str(source),
+        str(destination),
+        move_file_replace_existing | move_file_write_through,
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _posix_durable_replace(source: Path, destination: Path) -> None:
+    os.replace(source, destination)
+    directory_descriptor = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+
+
+def _default_durable_replace(source: Path, destination: Path) -> None:
+    if os.name == "nt":
+        _windows_durable_replace(source, destination)
+    else:
+        _posix_durable_replace(source, destination)
+
+
+def _write_atomic_fsynced(
+    destination: Path,
+    content: str,
+    *,
+    durable_replace: DurableReplace | None = None,
+) -> None:
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
     )
     try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(content.encode("utf-8"))
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_name, destination)
         try:
-            directory_descriptor = os.open(destination.parent, os.O_RDONLY)
-        except OSError:
-            directory_descriptor = None
-        if directory_descriptor is not None:
-            try:
-                os.fsync(directory_descriptor)
-            except OSError:
-                pass
-            finally:
-                os.close(directory_descriptor)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content.encode("utf-8"))
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError as error:
+            raise AuditSealError("SEAL_FILE_FSYNC_FAILED") from error
+        replace = durable_replace or _default_durable_replace
+        try:
+            replace(Path(temporary_name), destination)
+        except OSError as error:
+            raise AuditSealError("SEAL_DURABLE_REPLACE_FAILED") from error
     finally:
         try:
             os.unlink(temporary_name)
@@ -384,25 +444,35 @@ class SqliteActionAuditStore:
     def pending_mutation_correlations(self) -> tuple[str, ...]:
         records = self.records()
         pending: list[str] = []
-        correlations = dict.fromkeys(
-            record.correlation_id
-            for record in records
-            if record.kind in {ActionKind.TOOL_INTENT, ActionKind.GUI_ACTION_INTENT}
-            and record.payload.get("mutating") is True
-        )
-        for correlation_id in correlations:
-            correlated = [
-                record for record in records if record.correlation_id == correlation_id
-            ]
-            terminal = any(
-                record.kind in {ActionKind.TOOL_RESULT, ActionKind.GUI_ACTION_RESULT}
-                for record in correlated
+        intent_kinds = {ActionKind.TOOL_INTENT, ActionKind.GUI_ACTION_INTENT}
+        result_kind = {
+            ActionKind.TOOL_INTENT: ActionKind.TOOL_RESULT,
+            ActionKind.GUI_ACTION_INTENT: ActionKind.GUI_ACTION_RESULT,
+        }
+        mutating_intents = [
+            (index, record)
+            for index, record in enumerate(records)
+            if record.kind in intent_kinds and record.payload.get("mutating") is True
+        ]
+        for intent_offset, (start, intent) in enumerate(mutating_intents):
+            end = len(records)
+            for later_start, later_intent in mutating_intents[intent_offset + 1 :]:
+                if later_intent.correlation_id == intent.correlation_id:
+                    end = later_start
+                    break
+            lifecycle = records[start + 1 : end]
+            has_result = any(
+                record.correlation_id == intent.correlation_id
+                and record.kind is result_kind[intent.kind]
+                for record in lifecycle
             )
-            readback = any(
-                record.kind is ActionKind.NATIVE_READBACK for record in correlated
+            has_readback = any(
+                record.correlation_id == intent.correlation_id
+                and record.kind is ActionKind.NATIVE_READBACK
+                for record in lifecycle
             )
-            if not terminal or not readback:
-                pending.append(correlation_id)
+            if (not has_result or not has_readback) and intent.correlation_id not in pending:
+                pending.append(intent.correlation_id)
         return tuple(pending)
 
     def seal(
@@ -417,8 +487,7 @@ class SqliteActionAuditStore:
         key = _validated_hmac_key(hmac_key)
         if not key_id:
             raise ValueError("key_id is required")
-        if not created_utc:
-            raise ValueError("created_utc is required")
+        created_utc = _validated_created_utc(created_utc)
         materialized_artifacts = tuple(artifacts)
         with self._lock:
             records = self.records()

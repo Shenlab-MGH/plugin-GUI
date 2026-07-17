@@ -23,13 +23,23 @@ Commit target: `agent/v0.0.1`
   terminal-head changes, artifact changes, and HMAC changes.
 - Sealing fails closed for an empty chain or any unresolved mutation.
 - Equal or decreasing monotonic timestamps after the first event fail chain
-  verification.
+  verification and are rejected before the in-memory builder or SQLite chain
+  advances.
+- Pending mutation reconciliation is scoped to each intent lifecycle: tool and
+  GUI intents require their matching result type plus a native readback after
+  that specific intent. Reusing a correlation ID cannot hide a later pending
+  mutation.
+- Seal creation timestamps use a canonical RFC3339 UTC `Z` representation.
+- Seal replacement uses a flushed temporary file plus Windows
+  `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`; POSIX uses
+  atomic replacement followed by mandatory directory fsync. Durability errors
+  fail closed instead of being ignored.
 
 ## Verified
 
 ```text
-test_action_audit.py + test_durable_audit.py: 25 passed
-complete MCP suite: 90 passed
+test_action_audit.py + test_durable_audit.py: 34 passed
+complete MCP suite: 99 passed
 Skill test suite: 10 passed
 skill-creator quick_validate.py: Skill is valid!
 ```

@@ -215,3 +215,35 @@ def test_rejects_equal_monotonic_time_after_the_first_event() -> None:
 
     assert not report.valid
     assert "MONOTONIC_TIME_REGRESSION" in report.violation_codes
+
+
+def test_builder_rejects_nonincreasing_monotonic_time_without_advancing() -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    first = event(
+        builder,
+        ActionKind.OBSERVATION,
+        actor=ActionActor.AGENT,
+        correlation_id="inspect",
+        payload={"mode": "IDLE"},
+    )
+
+    with pytest.raises(AuditChainError, match="MONOTONIC_TIME_REGRESSION"):
+        builder.append(
+            kind=ActionKind.DECISION,
+            timestamp_utc="2026-07-17T00:00:02Z",
+            monotonic_ns=first.monotonic_ns,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect",
+            payload={"decision": "NO_ACTION"},
+        )
+
+    assert builder.next_sequence == 2
+    second = builder.append(
+        kind=ActionKind.DECISION,
+        timestamp_utc="2026-07-17T00:00:03Z",
+        monotonic_ns=first.monotonic_ns + 1,
+        actor=ActionActor.AGENT,
+        correlation_id="inspect",
+        payload={"decision": "NO_ACTION"},
+    )
+    assert second.sequence == 2
