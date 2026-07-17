@@ -4,6 +4,13 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
+& pwsh -NoProfile -File (
+    Join-Path $PSScriptRoot 'Test-OfficialDiffCoverage.ps1'
+) -Repository $repoRoot
+if ($LASTEXITCODE -ne 0) {
+    throw 'Official difference coverage check failed.'
+}
+
 & (Join-Path $PSScriptRoot 'Invoke-AgentCoreTests.ps1')
 if ($LASTEXITCODE -ne 0) {
     throw "Agent core tests failed with exit code $LASTEXITCODE"

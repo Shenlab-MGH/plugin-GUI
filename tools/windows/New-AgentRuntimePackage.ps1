@@ -11,6 +11,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+& pwsh -NoProfile -File (
+    Join-Path $PSScriptRoot 'Test-OfficialDiffCoverage.ps1'
+) -Repository $repoRoot
+if ($LASTEXITCODE -ne 0) {
+    throw 'Runtime packaging blocked by undisclosed official differences.'
+}
 
 $release = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
 $executable = Join-Path $release 'open-ephys.exe'
@@ -37,7 +44,6 @@ if (-not (Test-Path -LiteralPath $mcpExecutablePath -PathType Leaf) -or
         'open-ephys-agent-mcp.exe') {
     throw 'McpExecutable must identify open-ephys-agent-mcp.exe.'
 }
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $mcpLock = Join-Path $repoRoot 'integrations\mcp\uv.lock'
 $mcpProject = Join-Path $repoRoot 'integrations\mcp\pyproject.toml'
 $skillSource = Join-Path $repoRoot (
@@ -67,6 +73,8 @@ Copy-Item -LiteralPath (
 Copy-Item -LiteralPath (
     Join-Path $PSScriptRoot 'New-OpenEphysAgentMcpConfig.ps1'
 ) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'OFFICIAL-DIFF.md') `
+    -Destination $destinationPath -Force
 
 $mcpDestination = Join-Path $destinationPath 'mcp'
 New-Item -ItemType Directory -Path $mcpDestination | Out-Null
