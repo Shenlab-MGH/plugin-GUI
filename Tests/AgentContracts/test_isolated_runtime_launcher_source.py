@@ -79,6 +79,8 @@ def main() -> None:
             "Verifier must inspect the actual command line",
         "Get-NetTCPConnection":
             "Verifier must inspect listeners owned by the runtime",
+        "Select-Object LocalAddress, LocalPort, OwningProcess, State":
+            "Verifier output must exclude verbose CIM internals",
         "LocalPort -eq 37497":
             "Verifier must prove native HTTP is not owned",
         "LocalAddress -in @('127.0.0.1', '::1')":

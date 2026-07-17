@@ -17,7 +17,8 @@ $commandLine = (
 ).CommandLine
 $listeners = @(
     Get-NetTCPConnection -State Listen -OwningProcess $ProcessId `
-        -ErrorAction SilentlyContinue
+        -ErrorAction SilentlyContinue |
+        Select-Object LocalAddress, LocalPort, OwningProcess, State
 )
 $agentListeners = @(
     $listeners | Where-Object LocalPort -eq $AgentPort
