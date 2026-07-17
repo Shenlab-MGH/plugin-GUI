@@ -449,3 +449,44 @@ def test_cross_kind_intent_starts_a_new_correlation_lifecycle() -> None:
         "MISSING_MUTATION_INTENT",
         "MISSING_AUTHORITATIVE_READBACK",
     )
+
+
+@pytest.mark.parametrize(
+    ("result_kind", "intent_kind"),
+    [
+        (ActionKind.TOOL_RESULT, ActionKind.TOOL_INTENT),
+        (ActionKind.GUI_ACTION_RESULT, ActionKind.GUI_ACTION_INTENT),
+    ],
+)
+def test_confirmed_mutation_rejects_current_nonmutating_intent(
+    result_kind: ActionKind, intent_kind: ActionKind
+) -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    records = [
+        event(
+            builder,
+            intent_kind,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect-then-mutate",
+            payload={"mutating": False},
+        ),
+        event(
+            builder,
+            ActionKind.NATIVE_READBACK,
+            actor=ActionActor.OPEN_EPHYS,
+            correlation_id="inspect-then-mutate",
+            payload={"mode": "IDLE"},
+        ),
+        event(
+            builder,
+            result_kind,
+            actor=ActionActor.MCP,
+            correlation_id="inspect-then-mutate",
+            payload={"mutating": True, "status": "CONFIRMED"},
+        ),
+    ]
+
+    report = verify_action_chain(records, raise_on_error=False)
+
+    assert not report.valid
+    assert report.violation_codes == ("NON_MUTATING_INTENT",)

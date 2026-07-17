@@ -33,6 +33,9 @@ Commit target: `agent/v0.0.1`
   followed by native readback, followed by the result in the same correlation
   lifecycle. A readback before intent or evidence from a completed lifecycle
   cannot authorize a later result that reuses the correlation ID.
+- The matching current lifecycle intent must itself declare
+  `mutating: true`; a read-only intent followed by readback cannot authorize a
+  confirmed mutating result and produces `NON_MUTATING_INTENT`.
 - Pending mutation reconciliation is scoped to each intent lifecycle: tool and
   GUI intents require their matching result type plus a native readback after
   that specific intent. Every later tool or GUI intent with the same
@@ -52,8 +55,8 @@ Commit target: `agent/v0.0.1`
 ## Verified
 
 ```text
-focused action-audit + qualification suite: 284 passed
-complete MCP and Skill suite: 383 passed
+focused action-audit + qualification suite: 286 passed
+complete MCP and Skill suite: 385 passed
 skill-creator quick_validate.py: Skill is valid!
 git diff --check: passed
 ```

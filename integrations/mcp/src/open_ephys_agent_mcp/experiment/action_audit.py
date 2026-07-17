@@ -230,7 +230,7 @@ class ActionAuditReport:
 def _semantic_violations(records: list[ActionRecord]) -> list[str]:
     violations: list[str] = []
     human_has_control = False
-    active_mutations: dict[tuple[str, ActionKind], bool] = {}
+    active_mutations: dict[tuple[str, ActionKind], tuple[bool, bool]] = {}
     result_to_intent = {
         ActionKind.TOOL_RESULT: ActionKind.TOOL_INTENT,
         ActionKind.GUI_ACTION_RESULT: ActionKind.GUI_ACTION_INTENT,
@@ -257,21 +257,27 @@ def _semantic_violations(records: list[ActionRecord]) -> list[str]:
             for key in tuple(active_mutations):
                 if key[0] == record.correlation_id:
                     active_mutations.pop(key)
-            active_mutations[(record.correlation_id, record.kind)] = False
+            active_mutations[(record.correlation_id, record.kind)] = (
+                record.payload.get("mutating") is True,
+                False,
+            )
             continue
 
         if record.kind is ActionKind.NATIVE_READBACK:
             for key in tuple(active_mutations):
                 if key[0] == record.correlation_id:
-                    active_mutations[key] = True
+                    intent_is_mutating, _ = active_mutations[key]
+                    active_mutations[key] = (intent_is_mutating, True)
             continue
 
         intent_kind = result_to_intent.get(record.kind)
         if intent_kind is None:
             continue
         lifecycle_key = (record.correlation_id, intent_kind)
-        has_intent = lifecycle_key in active_mutations
-        has_readback = active_mutations.get(lifecycle_key, False)
+        lifecycle = active_mutations.get(lifecycle_key)
+        has_intent = lifecycle is not None
+        intent_is_mutating = lifecycle[0] if lifecycle is not None else False
+        has_readback = lifecycle[1] if lifecycle is not None else False
         is_confirmed_mutation = (
             record.payload.get("mutating") is True
             and record.payload.get("status") == "CONFIRMED"
@@ -279,6 +285,8 @@ def _semantic_violations(records: list[ActionRecord]) -> list[str]:
         if is_confirmed_mutation:
             if not has_intent:
                 violations.append("MISSING_MUTATION_INTENT")
+            elif not intent_is_mutating:
+                violations.append("NON_MUTATING_INTENT")
             if not has_readback:
                 violations.append("MISSING_AUTHORITATIVE_READBACK")
         active_mutations.pop(lifecycle_key, None)
