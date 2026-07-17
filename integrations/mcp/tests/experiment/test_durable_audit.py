@@ -130,6 +130,85 @@ def test_gui_intent_requires_gui_result_and_fresh_readback(tmp_path: Path) -> No
         assert store.pending_mutation_correlations() == ("click-record",)
 
 
+def test_nonmutating_tool_intent_starts_a_new_lifecycle_boundary(
+    tmp_path: Path,
+) -> None:
+    with SqliteActionAuditStore(
+        tmp_path / "audit.db", session_id="session-1", run_id="run-1"
+    ) as store:
+        append(
+            store,
+            ActionKind.TOOL_INTENT,
+            correlation_id="shared-correlation",
+            payload={"operation": "START_RECORDING", "mutating": True},
+        )
+        append(
+            store,
+            ActionKind.TOOL_INTENT,
+            correlation_id="shared-correlation",
+            payload={"operation": "GET_STATUS", "mutating": False},
+        )
+        append(
+            store,
+            ActionKind.NATIVE_READBACK,
+            actor=ActionActor.OPEN_EPHYS,
+            correlation_id="shared-correlation",
+            payload={"recording_state": "ACTIVE"},
+        )
+        append(
+            store,
+            ActionKind.TOOL_RESULT,
+            actor=ActionActor.MCP,
+            correlation_id="shared-correlation",
+            payload={"status": "CONFIRMED"},
+        )
+
+        assert store.pending_mutation_correlations() == ("shared-correlation",)
+        with pytest.raises(durable_audit.AuditSealError, match="PENDING_MUTATION"):
+            store.seal(
+                tmp_path / "audit.seal.json",
+                hmac_key=b"k" * 32,
+                key_id="key-1",
+                created_utc="2026-07-17T01:02:03Z",
+            )
+
+
+def test_tool_and_gui_intents_share_the_same_correlation_lifecycle_boundary(
+    tmp_path: Path,
+) -> None:
+    with SqliteActionAuditStore(
+        tmp_path / "audit.db", session_id="session-1", run_id="run-1"
+    ) as store:
+        append(
+            store,
+            ActionKind.GUI_ACTION_INTENT,
+            correlation_id="mixed-correlation",
+            payload={"operation": "CLICK_RECORD", "mutating": True},
+        )
+        append(
+            store,
+            ActionKind.TOOL_INTENT,
+            correlation_id="mixed-correlation",
+            payload={"operation": "GET_STATUS", "mutating": False},
+        )
+        append(
+            store,
+            ActionKind.NATIVE_READBACK,
+            actor=ActionActor.OPEN_EPHYS,
+            correlation_id="mixed-correlation",
+            payload={"recording_state": "ACTIVE"},
+        )
+        append(
+            store,
+            ActionKind.GUI_ACTION_RESULT,
+            actor=ActionActor.UIA,
+            correlation_id="mixed-correlation",
+            payload={"status": "CONFIRMED"},
+        )
+
+        assert store.pending_mutation_correlations() == ("mixed-correlation",)
+
+
 def test_store_rejects_nonincreasing_monotonic_time_without_changing_db(
     tmp_path: Path,
 ) -> None:

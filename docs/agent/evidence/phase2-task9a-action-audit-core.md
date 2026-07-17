@@ -27,8 +27,9 @@ Commit target: `agent/v0.0.1`
   advances.
 - Pending mutation reconciliation is scoped to each intent lifecycle: tool and
   GUI intents require their matching result type plus a native readback after
-  that specific intent. Reusing a correlation ID cannot hide a later pending
-  mutation.
+  that specific intent. Every later tool or GUI intent with the same
+  correlation ID, including a non-mutating or cross-kind intent, starts a new
+  lifecycle boundary and cannot supply evidence for the earlier mutation.
 - Seal creation timestamps use a canonical RFC3339 UTC `Z` representation.
 - Seal replacement uses a flushed temporary file plus Windows
   `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`; POSIX uses
@@ -38,8 +39,8 @@ Commit target: `agent/v0.0.1`
 ## Verified
 
 ```text
-test_action_audit.py + test_durable_audit.py: 34 passed
-complete MCP suite: 99 passed
+test_action_audit.py + test_durable_audit.py: 36 passed
+complete MCP suite: 101 passed
 Skill test suite: 10 passed
 skill-creator quick_validate.py: Skill is valid!
 ```

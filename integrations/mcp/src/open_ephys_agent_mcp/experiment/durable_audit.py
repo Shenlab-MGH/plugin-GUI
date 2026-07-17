@@ -449,14 +449,16 @@ class SqliteActionAuditStore:
             ActionKind.TOOL_INTENT: ActionKind.TOOL_RESULT,
             ActionKind.GUI_ACTION_INTENT: ActionKind.GUI_ACTION_RESULT,
         }
-        mutating_intents = [
+        all_intents = [
             (index, record)
             for index, record in enumerate(records)
-            if record.kind in intent_kinds and record.payload.get("mutating") is True
+            if record.kind in intent_kinds
         ]
-        for intent_offset, (start, intent) in enumerate(mutating_intents):
+        for intent_offset, (start, intent) in enumerate(all_intents):
+            if intent.payload.get("mutating") is not True:
+                continue
             end = len(records)
-            for later_start, later_intent in mutating_intents[intent_offset + 1 :]:
+            for later_start, later_intent in all_intents[intent_offset + 1 :]:
                 if later_intent.correlation_id == intent.correlation_id:
                     end = later_start
                     break
