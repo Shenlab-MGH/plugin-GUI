@@ -282,7 +282,7 @@ def verify_action_chain(
         if record.recompute_hash() != record.event_hash:
             violations.append("EVENT_HASH_MISMATCH")
             break
-        if record.monotonic_ns < previous_monotonic_ns:
+        if expected_sequence > 1 and record.monotonic_ns <= previous_monotonic_ns:
             violations.append("MONOTONIC_TIME_REGRESSION")
             break
         previous_hash = record.event_hash

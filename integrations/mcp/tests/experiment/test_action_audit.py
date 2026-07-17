@@ -186,3 +186,32 @@ def test_requires_intent_and_authoritative_readback_for_mutating_result() -> Non
     assert "MISSING_MUTATION_INTENT" in report.violation_codes
     assert "MISSING_AUTHORITATIVE_READBACK" in report.violation_codes
 
+
+def test_rejects_equal_monotonic_time_after_the_first_event() -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    records = [
+        event(
+            builder,
+            ActionKind.OBSERVATION,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect",
+            payload={"mode": "IDLE"},
+        ),
+        event(
+            builder,
+            ActionKind.DECISION,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect",
+            payload={"decision": "NO_ACTION"},
+        ),
+    ]
+    records[1] = replace(
+        records[1],
+        monotonic_ns=records[0].monotonic_ns,
+    )
+    records[1] = replace(records[1], event_hash=records[1].recompute_hash())
+
+    report = verify_action_chain(records, raise_on_error=False)
+
+    assert not report.valid
+    assert "MONOTONIC_TIME_REGRESSION" in report.violation_codes
