@@ -5,6 +5,8 @@ add_sources(open-ephys
     AgentLoopbackServer.h
     AgentLoopbackServer.cpp
     AgentCommand.h
+    AgentAccessibilityState.h
+    AgentAccessibilityState.cpp
     AgentState.h
     AgentState.cpp
     AgentStateSnapshotCache.h
