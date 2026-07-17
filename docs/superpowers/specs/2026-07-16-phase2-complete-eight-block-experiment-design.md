@@ -8,6 +8,19 @@ human supervision. The run consists of eight sequential Neuropixels 2.0
 shanks simultaneously and is stored in its own Open Ephys top-level recording
 directory.
 
+The non-negotiable product goal is an end-to-end complete eight-recording run,
+called the laboratory's "complete 8-shank recording" workflow. The system must
+prepare, execute, monitor, stop, bind, validate, and report all eight planned
+recordings in order. A single-part demo, a reusable loop that has not completed
+all eight parts on the real device, a recording button wrapper, a directory
+creator, an SOP, or a Source Sim-only result does not satisfy Phase 2.
+
+Human authorization, preset confirmation when the unchanged PXI plugin cannot
+provide authoritative readback, scientific QC review, and manual takeover are
+parts of the complete supervised workflow. They do not permit the system to
+skip a part, infer success, or end without a run-level result for every planned
+recording.
+
 Phase 2 extends the Open Ephys GUI v1.0.2 fork. It does not fork or modify the
 installed Neuropixels-PXI 1.0.3-API10 plugin, imec Neuropix API 3.70.3, device
 drivers, firmware, calibration data, Record Engine, Binary format, sampling,
@@ -371,6 +384,11 @@ to execute a pre-authorized safety stop.
 
 ## 15. Acceptance program
 
+Phase 2 acceptance is atomic at the run level. It cannot be awarded from eight
+independent partial demonstrations or from one successful part repeated only
+in unit tests. One supervised run must traverse the planned sequence and
+produce the complete correlated evidence set for all eight recordings.
+
 ### 15.1 Automated unit and integration tests
 
 Tests cover every legal and illegal state transition, stale revisions,
@@ -417,6 +435,8 @@ and signal evidence. Any failure returns the design to experimental status.
 
 Run the actual parameterized duration plan. Completion requires:
 
+- one end-to-end workflow invocation reaches a terminal run-level decision for
+  all eight planned recordings without silently abandoning or skipping a part;
 - exactly eight scientist-approved `PART_PASSED` results;
 - eight unique planned top-level directories and zero auto-suffixed names;
 - exact preset evidence or scoped human confirmation for every part;
@@ -429,7 +449,8 @@ Run the actual parameterized duration plan. Completion requires:
 - explicit human review and release approval.
 
 Only after this acceptance may the version become `0.1.0` and be described as
-capable of completing the laboratory's actual experiment.
+capable of completing the laboratory's actual complete 8-shank recording
+experiment.
 
 ## 16. MCP and Skill boundary
 
