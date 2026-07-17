@@ -182,6 +182,7 @@ build/
 #15. Agent fork local build directories
 /Build-agent-core/
 /Build-clang*/
+/Build-runtime/
 
 #16. Python Agent Gateway caches
 __pycache__/
