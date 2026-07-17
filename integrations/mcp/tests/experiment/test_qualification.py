@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import fields
+
+import pytest
+
 from open_ephys_agent_mcp.experiment.qualification import (
     QualificationEvidence,
     QualificationProfile,
@@ -113,3 +117,97 @@ def test_missing_manifest_or_first_failure_record_is_no_go() -> None:
     assert "MISSING_EVIDENCE_MANIFEST_HASH" in report.failure_codes
     assert "INCOMPLETE_FIRST_FAILURE_RECORDS" in report.failure_codes
 
+
+VOLUME_FIELDS = tuple(
+    field.name
+    for field in fields(QualificationProfile)
+    if field.name != "profile_id"
+)
+ZERO_FIELDS = (
+    "intact_replay_mismatches",
+    "undetected_corruptions",
+    "duplicate_scientific_mutations",
+    "false_complete_reports",
+    "takeover_mutations",
+    "blind_non_idempotent_retries",
+    "coordinate_fallback_mutations",
+    "plaintext_secret_leaks",
+    "failed_clean_runs",
+    "flaky_retries",
+)
+INVALID_NUMBERS = (True, 1.0, float("nan"), float("inf"), "1", -1)
+
+
+@pytest.mark.parametrize("field", VOLUME_FIELDS)
+@pytest.mark.parametrize("value", INVALID_NUMBERS)
+def test_invalid_profile_threshold_is_a_stable_no_go(
+    field: str, value: object
+) -> None:
+    profile = release_profile_v0_0_1()
+    invalid = QualificationProfile(**{**profile.__dict__, field: value})
+
+    report = evaluate_qualification(invalid, passing_evidence(profile))
+
+    assert report.decision == "NO_GO"
+    assert f"INVALID_PROFILE_{field.upper()}" in report.failure_codes
+
+
+@pytest.mark.parametrize("field", VOLUME_FIELDS)
+@pytest.mark.parametrize("value", INVALID_NUMBERS)
+def test_invalid_evidence_volume_is_a_stable_no_go(
+    field: str, value: object
+) -> None:
+    profile = release_profile_v0_0_1()
+    evidence = passing_evidence(profile)
+    invalid = QualificationEvidence(**{**evidence.__dict__, field: value})
+
+    report = evaluate_qualification(profile, invalid)
+
+    assert report.decision == "NO_GO"
+    assert f"INVALID_EVIDENCE_{field.upper()}" in report.failure_codes
+
+
+@pytest.mark.parametrize("field", ZERO_FIELDS)
+@pytest.mark.parametrize("value", INVALID_NUMBERS)
+def test_invalid_evidence_zero_counter_is_a_stable_no_go(
+    field: str, value: object
+) -> None:
+    profile = release_profile_v0_0_1()
+    evidence = passing_evidence(profile)
+    invalid = QualificationEvidence(**{**evidence.__dict__, field: value})
+
+    report = evaluate_qualification(profile, invalid)
+
+    assert report.decision == "NO_GO"
+    assert f"INVALID_EVIDENCE_{field.upper()}" in report.failure_codes
+
+
+@pytest.mark.parametrize("value", (1, 0, "true", None))
+def test_first_failure_completeness_requires_an_actual_bool(value: object) -> None:
+    profile = release_profile_v0_0_1()
+    evidence = passing_evidence(profile)
+    invalid = QualificationEvidence(
+        **{**evidence.__dict__, "first_failure_records_complete": value}
+    )
+
+    report = evaluate_qualification(profile, invalid)
+
+    assert report.decision == "NO_GO"
+    assert "INVALID_FIRST_FAILURE_RECORDS_COMPLETE" in report.failure_codes
+
+
+@pytest.mark.parametrize(
+    "value",
+    (None, 123, "", "a" * 63, "a" * 65, "A" * 64, "g" * 64),
+)
+def test_manifest_hash_requires_exact_lowercase_sha256(value: object) -> None:
+    profile = release_profile_v0_0_1()
+    evidence = passing_evidence(profile)
+    invalid = QualificationEvidence(
+        **{**evidence.__dict__, "evidence_manifest_hash": value}
+    )
+
+    report = evaluate_qualification(profile, invalid)
+
+    assert report.decision == "NO_GO"
+    assert "MISSING_EVIDENCE_MANIFEST_HASH" in report.failure_codes

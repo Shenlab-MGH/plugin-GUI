@@ -22,6 +22,23 @@ def event(builder: ActionAuditBuilder, kind: ActionKind, **kwargs: object):
     )
 
 
+def rechain(records):
+    """Recompute a self-consistent chain after deliberate test mutations."""
+    rebuilt = []
+    previous_hash = "0" * 64
+    for sequence, record in enumerate(records, start=1):
+        updated = replace(
+            record,
+            sequence=sequence,
+            previous_hash=previous_hash,
+            event_hash="",
+        )
+        updated = replace(updated, event_hash=updated.recompute_hash())
+        rebuilt.append(updated)
+        previous_hash = updated.event_hash
+    return rebuilt
+
+
 def test_builds_and_verifies_a_complete_correlated_mutation_trace() -> None:
     builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
     records = [
@@ -247,3 +264,188 @@ def test_builder_rejects_nonincreasing_monotonic_time_without_advancing() -> Non
         payload={"decision": "NO_ACTION"},
     )
     assert second.sequence == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "violation"),
+    [
+        ("schema_version", "oe-agent-action-audit/future", "SCHEMA_MISMATCH"),
+        ("session_id", "session-2", "SESSION_MISMATCH"),
+        ("run_id", "run-2", "RUN_MISMATCH"),
+    ],
+)
+def test_rejects_mixed_chain_identity(
+    field: str, value: str, violation: str
+) -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    records = [
+        event(
+            builder,
+            ActionKind.OBSERVATION,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect",
+            payload={"mode": "IDLE"},
+        ),
+        event(
+            builder,
+            ActionKind.DECISION,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect",
+            payload={"decision": "NO_ACTION"},
+        ),
+    ]
+    records[1] = replace(records[1], **{field: value})
+
+    report = verify_action_chain(rechain(records), raise_on_error=False)
+
+    assert not report.valid
+    assert report.violation_codes == (violation,)
+
+
+def test_rejects_duplicate_event_id_in_an_otherwise_valid_chain() -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    records = [
+        event(
+            builder,
+            ActionKind.OBSERVATION,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect",
+            payload={"mode": "IDLE"},
+        ),
+        event(
+            builder,
+            ActionKind.DECISION,
+            actor=ActionActor.AGENT,
+            correlation_id="inspect",
+            payload={"decision": "NO_ACTION"},
+        ),
+    ]
+    records[1] = replace(records[1], event_id=records[0].event_id)
+
+    report = verify_action_chain(rechain(records), raise_on_error=False)
+
+    assert not report.valid
+    assert report.violation_codes == ("DUPLICATE_EVENT_ID",)
+
+
+@pytest.mark.parametrize(
+    ("result_kind", "intent_kind"),
+    [
+        (ActionKind.TOOL_RESULT, ActionKind.TOOL_INTENT),
+        (ActionKind.GUI_ACTION_RESULT, ActionKind.GUI_ACTION_INTENT),
+    ],
+)
+def test_confirmed_mutation_requires_readback_after_matching_intent(
+    result_kind: ActionKind, intent_kind: ActionKind
+) -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    records = [
+        event(
+            builder,
+            ActionKind.NATIVE_READBACK,
+            actor=ActionActor.OPEN_EPHYS,
+            correlation_id="start",
+            payload={"mode": "IDLE"},
+        ),
+        event(
+            builder,
+            intent_kind,
+            actor=ActionActor.AGENT,
+            correlation_id="start",
+            payload={"mutating": True},
+        ),
+        event(
+            builder,
+            result_kind,
+            actor=ActionActor.MCP,
+            correlation_id="start",
+            payload={"mutating": True, "status": "CONFIRMED"},
+        ),
+    ]
+
+    report = verify_action_chain(records, raise_on_error=False)
+
+    assert not report.valid
+    assert report.violation_codes == ("MISSING_AUTHORITATIVE_READBACK",)
+
+
+@pytest.mark.parametrize(
+    ("result_kind", "intent_kind"),
+    [
+        (ActionKind.TOOL_RESULT, ActionKind.TOOL_INTENT),
+        (ActionKind.GUI_ACTION_RESULT, ActionKind.GUI_ACTION_INTENT),
+    ],
+)
+def test_old_completed_lifecycle_cannot_satisfy_reused_correlation(
+    result_kind: ActionKind, intent_kind: ActionKind
+) -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    records = []
+    for kind, actor in (
+        (intent_kind, ActionActor.AGENT),
+        (ActionKind.NATIVE_READBACK, ActionActor.OPEN_EPHYS),
+        (result_kind, ActionActor.MCP),
+        (intent_kind, ActionActor.AGENT),
+        (result_kind, ActionActor.MCP),
+    ):
+        payload = (
+            {"mutating": True, "status": "CONFIRMED"}
+            if kind is result_kind
+            else {"mutating": True}
+        )
+        records.append(
+            event(
+                builder,
+                kind,
+                actor=actor,
+                correlation_id="reused",
+                payload=payload,
+            )
+        )
+
+    report = verify_action_chain(records, raise_on_error=False)
+
+    assert not report.valid
+    assert report.violation_codes == ("MISSING_AUTHORITATIVE_READBACK",)
+
+
+def test_cross_kind_intent_starts_a_new_correlation_lifecycle() -> None:
+    builder = ActionAuditBuilder(session_id="session-1", run_id="run-1")
+    records = [
+        event(
+            builder,
+            ActionKind.GUI_ACTION_INTENT,
+            actor=ActionActor.AGENT,
+            correlation_id="shared",
+            payload={"mutating": True},
+        ),
+        event(
+            builder,
+            ActionKind.NATIVE_READBACK,
+            actor=ActionActor.OPEN_EPHYS,
+            correlation_id="shared",
+            payload={"mode": "RECORD"},
+        ),
+        event(
+            builder,
+            ActionKind.TOOL_INTENT,
+            actor=ActionActor.AGENT,
+            correlation_id="shared",
+            payload={"mutating": False},
+        ),
+        event(
+            builder,
+            ActionKind.GUI_ACTION_RESULT,
+            actor=ActionActor.UIA,
+            correlation_id="shared",
+            payload={"mutating": True, "status": "CONFIRMED"},
+        ),
+    ]
+
+    report = verify_action_chain(records, raise_on_error=False)
+
+    assert not report.valid
+    assert report.violation_codes == (
+        "MISSING_MUTATION_INTENT",
+        "MISSING_AUTHORITATIVE_READBACK",
+    )

@@ -230,7 +230,12 @@ class ActionAuditReport:
 def _semantic_violations(records: list[ActionRecord]) -> list[str]:
     violations: list[str] = []
     human_has_control = False
-    for index, record in enumerate(records):
+    active_mutations: dict[tuple[str, ActionKind], bool] = {}
+    result_to_intent = {
+        ActionKind.TOOL_RESULT: ActionKind.TOOL_INTENT,
+        ActionKind.GUI_ACTION_RESULT: ActionKind.GUI_ACTION_INTENT,
+    }
+    for record in records:
         if record.kind is ActionKind.HUMAN_TAKEOVER:
             human_has_control = True
             continue
@@ -248,21 +253,35 @@ def _semantic_violations(records: list[ActionRecord]) -> list[str]:
         }:
             violations.append("AGENT_ACTION_DURING_HUMAN_TAKEOVER")
 
+        if record.kind in {ActionKind.TOOL_INTENT, ActionKind.GUI_ACTION_INTENT}:
+            for key in tuple(active_mutations):
+                if key[0] == record.correlation_id:
+                    active_mutations.pop(key)
+            active_mutations[(record.correlation_id, record.kind)] = False
+            continue
+
+        if record.kind is ActionKind.NATIVE_READBACK:
+            for key in tuple(active_mutations):
+                if key[0] == record.correlation_id:
+                    active_mutations[key] = True
+            continue
+
+        intent_kind = result_to_intent.get(record.kind)
+        if intent_kind is None:
+            continue
+        lifecycle_key = (record.correlation_id, intent_kind)
+        has_intent = lifecycle_key in active_mutations
+        has_readback = active_mutations.get(lifecycle_key, False)
         is_confirmed_mutation = (
-            record.kind is ActionKind.TOOL_RESULT
-            and record.payload.get("mutating") is True
+            record.payload.get("mutating") is True
             and record.payload.get("status") == "CONFIRMED"
         )
-        if not is_confirmed_mutation:
-            continue
-        preceding = records[:index]
-        correlated = [
-            item for item in preceding if item.correlation_id == record.correlation_id
-        ]
-        if not any(item.kind is ActionKind.TOOL_INTENT for item in correlated):
-            violations.append("MISSING_MUTATION_INTENT")
-        if not any(item.kind is ActionKind.NATIVE_READBACK for item in correlated):
-            violations.append("MISSING_AUTHORITATIVE_READBACK")
+        if is_confirmed_mutation:
+            if not has_intent:
+                violations.append("MISSING_MUTATION_INTENT")
+            if not has_readback:
+                violations.append("MISSING_AUTHORITATIVE_READBACK")
+        active_mutations.pop(lifecycle_key, None)
     return violations
 
 
@@ -273,8 +292,24 @@ def verify_action_chain(
     violations: list[str] = []
     previous_hash = GENESIS_HASH
     previous_monotonic_ns = -1
+    expected_session_id = materialized[0].session_id if materialized else None
+    expected_run_id = materialized[0].run_id if materialized else None
+    event_ids: set[str] = set()
 
     for expected_sequence, record in enumerate(materialized, start=1):
+        if record.schema_version != SCHEMA_VERSION:
+            violations.append("SCHEMA_MISMATCH")
+            break
+        if record.session_id != expected_session_id:
+            violations.append("SESSION_MISMATCH")
+            break
+        if record.run_id != expected_run_id:
+            violations.append("RUN_MISMATCH")
+            break
+        if record.event_id in event_ids:
+            violations.append("DUPLICATE_EVENT_ID")
+            break
+        event_ids.add(record.event_id)
         if record.sequence != expected_sequence:
             violations.append("SEQUENCE_GAP")
             break

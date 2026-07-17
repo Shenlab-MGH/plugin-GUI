@@ -25,6 +25,14 @@ Commit target: `agent/v0.0.1`
 - Equal or decreasing monotonic timestamps after the first event fail chain
   verification and are rejected before the in-memory builder or SQLite chain
   advances.
+- Chain verification requires the exact v0.0.1 schema across every event,
+  stable session and run identity, and globally unique event IDs. Violations
+  produce `SCHEMA_MISMATCH`, `SESSION_MISMATCH`, `RUN_MISMATCH`, or
+  `DUPLICATE_EVENT_ID` without accepting a self-consistently rehashed chain.
+- Confirmed mutating tool and GUI results require their matching intent,
+  followed by native readback, followed by the result in the same correlation
+  lifecycle. A readback before intent or evidence from a completed lifecycle
+  cannot authorize a later result that reuses the correlation ID.
 - Pending mutation reconciliation is scoped to each intent lifecycle: tool and
   GUI intents require their matching result type plus a native readback after
   that specific intent. Every later tool or GUI intent with the same
@@ -35,14 +43,19 @@ Commit target: `agent/v0.0.1`
   `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`; POSIX uses
   atomic replacement followed by mandatory directory fsync. Durability errors
   fail closed instead of being ignored.
+- Qualification thresholds and evidence counters accept only non-negative
+  built-in integers; booleans, floats, NaN, infinity, strings, and negative
+  values produce stable fail-closed codes instead of bypassing gates or
+  raising comparison errors. First-failure completeness requires a built-in
+  boolean, and manifest evidence requires an exact lowercase 64-hex SHA-256.
 
 ## Verified
 
 ```text
-test_action_audit.py + test_durable_audit.py: 36 passed
-complete MCP suite: 101 passed
-Skill test suite: 10 passed
+focused action-audit + qualification suite: 284 passed
+complete MCP and Skill suite: 383 passed
 skill-creator quick_validate.py: Skill is valid!
+git diff --check: passed
 ```
 
 ## Explicitly not yet claimed

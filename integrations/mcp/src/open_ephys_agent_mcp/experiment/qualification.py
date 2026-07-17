@@ -126,18 +126,32 @@ def evaluate_qualification(
 ) -> QualificationReport:
     failures: list[str] = []
     for field, code in _VOLUME_FIELDS.items():
-        if getattr(evidence, field) < getattr(profile, field):
+        required = getattr(profile, field)
+        observed = getattr(evidence, field)
+        profile_is_valid = type(required) is int and required >= 0
+        evidence_is_valid = type(observed) is int and observed >= 0
+        if not profile_is_valid:
+            failures.append(f"INVALID_PROFILE_{field.upper()}")
+        if not evidence_is_valid:
+            failures.append(f"INVALID_EVIDENCE_{field.upper()}")
+        if profile_is_valid and evidence_is_valid and observed < required:
             failures.append(code)
     for field, code in _ZERO_FIELDS.items():
-        if getattr(evidence, field) != 0:
+        observed = getattr(evidence, field)
+        if type(observed) is not int or observed < 0:
+            failures.append(f"INVALID_EVIDENCE_{field.upper()}")
+        elif observed != 0:
             failures.append(code)
-    if not re.fullmatch(r"[0-9a-f]{64}", evidence.evidence_manifest_hash):
+    if not isinstance(evidence.evidence_manifest_hash, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", evidence.evidence_manifest_hash
+    ):
         failures.append("MISSING_EVIDENCE_MANIFEST_HASH")
-    if not evidence.first_failure_records_complete:
+    if type(evidence.first_failure_records_complete) is not bool:
+        failures.append("INVALID_FIRST_FAILURE_RECORDS_COMPLETE")
+    elif not evidence.first_failure_records_complete:
         failures.append("INCOMPLETE_FIRST_FAILURE_RECORDS")
     return QualificationReport(
         profile_id=profile.profile_id,
         decision="PASS" if not failures else "NO_GO",
         failure_codes=tuple(failures),
     )
-
