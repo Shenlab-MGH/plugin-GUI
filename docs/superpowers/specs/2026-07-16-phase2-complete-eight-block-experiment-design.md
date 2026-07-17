@@ -384,6 +384,12 @@ to execute a pre-authorized safety stop.
 
 ## 15. Acceptance program
 
+The detailed Agent behavior ledger, realistic simulation scale, fault matrix,
+and non-negotiable metrics are defined by
+`2026-07-17-agent-behavior-audit-and-simulation-qualification.md`. That document
+is a binding release gate, not optional test guidance. Section 15.7 cannot pass
+when either the scientific evidence chain or Agent behavior chain is incomplete.
+
 Phase 2 acceptance is atomic at the run level. It cannot be awarded from eight
 independent partial demonstrations or from one successful part repeated only
 in unit tests. One supervised run must traverse the planned sequence and

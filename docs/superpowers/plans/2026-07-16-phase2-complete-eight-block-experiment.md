@@ -574,6 +574,54 @@ git add integrations/mcp
 git commit -m "feat: bind and verify native recording artifacts"
 ```
 
+### Task 9A: Durable Agent behavior ledger and replay authority
+
+**Files:**
+- Create: `integrations/mcp/src/open_ephys_agent_mcp/experiment/action_audit.py`
+- Create: `integrations/mcp/tests/experiment/test_action_audit.py`
+- Create: `tools/agent_audit/`
+- Create: `Tests/AgentAudit/`
+- Create: `docs/agent/action-audit-v0.0.1.md`
+- Modify: `tools/agent_gateway/open_ephys_agent_gateway/audit.py`
+
+**Interfaces:**
+- Produces a unified, versioned action envelope and tamper-evident chain.
+- Produces a single-writer SQLite WAL collector, artifact CAS, checkpoint/seal,
+  offline verifier, and dry-run reference replay.
+- Correlates Agent, human, MCP, native endpoint, UIA, GUI input, video, and
+  filesystem evidence without storing secrets or raw neural data.
+
+- [x] **Step 1: Add failing action-envelope and chain-verifier tests**
+
+Cover correlation, hash tampering, sequence gaps, recursive secret redaction,
+human takeover, and mutation intent/readback completeness.
+
+- [x] **Step 2: Implement the minimal in-memory builder and verifier**
+
+This core is not a durable operational ledger and must not be described as one.
+
+- [ ] **Step 3: TDD the authoritative SQLite WAL collector and artifact CAS**
+
+Intent commit must precede mutation. Add crash cuts for write/flush/fsync/ack,
+single-writer sequence allocation, DPAPI/CNG checkpoint protection, atomic
+artifact publication, sealing, and offline verification.
+
+- [ ] **Step 4: Integrate producers and enforce fail-closed mutation**
+
+Connect the coordinator, gateway, native endpoint, UIA recorder, human takeover,
+window capture, and artifact binder. Audit degradation blocks new mutation but
+does not block an authorized emergency stop.
+
+- [ ] **Step 5: Implement deterministic dry-run replay**
+
+Compile only fully verified semantic correlations. Do not replay coordinates,
+secrets, approvals, PIDs, HWNDs, or hidden model reasoning.
+
+- [ ] **Step 6: Execute the Agent-audit PR gate and commit**
+
+Run the exact PR scale in the binding qualification specification and retain
+seeded evidence.
+
 ### Task 10: Experiment coordinator, exact MCP tools, and Skill
 
 **Files:**
@@ -702,13 +750,63 @@ git add tools Tests docs OFFICIAL-DIFF.md
 git commit -m "test: prove complete eight-part experiment workflow"
 ```
 
+### Task 12: Large-scale realistic simulation qualification
+
+**Files:**
+- Create: `tools/windows/Invoke-AgentQualification.ps1`
+- Create: `integrations/mcp/src/open_ephys_agent_mcp/experiment/qualification.py`
+- Create: `integrations/mcp/tests/experiment/test_qualification.py`
+- Create: `docs/agent/qualification-profile-v0.0.1.json`
+- Create: `docs/agent/evidence/qualification/`
+
+- [ ] **Step 1: Encode the binding PR/nightly/release profiles**
+
+Profiles may be changed only through reviewed version control. Counts can be
+raised; lowering a release gate requires explicit scientist approval and a
+documented risk decision.
+
+- [ ] **Step 2: TDD the independent reference model and report evaluator**
+
+The evaluator refuses PASS for insufficient sample count, missing seed/hash,
+flaky rerun, behavior-chain gap, artifact mismatch, unsafe transition, secret
+leak, incomplete part, or missing real-process evidence.
+
+- [ ] **Step 3: Execute PR and nightly synthetic/fault gates**
+
+Retain the first failure and deterministic reproduction command. Do not hide a
+failure with retries.
+
+- [ ] **Step 4: Execute real-process Source Sim gates**
+
+Run 30 accelerated and 10 nominal-duration complete eight-part cycles using
+the packaged fork, real Windows message thread, real Binary engine, actual
+isolated disk output, and pinned official file loader.
+
+- [ ] **Step 5: Execute durability and capture soak gates**
+
+Require a 24-hour journal/replay soak, four-hour window capture soak, 100
+collector/replayer restarts, and zero silent evidence loss.
+
+- [ ] **Step 6: Execute supervised real-device qualification**
+
+Requires three separate authorized, consecutive 8/8 qualification runs and
+scientist review. This step cannot be simulated or self-approved by the Agent.
+
+- [ ] **Step 7: Seal and review qualification evidence**
+
+Produce one signed report covering executable/config/plugin hashes, all seeds,
+first-failure records, behavior-ledger terminal hashes, artifact roots, per-part
+QC, and explicit human approval.
+
 ## Execution order and release gates
 
 Tasks execute in order. Tasks 1-4 may run without Open Ephys. Task 5 permits
 only IDLE directory tests. Task 6 first permits Source Sim acquisition and
 recording. Task 7 does not mutate the official PXI plugin. Tasks 8-10 remain
-experimental until the Source Sim and fault matrix pass. Task 11 real-device
-steps require separate human authorization at each gate.
+experimental until the Source Sim and fault matrix pass. Task 11 and Task 12
+real-device steps require separate human authorization at each gate. The
+binding qualification specification must pass in addition to Task 11; a single
+successful demonstration never substitutes for the required population tests.
 
 No implementation checkpoint, demo, or partial package changes the final goal:
 one supervised, end-to-end, complete eight-recording experiment with eight

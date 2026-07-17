@@ -1,0 +1,271 @@
+"""Tamper-evident, replayable records for Agent and human actions."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Iterable, Mapping
+
+
+SCHEMA_VERSION = "oe-agent-action-audit/v0.0.1"
+GENESIS_HASH = "0" * 64
+
+_SECRET_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "authorization",
+        "bearer_token",
+        "cookie",
+        "password",
+        "refresh_token",
+        "secret",
+        "set-cookie",
+        "token",
+    }
+)
+_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+_QUERY_SECRET_PATTERN = re.compile(
+    r"(?i)([?&](?:access_token|api_key|authorization|token)=)[^&#\s]+"
+)
+
+
+class ActionActor(str, Enum):
+    AGENT = "AGENT"
+    HUMAN = "HUMAN"
+    MCP = "MCP"
+    OPEN_EPHYS = "OPEN_EPHYS"
+    SYSTEM = "SYSTEM"
+    UIA = "UIA"
+    RECORDER = "RECORDER"
+
+
+class ActionKind(str, Enum):
+    OBSERVATION = "OBSERVATION"
+    DECISION = "DECISION"
+    TOOL_INTENT = "TOOL_INTENT"
+    TOOL_RESULT = "TOOL_RESULT"
+    NATIVE_REQUEST = "NATIVE_REQUEST"
+    NATIVE_READBACK = "NATIVE_READBACK"
+    UIA_SNAPSHOT = "UIA_SNAPSHOT"
+    GUI_ACTION_INTENT = "GUI_ACTION_INTENT"
+    GUI_ACTION_RESULT = "GUI_ACTION_RESULT"
+    VIDEO_SEGMENT = "VIDEO_SEGMENT"
+    HUMAN_APPROVAL = "HUMAN_APPROVAL"
+    HUMAN_TAKEOVER = "HUMAN_TAKEOVER"
+    HUMAN_RESUME = "HUMAN_RESUME"
+    ARTIFACT_BOUND = "ARTIFACT_BOUND"
+    ERROR = "ERROR"
+
+
+class AuditChainError(ValueError):
+    """Raised when a stored behavior trace cannot be trusted."""
+
+
+def _redact(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): (
+                "[REDACTED]"
+                if str(key).lower() in _SECRET_KEYS
+                else _redact(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact(item) for item in value]
+    if isinstance(value, str):
+        value = _BEARER_PATTERN.sub("Bearer [REDACTED]", value)
+        return _QUERY_SECRET_PATTERN.sub(r"\1[REDACTED]", value)
+    return value
+
+
+def _canonical_json(value: Mapping[str, Any]) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+@dataclass(frozen=True)
+class ActionRecord:
+    schema_version: str
+    event_id: str
+    session_id: str
+    run_id: str | None
+    sequence: int
+    timestamp_utc: str
+    monotonic_ns: int
+    actor: ActionActor
+    kind: ActionKind
+    correlation_id: str
+    causation_id: str | None
+    payload: Mapping[str, Any]
+    previous_hash: str
+    event_hash: str
+
+    def content(self) -> dict[str, Any]:
+        return {
+            "actor": self.actor.value,
+            "causation_id": self.causation_id,
+            "correlation_id": self.correlation_id,
+            "event_id": self.event_id,
+            "kind": self.kind.value,
+            "monotonic_ns": self.monotonic_ns,
+            "payload": self.payload,
+            "previous_hash": self.previous_hash,
+            "run_id": self.run_id,
+            "schema_version": self.schema_version,
+            "sequence": self.sequence,
+            "session_id": self.session_id,
+            "timestamp_utc": self.timestamp_utc,
+        }
+
+    def canonical_json(self) -> str:
+        return _canonical_json({**self.content(), "event_hash": self.event_hash})
+
+    def recompute_hash(self) -> str:
+        return hashlib.sha256(_canonical_json(self.content()).encode("utf-8")).hexdigest()
+
+
+class ActionAuditBuilder:
+    """Builds one ordered chain; durable persistence is supplied by the caller."""
+
+    def __init__(self, *, session_id: str, run_id: str | None = None):
+        if not session_id:
+            raise ValueError("session_id is required")
+        self.session_id = session_id
+        self.run_id = run_id
+        self._records: list[ActionRecord] = []
+
+    @property
+    def next_sequence(self) -> int:
+        return len(self._records) + 1
+
+    def append(
+        self,
+        *,
+        kind: ActionKind,
+        timestamp_utc: str,
+        monotonic_ns: int,
+        actor: ActionActor,
+        correlation_id: str,
+        payload: Mapping[str, Any],
+        causation_id: str | None = None,
+        event_id: str | None = None,
+    ) -> ActionRecord:
+        if not correlation_id:
+            raise ValueError("correlation_id is required")
+        sequence = self.next_sequence
+        previous_hash = self._records[-1].event_hash if self._records else GENESIS_HASH
+        record = ActionRecord(
+            schema_version=SCHEMA_VERSION,
+            event_id=event_id or f"{self.session_id}:{sequence:08d}",
+            session_id=self.session_id,
+            run_id=self.run_id,
+            sequence=sequence,
+            timestamp_utc=timestamp_utc,
+            monotonic_ns=monotonic_ns,
+            actor=actor,
+            kind=kind,
+            correlation_id=correlation_id,
+            causation_id=causation_id,
+            payload=_redact(payload),
+            previous_hash=previous_hash,
+            event_hash="",
+        )
+        record = ActionRecord(**{**record.__dict__, "event_hash": record.recompute_hash()})
+        self._records.append(record)
+        return record
+
+
+@dataclass(frozen=True)
+class ActionAuditReport:
+    valid: bool
+    event_count: int
+    terminal_hash: str
+    violation_codes: tuple[str, ...]
+
+
+def _semantic_violations(records: list[ActionRecord]) -> list[str]:
+    violations: list[str] = []
+    human_has_control = False
+    for index, record in enumerate(records):
+        if record.kind is ActionKind.HUMAN_TAKEOVER:
+            human_has_control = True
+            continue
+        if record.kind is ActionKind.HUMAN_RESUME:
+            if not record.payload.get("approval_id") or not record.payload.get(
+                "fresh_snapshot_id"
+            ):
+                violations.append("UNBOUND_HUMAN_RESUME")
+            else:
+                human_has_control = False
+            continue
+        if human_has_control and record.actor is ActionActor.AGENT and record.kind in {
+            ActionKind.TOOL_INTENT,
+            ActionKind.GUI_ACTION_INTENT,
+        }:
+            violations.append("AGENT_ACTION_DURING_HUMAN_TAKEOVER")
+
+        is_confirmed_mutation = (
+            record.kind is ActionKind.TOOL_RESULT
+            and record.payload.get("mutating") is True
+            and record.payload.get("status") == "CONFIRMED"
+        )
+        if not is_confirmed_mutation:
+            continue
+        preceding = records[:index]
+        correlated = [
+            item for item in preceding if item.correlation_id == record.correlation_id
+        ]
+        if not any(item.kind is ActionKind.TOOL_INTENT for item in correlated):
+            violations.append("MISSING_MUTATION_INTENT")
+        if not any(item.kind is ActionKind.NATIVE_READBACK for item in correlated):
+            violations.append("MISSING_AUTHORITATIVE_READBACK")
+    return violations
+
+
+def verify_action_chain(
+    records: Iterable[ActionRecord], *, raise_on_error: bool = True
+) -> ActionAuditReport:
+    materialized = list(records)
+    violations: list[str] = []
+    previous_hash = GENESIS_HASH
+    previous_monotonic_ns = -1
+
+    for expected_sequence, record in enumerate(materialized, start=1):
+        if record.sequence != expected_sequence:
+            violations.append("SEQUENCE_GAP")
+            break
+        if record.previous_hash != previous_hash:
+            violations.append("PREVIOUS_HASH_MISMATCH")
+            break
+        if record.recompute_hash() != record.event_hash:
+            violations.append("EVENT_HASH_MISMATCH")
+            break
+        if record.monotonic_ns < previous_monotonic_ns:
+            violations.append("MONOTONIC_TIME_REGRESSION")
+            break
+        previous_hash = record.event_hash
+        previous_monotonic_ns = record.monotonic_ns
+
+    if not violations:
+        violations.extend(_semantic_violations(materialized))
+
+    unique_violations = tuple(dict.fromkeys(violations))
+    report = ActionAuditReport(
+        valid=not unique_violations,
+        event_count=len(materialized),
+        terminal_hash=materialized[-1].event_hash if materialized else GENESIS_HASH,
+        violation_codes=unique_violations,
+    )
+    if unique_violations and raise_on_error:
+        raise AuditChainError(",".join(unique_violations))
+    return report
+
