@@ -39,6 +39,9 @@ $checks = [ordered]@{
     user_plugins_locked_off_argument = (
         $commandLine -like '*--no-user-plugins*'
     )
+    agent_uia_readonly_argument = (
+        $commandLine -match '(?:^|\s)--agent-uia-readonly(?:\s|$)'
+    )
     agent_port_argument = (
         $commandLine -like "*--agent-port*$AgentPort*"
     )

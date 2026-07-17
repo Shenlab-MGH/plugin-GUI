@@ -33,6 +33,8 @@ def main() -> None:
             "Native Open Ephys HTTP must be locked off",
         "'--no-user-plugins'":
             "User-installed plugins must be locked off",
+        "'--agent-uia-readonly'":
+            "Read-only Agent UIA must be enabled in isolation",
         "'--state-dir'":
             "A dedicated state directory must be passed",
         "OE_AGENT_TOKEN":
@@ -85,6 +87,8 @@ def main() -> None:
             "Verifier must prove native HTTP is not owned",
         "LocalAddress -in @('127.0.0.1', '::1')":
             "Agent endpoint must be loopback-only",
+        "agent_uia_readonly_argument":
+            "Verifier must prove read-only UIA was explicitly enabled",
     }
     for fragment, message in verifier_contract.items():
         require(VERIFIER, fragment, message)

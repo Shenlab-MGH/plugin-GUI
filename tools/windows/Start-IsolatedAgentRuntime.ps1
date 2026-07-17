@@ -110,7 +110,8 @@ $arguments = @(
     '--state-dir', $statePath,
     '--no-http',
     '--agent-port', [string]$AgentPort,
-    '--no-user-plugins'
+    '--no-user-plugins',
+    '--agent-uia-readonly'
 )
 if ($configPath) {
     $arguments += $configPath
@@ -151,6 +152,7 @@ $result = [ordered]@{
     agent_port = $AgentPort
     native_http_locked_off = $true
     user_plugins_locked_off = $true
+    agent_uia_readonly = $true
     token_present = $tokenPresent
     running_open_ephys = $running
     blocking_reasons = @($blockingReasons)
