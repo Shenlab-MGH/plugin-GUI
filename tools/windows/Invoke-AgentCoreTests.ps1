@@ -138,3 +138,8 @@ Invoke-CompileAndRun -Name 'AgentRecordingSafetyTests' -Sources @(
     'Tests\AgentCore\AgentRecordingSafetyTests.cpp',
     'Source\Agent\AgentRecordingSafety.cpp'
 )
+
+Invoke-CompileAndRun -Name 'AgentRecordingWatchdogTests' -Sources @(
+    'Tests\AgentCore\AgentRecordingWatchdogTests.cpp',
+    'Source\Agent\AgentRecordingWatchdog.cpp'
+)

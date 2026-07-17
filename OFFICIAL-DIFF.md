@@ -27,6 +27,8 @@ otherwise. Scientific acquisition and recording parity remains a release gate.
 | Source/Agent/AgentLoopbackServer.h | ADDED | No Agent listener | Declares loopback server | New local control surface | AgentLoopbackServerTests | Agent mode off |
 | Source/Agent/AgentRecordingSafety.cpp | ADDED | No Agent recording safety policy | Shares fail-closed Record Node, directory, synchronization, state, and revision checks | Recording start rejection or unsafe acceptance | AgentRecordingSafetyTests and source contract | Agent mode off |
 | Source/Agent/AgentRecordingSafety.h | ADDED | No Agent recording safety policy | Declares pure recording-gate observations and outcomes | Safety contract mismatch | AgentRecordingSafetyTests | Agent mode off |
+| Source/Agent/AgentRecordingWatchdog.cpp | ADDED | No Agent duration watchdog | Produces bounded observe, verified-stop, takeover, and completion decisions from monotonic elapsed input | Late stop or unsafe retry | AgentRecordingWatchdogTests | Agent mode off |
+| Source/Agent/AgentRecordingWatchdog.h | ADDED | No Agent duration watchdog | Declares pure watchdog plan, observations, and pause semantics | Timing-policy mismatch | AgentRecordingWatchdogTests | Agent mode off |
 | Source/Agent/AgentState.cpp | ADDED | No Agent state revision | Observed state and monotonic revision | Stale state | AgentStateTests | Agent mode off |
 | Source/Agent/AgentState.h | ADDED | No Agent state revision | Declares observed state | Stale state | AgentStateTests | Agent mode off |
 | Source/Agent/AgentStateSnapshotCache.cpp | ADDED | No Agent snapshot cache | Thread-safe bounded state snapshot | Stale snapshot | AgentStateSnapshotCacheTests | Agent mode off |

@@ -100,6 +100,12 @@ add_agent_core_test(
 )
 
 add_agent_core_test(
+    AgentRecordingWatchdogTests
+    AgentRecordingWatchdogTests.cpp
+    ../../Source/Agent/AgentRecordingWatchdog.cpp
+)
+
+add_agent_core_test(
     RuntimeOptionsTests
     RuntimeOptionsTests.cpp
     ../../Source/Agent/RuntimeOptions.cpp
