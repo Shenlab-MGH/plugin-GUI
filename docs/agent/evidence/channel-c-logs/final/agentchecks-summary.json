@@ -1,0 +1,37 @@
+{
+  "Schema": "open-ephys-agent/channel-c-agentchecks/v1",
+  "SourceCommit": "13874008e744660350b33efa0399975797c965b9",
+  "Rounds": [
+    {
+      "Round": 1,
+      "ExitCode": 0,
+      "ElapsedSeconds": 38.038,
+      "PytestPassed": 398.0,
+      "ExplicitPassLines": 35,
+      "FinalLine": "PASS agent fork local checks",
+      "LogFile": "docs/agent/evidence/channel-c-logs/final/agentchecks-round-1.log",
+      "LogSha256": "a025f04a55a0a727f5e7ab09cee9dc0bf18f1b752aab1c15dea704e2a3174d6a"
+    },
+    {
+      "Round": 2,
+      "ExitCode": 0,
+      "ElapsedSeconds": 37.331,
+      "PytestPassed": 398.0,
+      "ExplicitPassLines": 35,
+      "FinalLine": "PASS agent fork local checks",
+      "LogFile": "docs/agent/evidence/channel-c-logs/final/agentchecks-round-2.log",
+      "LogSha256": "8121b09af98ad25e12642fee00d8dac85833cae4f26a6963c8b428623ba443ca"
+    },
+    {
+      "Round": 3,
+      "ExitCode": 0,
+      "ElapsedSeconds": 37.742,
+      "PytestPassed": 398.0,
+      "ExplicitPassLines": 35,
+      "FinalLine": "PASS agent fork local checks",
+      "LogFile": "docs/agent/evidence/channel-c-logs/final/agentchecks-round-3.log",
+      "LogSha256": "9ee937791b8964a987811f7e31778dd75e125abf06ed6757a2b1205a881efb8b"
+    }
+  ],
+  "Decision": "PASS"
+}
