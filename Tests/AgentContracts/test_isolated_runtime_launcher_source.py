@@ -62,7 +62,7 @@ def main() -> None:
             "Package manifest must identify its source commit",
         "source_dirty":
             "Package manifest must disclose uncommitted source",
-        "BUILD_TESTS:BOOL=OFF":
+        "BUILD_TESTS:(?:BOOL|UNINITIALIZED)=OFF":
             "Runtime packages must reject test-linked builds",
         "gui_testable_source.*":
             "Runtime packages must reject test-only host artifacts",
