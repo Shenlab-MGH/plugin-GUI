@@ -58,6 +58,7 @@ add_agent_core_test(
     AgentControlProtocolTests
     AgentControlProtocolTests.cpp
     ../../Source/Agent/AgentControlProtocol.cpp
+    ../../Source/Agent/AgentExperimentDirectoryEndpoint.cpp
 )
 
 add_agent_core_test(
@@ -68,6 +69,7 @@ add_agent_core_test(
     ../../Source/Agent/AgentTransportEndpoint.cpp
     ../../Source/Agent/AgentTransportMailbox.cpp
     ../../Source/Agent/AgentStateSnapshotCache.cpp
+    ../../Source/Agent/AgentExperimentDirectoryEndpoint.cpp
 )
 if(WIN32)
     target_link_libraries(AgentLoopbackServerTests PRIVATE ws2_32)
@@ -83,6 +85,12 @@ add_agent_core_test(
     AgentExperimentDirectoryTests
     AgentExperimentDirectoryTests.cpp
     ../../Source/Agent/AgentExperimentDirectory.cpp
+)
+
+add_agent_core_test(
+    AgentExperimentDirectoryEndpointTests
+    AgentExperimentDirectoryEndpointTests.cpp
+    ../../Source/Agent/AgentExperimentDirectoryEndpoint.cpp
 )
 
 add_agent_core_test(

@@ -42,6 +42,36 @@ public:
         };
     }
 };
+
+class FakeDirectoryExecutor final
+    : public AgentExperimentDirectoryExecutor
+{
+public:
+    AgentDirectoryApplyResult apply (
+        const AgentDirectoryRequest& request) override
+    {
+        current = {
+            request.approvedRoot,
+            request.directoryName,
+            request.approvedRoot + "\\" + request.directoryName,
+            true,
+            false,
+            AgentObservedMode::idle,
+            request.expectedRevision + 1
+        };
+        return {
+            { AgentDirectoryOutcome::ready, current.targetPath },
+            current
+        };
+    }
+
+    AgentRecordingDirectorySnapshot snapshot() override
+    {
+        return current;
+    }
+
+    AgentRecordingDirectorySnapshot current;
+};
 }
 
 int main()
@@ -60,6 +90,20 @@ int main()
         });
     auto executor = std::make_shared<FakeExecutor>();
     endpoint->attachExecutor (executor);
+    auto directoryEndpoint =
+        AgentExperimentDirectoryEndpoint::create (
+            [&scheduled] (std::function<void()> callback)
+            {
+                scheduled.push_back (std::move (callback));
+                return true;
+            },
+            {
+                "D:\\recordings", {}, {}, false, false,
+                AgentObservedMode::idle, 1
+            });
+    auto directoryExecutor =
+        std::make_shared<FakeDirectoryExecutor>();
+    directoryEndpoint->attachExecutor (directoryExecutor);
 
     const std::string token (
         "0123456789abcdef0123456789abcdef");
@@ -67,7 +111,8 @@ int main()
         endpoint,
         token,
         0,
-        false);
+        false,
+        directoryEndpoint);
     require (observeOnlyServer.start(),
              "The observe-only server must bind");
     const auto observePort =
@@ -95,7 +140,8 @@ int main()
              "Observe-only POST must fail before parsing");
     observeOnlyServer.stop();
 
-    AgentLoopbackServer server (endpoint, token, 0, true);
+    AgentLoopbackServer server (
+        endpoint, token, 0, true, directoryEndpoint);
     require (server.start(),
              "The loopback server must bind for integration testing");
     const auto port = server.getBoundPort();
@@ -113,6 +159,15 @@ int main()
     require (status->body.find ("\"phase\":\"READY\"")
                  != std::string::npos,
              "Status must come from the attached endpoint");
+
+    const auto initialDirectory = client.Get (
+        "/v1/experiment/directory", authorized);
+    require (initialDirectory && initialDirectory->status == 200,
+             "Directory readback must be available when authorized");
+    require (initialDirectory->body.find (
+                 "\"approved_root\":\"D:\\\\recordings\"")
+                 != std::string::npos,
+             "Directory readback must come from the endpoint snapshot");
 
     const auto receipt = client.Post (
         "/v1/transport/requests",
@@ -151,6 +206,29 @@ int main()
     require (result->body.find ("\"final_mode\":\"ACQUIRE\"")
                  != std::string::npos,
              "Lookup must expose verified final mode");
+
+    const auto directoryReceipt = client.Put (
+        "/v1/experiment/directory",
+        authorized,
+        std::string (
+            R"({"run_id":"run-1","command_id":"http-dir-1","expected_session_id":")")
+            + server.getSessionId()
+            + R"(","approved_root":"D:\\recordings","directory_name":"mouseA_shank_01","expected_revision":1})",
+        "application/json");
+    require (directoryReceipt && directoryReceipt->status == 202,
+             "A valid directory request must be accepted asynchronously");
+    require (scheduled.size() == 2,
+             "Directory POST must schedule exactly one callback");
+    scheduled.back()();
+    const auto directoryResult = client.Get (
+        "/v1/experiment/directory/requests/http-dir-1",
+        authorized);
+    require (directoryResult && directoryResult->status == 200,
+             "Completed directory request lookup must succeed");
+    require (directoryResult->body.find (
+                 "\"outcome\":\"READY\"")
+                 != std::string::npos,
+             "Directory lookup must expose verified completion");
 
     server.stop();
     require (server.getBoundPort() == -1,

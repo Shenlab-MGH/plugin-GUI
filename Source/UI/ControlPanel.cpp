@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "ControlPanel.h"
 #include "../AccessClass.h"
 #include "../Agent/TransportAccessibilityRegistry.h"
+#include "../Agent/ControlPanelExperimentAdapter.h"
 #include "../Processors/PluginManager/PluginManager.h"
 #include "../Processors/RecordNode/RecordNode.h"
 #include "../Processors/RecordNode/RecordEngine.h"
@@ -571,6 +572,14 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
               AgentObservedMode::unknown,
               0
           })),
+      agentExperimentDirectoryEndpoint (
+          AgentExperimentDirectoryEndpoint::create (
+              [] (AgentExperimentDirectoryEndpoint::ScheduledCallback callback)
+              {
+                  return MessageManager::callAsync (
+                      std::move (callback));
+              },
+              {})),
       isConsoleApp (isConsoleApp_)
 {
     AccessClass::setControlPanel (this);
@@ -578,6 +587,10 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
         std::make_shared<ControlPanelTransportExecutor> (*this);
     agentTransportEndpoint->attachExecutor (
         agentTransportExecutor);
+    agentExperimentDirectoryAdapter =
+        std::make_shared<ControlPanelExperimentAdapter> (*this);
+    agentExperimentDirectoryEndpoint->attachExecutor (
+        agentExperimentDirectoryAdapter);
 
     recordButton = std::make_unique<RecordButton>();
     recordButton->addListener (this);
@@ -662,6 +675,7 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
     }
 
     readState();
+    invalidateAgentDirectoryPreparation();
 }
 
 ControlPanel::~ControlPanel()
@@ -675,6 +689,11 @@ ControlPanel::~ControlPanel()
     agentTransportExecutor->detach (*this);
     agentTransportEndpoint->beginShutdown();
     agentTransportExecutor.reset();
+    agentExperimentDirectoryEndpoint->detachExecutor (
+        agentExperimentDirectoryAdapter);
+    agentExperimentDirectoryAdapter->detach (*this);
+    agentExperimentDirectoryEndpoint->beginShutdown();
+    agentExperimentDirectoryAdapter.reset();
     AccessClass::clearControlPanel (this);
 }
 
@@ -1128,6 +1147,7 @@ void ControlPanel::labelTextChanged (Label* label)
     }
 
     clock->resetRecordingTime();
+    invalidateAgentDirectoryPreparation();
 }
 
 void ControlPanel::startRecording()
@@ -1331,6 +1351,144 @@ std::shared_ptr<AgentTransportEndpoint>
 ControlPanel::getAgentTransportEndpoint() const
 {
     return agentTransportEndpoint;
+}
+
+std::shared_ptr<AgentExperimentDirectoryEndpoint>
+ControlPanel::getAgentExperimentDirectoryEndpoint() const
+{
+    return agentExperimentDirectoryEndpoint;
+}
+
+void ControlPanel::invalidateAgentDirectoryPreparation()
+{
+    auto* messageManager = MessageManager::getInstance();
+    if (messageManager == nullptr
+        || ! messageManager->isThisTheMessageThread())
+    {
+        jassertfalse;
+        return;
+    }
+    const auto state = readState();
+    agentDirectorySnapshot = {
+        getRecordingParentDirectory().getFullPathName().toStdString(),
+        {},
+        {},
+        false,
+        false,
+        state.mode,
+        state.revision
+    };
+    agentExperimentDirectoryEndpoint->publish (
+        agentDirectorySnapshot);
+}
+
+AgentRecordingDirectorySnapshot
+ControlPanel::getAgentRecordingDirectorySnapshot()
+{
+    auto* messageManager = MessageManager::getInstance();
+    if (messageManager == nullptr
+        || ! messageManager->isThisTheMessageThread())
+    {
+        jassertfalse;
+        return {};
+    }
+
+    const auto state = readState();
+    agentDirectorySnapshot.mode = state.mode;
+    agentDirectorySnapshot.revision = state.revision;
+    if (! agentDirectorySnapshot.approvedRoot.empty())
+    {
+        agentDirectorySnapshot.targetExists =
+            File (String::fromUTF8 (
+                agentDirectorySnapshot.targetPath.c_str()))
+                .exists();
+    }
+    return agentDirectorySnapshot;
+}
+
+AgentDirectoryApplyResult
+ControlPanel::prepareAgentRecordingDirectory (
+    const AgentDirectoryRequest& request)
+{
+    auto* messageManager = MessageManager::getInstance();
+    if (messageManager == nullptr
+        || ! messageManager->isThisTheMessageThread())
+    {
+        jassertfalse;
+        return { { AgentDirectoryOutcome::approvedRootInvalid, {} }, {} };
+    }
+
+    const File root (String::fromUTF8 (request.approvedRoot.c_str()));
+    const File target = root.getChildFile (
+        String::fromUTF8 (request.directoryName.c_str()));
+    std::vector<std::string> siblings;
+    if (root.isDirectory())
+    {
+        const auto children = root.findChildFiles (
+            File::findDirectories, false);
+        siblings.reserve (static_cast<std::size_t> (children.size()));
+        for (const auto& child : children)
+            siblings.push_back (child.getFileName().toStdString());
+    }
+
+    const auto state = readState();
+    AgentExperimentDirectory policy;
+    const auto decision = policy.validate (
+        request,
+        {
+            target.exists(),
+            std::move (siblings),
+            state.mode,
+            state.revision
+        });
+    if (decision.outcome != AgentDirectoryOutcome::ready
+        || ! root.isDirectory())
+    {
+        const auto effectiveDecision =
+            ! root.isDirectory()
+            ? AgentDirectoryDecision {
+                  AgentDirectoryOutcome::approvedRootInvalid, {}
+              }
+            : decision;
+        return { effectiveDecision, getAgentRecordingDirectorySnapshot() };
+    }
+
+    setRecordingParentDirectory (root.getFullPathName());
+    setRecordingDirectoryPrependText ({});
+    setRecordingDirectoryBaseText (
+        String::fromUTF8 (request.directoryName.c_str()));
+    setRecordingDirectoryAppendText ({});
+    createNewRecordingDirectory();
+
+    const auto exactName = generateFilenameFromFields (false);
+    const bool exactReadback =
+        getRecordingParentDirectory() == root
+        && getRecordingDirectoryPrependText().isEmpty()
+        && getRecordingDirectoryBaseText()
+               == String::fromUTF8 (request.directoryName.c_str())
+        && getRecordingDirectoryAppendText().isEmpty()
+        && exactName
+               == String::fromUTF8 (request.directoryName.c_str())
+        && ! target.exists();
+
+    agentDirectorySnapshot = {
+        root.getFullPathName().toStdString(),
+        request.directoryName,
+        target.getFullPathName().toStdString(),
+        exactReadback,
+        target.exists(),
+        state.mode,
+        state.revision
+    };
+    if (! exactReadback)
+    {
+        return {
+            { AgentDirectoryOutcome::invalidNativeName,
+              decision.targetPath },
+            agentDirectorySnapshot
+        };
+    }
+    return { decision, agentDirectorySnapshot };
 }
 
 AgentTransportApplyResult ControlPanel::applyAgentTransportRequest (
@@ -1577,6 +1735,7 @@ void ControlPanel::filenameComponentChanged (FilenameComponent* fnComponent)
                                                               "Setting the parent recording directory to the default user save directory.");
         }
 
+        invalidateAgentDirectoryPreparation();
         return;
     }
     else
@@ -1586,6 +1745,7 @@ void ControlPanel::filenameComponentChanged (FilenameComponent* fnComponent)
             recNode->setDefaultRecordingDirectory (currentFile);
         }
     }
+    invalidateAgentDirectoryPreparation();
 }
 
 void ControlPanel::disableCallbacks()
@@ -1796,7 +1956,10 @@ void ControlPanel::setRecordingDirectoryPrependText (String text)
                 field->newDirectoryNeeded = true;
 
                 if (text.length() == 0)
+                {
                     field->state = FilenameFieldComponent::State::NONE;
+                    field->value = "";
+                }
                 else if (text == "auto")
                     field->state = FilenameFieldComponent::State::AUTO;
                 else
@@ -1838,7 +2001,10 @@ void ControlPanel::setRecordingDirectoryAppendText (String text)
                 field->newDirectoryNeeded = true;
 
                 if (text.length() == 0)
+                {
                     field->state = FilenameFieldComponent::State::NONE;
+                    field->value = "";
+                }
                 else if (text == "auto")
                     field->state = FilenameFieldComponent::State::AUTO;
                 else

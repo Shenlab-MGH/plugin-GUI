@@ -152,6 +152,106 @@ const char* applyOutcomeName (
 
     return "REJECTED";
 }
+
+const char* directoryRequestStateName (
+    AgentDirectoryRequestState state)
+{
+    switch (state)
+    {
+        case AgentDirectoryRequestState::unknown: return "UNKNOWN";
+        case AgentDirectoryRequestState::pending: return "PENDING";
+        case AgentDirectoryRequestState::active: return "ACTIVE";
+        case AgentDirectoryRequestState::completed: return "COMPLETED";
+        case AgentDirectoryRequestState::cancelled: return "CANCELLED";
+        case AgentDirectoryRequestState::expired: return "EXPIRED";
+    }
+    return "UNKNOWN";
+}
+
+const char* directoryOutcomeName (AgentDirectoryOutcome outcome)
+{
+    switch (outcome)
+    {
+        case AgentDirectoryOutcome::ready: return "READY";
+        case AgentDirectoryOutcome::approvedRootInvalid:
+            return "APPROVED_ROOT_INVALID";
+        case AgentDirectoryOutcome::invalidNativeName:
+            return "INVALID_NATIVE_NAME";
+        case AgentDirectoryOutcome::autoSuffixForbidden:
+            return "AUTO_SUFFIX_FORBIDDEN";
+        case AgentDirectoryOutcome::alreadyExists:
+        case AgentDirectoryOutcome::caseCollision:
+            return "DIRECTORY_COLLISION";
+        case AgentDirectoryOutcome::recordingNotInactive:
+            return "RECORDING_NOT_INACTIVE";
+        case AgentDirectoryOutcome::revisionConflict:
+            return "REVISION_CONFLICT";
+    }
+    return "REJECTED";
+}
+}
+
+AgentDirectoryParseResult
+AgentControlProtocol::parseDirectoryRequest (
+    const std::string& body)
+{
+    try
+    {
+        const auto value = json::parse (body);
+        if (! value.is_object() || value.size() != 6
+            || ! value.contains ("run_id")
+            || ! value.contains ("command_id")
+            || ! value.contains ("expected_session_id")
+            || ! value.contains ("approved_root")
+            || ! value.contains ("directory_name")
+            || ! value.contains ("expected_revision")
+            || ! value["run_id"].is_string()
+            || ! value["command_id"].is_string()
+            || ! value["expected_session_id"].is_string()
+            || ! value["approved_root"].is_string()
+            || ! value["directory_name"].is_string()
+            || ! value["expected_revision"].is_number_integer())
+        {
+            return { std::nullopt, {}, "INVALID_REQUEST" };
+        }
+
+        const auto runId = value["run_id"].get<std::string>();
+        const auto commandId = value["command_id"].get<std::string>();
+        const auto expectedSessionId =
+            value["expected_session_id"].get<std::string>();
+        const auto approvedRoot =
+            value["approved_root"].get<std::string>();
+        const auto directoryName =
+            value["directory_name"].get<std::string>();
+        const auto revision =
+            value["expected_revision"].get<std::int64_t>();
+        if (! isSafeIdentifier (runId)
+            || ! isSafeIdentifier (commandId)
+            || ! isSafeIdentifier (expectedSessionId)
+            || approvedRoot.empty() || approvedRoot.size() > 1024
+            || directoryName.empty() || directoryName.size() > 255
+            || revision < 0)
+        {
+            return { std::nullopt, {}, "INVALID_REQUEST" };
+        }
+        return {
+            AgentDirectoryEndpointRequest {
+                runId,
+                commandId,
+                {
+                    approvedRoot,
+                    directoryName,
+                    static_cast<std::uint64_t> (revision)
+                }
+            },
+            expectedSessionId,
+            {}
+        };
+    }
+    catch (...)
+    {
+        return { std::nullopt, {}, "INVALID_JSON" };
+    }
 }
 
 AgentControlParseResult
@@ -331,6 +431,78 @@ std::string AgentControlProtocol::serializeSubmitReceipt (
         { "schema_version", schemaVersion },
         { "session_id", sessionId },
         { "request_id", requestId },
+        { "state", state },
+        { "reason", reason }
+    }.dump();
+}
+
+std::string AgentControlProtocol::serializeDirectorySnapshot (
+    const AgentRecordingDirectorySnapshot& snapshot,
+    const std::string& sessionId)
+{
+    return json {
+        { "schema_version", schemaVersion },
+        { "session_id", sessionId },
+        { "approved_root", snapshot.approvedRoot },
+        { "directory_name", snapshot.directoryName },
+        { "target_path", snapshot.targetPath },
+        { "prepared", snapshot.prepared },
+        { "target_exists", snapshot.targetExists },
+        { "mode", modeName (snapshot.mode) },
+        { "revision", snapshot.revision }
+    }.dump();
+}
+
+std::string AgentControlProtocol::serializeDirectoryRequestLookup (
+    const std::string& requestId,
+    const AgentDirectoryLookup& lookup,
+    const std::string& sessionId)
+{
+    json value {
+        { "schema_version", schemaVersion },
+        { "session_id", sessionId },
+        { "command_id", requestId },
+        { "state", directoryRequestStateName (lookup.state) }
+    };
+    if (lookup.result)
+    {
+        value["outcome"] =
+            directoryOutcomeName (lookup.result->decision.outcome);
+        value["target_path"] = lookup.result->decision.targetPath;
+        value["prepared"] = lookup.result->snapshot.prepared;
+        value["final_revision"] = lookup.result->snapshot.revision;
+    }
+    return value.dump();
+}
+
+std::string AgentControlProtocol::serializeDirectorySubmitReceipt (
+    const std::string& requestId,
+    AgentDirectorySubmitOutcome outcome,
+    const std::string& sessionId)
+{
+    const char* state = "REJECTED";
+    const char* reason = "INVALID_REQUEST";
+    switch (outcome)
+    {
+        case AgentDirectorySubmitOutcome::accepted:
+            state = "PENDING"; reason = "NONE"; break;
+        case AgentDirectorySubmitOutcome::duplicate:
+            state = "DUPLICATE"; reason = "NONE"; break;
+        case AgentDirectorySubmitOutcome::idConflict:
+            reason = "ID_CONFLICT"; break;
+        case AgentDirectorySubmitOutcome::busy:
+            reason = "BUSY"; break;
+        case AgentDirectorySubmitOutcome::invalidRequest:
+            reason = "INVALID_REQUEST"; break;
+        case AgentDirectorySubmitOutcome::unavailable:
+            reason = "UNAVAILABLE"; break;
+        case AgentDirectorySubmitOutcome::shuttingDown:
+            reason = "SHUTTING_DOWN"; break;
+    }
+    return json {
+        { "schema_version", schemaVersion },
+        { "session_id", sessionId },
+        { "command_id", requestId },
         { "state", state },
         { "reason", reason }
     }.dump();

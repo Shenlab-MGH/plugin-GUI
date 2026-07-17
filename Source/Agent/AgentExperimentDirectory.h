@@ -48,6 +48,17 @@ struct AgentDirectoryDecision
     std::string targetPath;
 };
 
+struct AgentRecordingDirectorySnapshot
+{
+    std::string approvedRoot;
+    std::string directoryName;
+    std::string targetPath;
+    bool prepared = false;
+    bool targetExists = false;
+    AgentObservedMode mode = AgentObservedMode::unknown;
+    std::uint64_t revision = 0;
+};
+
 class AgentExperimentDirectory
 {
 public:
@@ -55,4 +66,3 @@ public:
         const AgentDirectoryRequest& request,
         const AgentDirectoryObservation& observation) const;
 };
-

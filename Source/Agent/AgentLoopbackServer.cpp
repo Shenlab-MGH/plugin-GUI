@@ -29,8 +29,11 @@ AgentLoopbackServer::AgentLoopbackServer (
     std::shared_ptr<AgentTransportEndpoint> endpointToUse,
     std::string tokenToUse,
     int portToUse,
-    bool mutationEnabledToUse)
+    bool mutationEnabledToUse,
+    std::shared_ptr<AgentExperimentDirectoryEndpoint>
+        directoryEndpointToUse)
     : endpoint (std::move (endpointToUse)),
+      directoryEndpoint (std::move (directoryEndpointToUse)),
       bearerToken (std::move (tokenToUse)),
       sessionId (createSessionId()),
       requestedPort (portToUse),
@@ -121,6 +124,115 @@ void AgentLoopbackServer::run()
 
 void AgentLoopbackServer::configureRoutes()
 {
+    server.Get ("/v1/experiment/directory",
+                [this] (const httplib::Request& request,
+                        httplib::Response& response)
+                {
+                    if (! authorize (request, response))
+                        return;
+                    if (! directoryEndpoint)
+                    {
+                        setJson (response, 503,
+                                 R"({"error":"UNAVAILABLE"})");
+                        return;
+                    }
+                    setJson (
+                        response,
+                        200,
+                        AgentControlProtocol::serializeDirectorySnapshot (
+                            directoryEndpoint->snapshot(),
+                            sessionId));
+                });
+
+    server.Get (R"(/v1/experiment/directory/requests/(.+))",
+                [this] (const httplib::Request& request,
+                        httplib::Response& response)
+                {
+                    if (! authorize (request, response))
+                        return;
+                    if (! directoryEndpoint)
+                    {
+                        setJson (response, 503,
+                                 R"({"error":"UNAVAILABLE"})");
+                        return;
+                    }
+                    const auto requestId = request.matches[1].str();
+                    const auto lookup = directoryEndpoint->query (requestId);
+                    setJson (
+                        response,
+                        lookup.state == AgentDirectoryRequestState::unknown
+                            ? 404 : 200,
+                        AgentControlProtocol::serializeDirectoryRequestLookup (
+                            requestId, lookup, sessionId));
+                });
+
+    server.Put ("/v1/experiment/directory",
+                 [this] (const httplib::Request& request,
+                         httplib::Response& response)
+                 {
+                     if (! authorize (request, response))
+                         return;
+                     if (! mutationEnabled)
+                     {
+                         setJson (response, 403,
+                                  R"({"error":"MUTATION_NOT_ARMED"})");
+                         return;
+                     }
+                     if (! directoryEndpoint)
+                     {
+                         setJson (response, 503,
+                                  R"({"error":"UNAVAILABLE"})");
+                         return;
+                     }
+                     if (request.body.empty() || request.body.size() > 16384)
+                     {
+                         setJson (response, 400,
+                                  R"({"error":"INVALID_BODY"})");
+                         return;
+                     }
+                     const auto parsed =
+                         AgentControlProtocol::parseDirectoryRequest (
+                             request.body);
+                     if (! parsed.request)
+                     {
+                         setJson (
+                             response, 400,
+                             std::string ("{\"error\":\"")
+                                 + parsed.error + "\"}");
+                         return;
+                     }
+                     if (! constantTimeEqual (
+                             parsed.expectedSessionId, sessionId))
+                     {
+                         setJson (response, 409,
+                                  R"({"error":"SESSION_MISMATCH"})");
+                         return;
+                     }
+                     const auto outcome =
+                         directoryEndpoint->submit (*parsed.request);
+                     int status = 409;
+                     if (outcome == AgentDirectorySubmitOutcome::accepted)
+                         status = 202;
+                     else if (outcome
+                              == AgentDirectorySubmitOutcome::duplicate)
+                         status = 200;
+                     else if (outcome
+                              == AgentDirectorySubmitOutcome::invalidRequest)
+                         status = 400;
+                     else if (outcome
+                                  == AgentDirectorySubmitOutcome::unavailable
+                              || outcome
+                                  == AgentDirectorySubmitOutcome::shuttingDown)
+                         status = 503;
+                     setJson (
+                         response,
+                         status,
+                         AgentControlProtocol::serializeDirectorySubmitReceipt (
+                             parsed.request->commandId,
+                             outcome,
+                             sessionId));
+                 });
+
     server.Get ("/v1/status",
                 [this] (const httplib::Request& request,
                         httplib::Response& response)

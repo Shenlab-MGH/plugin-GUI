@@ -17,6 +17,7 @@
 #pragma once
 
 #include "AgentTransportEndpoint.h"
+#include "AgentExperimentDirectoryEndpoint.h"
 #if defined (__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-literal-operator"
@@ -38,7 +39,9 @@ public:
         std::shared_ptr<AgentTransportEndpoint> endpoint,
         std::string bearerToken,
         int port = 37498,
-        bool mutationEnabled = false);
+        bool mutationEnabled = false,
+        std::shared_ptr<AgentExperimentDirectoryEndpoint>
+            directoryEndpoint = nullptr);
 
     ~AgentLoopbackServer();
 
@@ -66,6 +69,8 @@ private:
     static std::string createSessionId();
 
     std::shared_ptr<AgentTransportEndpoint> endpoint;
+    std::shared_ptr<AgentExperimentDirectoryEndpoint>
+        directoryEndpoint;
     std::string bearerToken;
     std::string sessionId;
     int requestedPort;

@@ -103,7 +103,8 @@ Invoke-CompileAndRun -Name 'AgentTransportEndpointTests' -Sources @(
 
 Invoke-CompileAndRun -Name 'AgentControlProtocolTests' -Sources @(
     'Tests\AgentCore\AgentControlProtocolTests.cpp',
-    'Source\Agent\AgentControlProtocol.cpp'
+    'Source\Agent\AgentControlProtocol.cpp',
+    'Source\Agent\AgentExperimentDirectoryEndpoint.cpp'
 )
 
 Invoke-CompileAndRun -Name 'AgentLoopbackServerTests' -Sources @(
@@ -112,7 +113,8 @@ Invoke-CompileAndRun -Name 'AgentLoopbackServerTests' -Sources @(
     'Source\Agent\AgentControlProtocol.cpp',
     'Source\Agent\AgentTransportEndpoint.cpp',
     'Source\Agent\AgentTransportMailbox.cpp',
-    'Source\Agent\AgentStateSnapshotCache.cpp'
+    'Source\Agent\AgentStateSnapshotCache.cpp',
+    'Source\Agent\AgentExperimentDirectoryEndpoint.cpp'
 ) -Libraries @(
     '-lws2_32'
 )
@@ -125,4 +127,9 @@ Invoke-CompileAndRun -Name 'AgentStateSnapshotCacheTests' -Sources @(
 Invoke-CompileAndRun -Name 'AgentExperimentDirectoryTests' -Sources @(
     'Tests\AgentCore\AgentExperimentDirectoryTests.cpp',
     'Source\Agent\AgentExperimentDirectory.cpp'
+)
+
+Invoke-CompileAndRun -Name 'AgentExperimentDirectoryEndpointTests' -Sources @(
+    'Tests\AgentCore\AgentExperimentDirectoryEndpointTests.cpp',
+    'Source\Agent\AgentExperimentDirectoryEndpoint.cpp'
 )

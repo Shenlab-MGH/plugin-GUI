@@ -271,7 +271,8 @@ MainWindow::MainWindow (
             controlPanel->getAgentTransportEndpoint(),
             agentToken.toStdString(),
             runtimeOptions.agentPort,
-            false);
+            false,
+            controlPanel->getAgentExperimentDirectoryEndpoint());
         if (! agentServer->start())
         {
             LOGC ("Agent loopback server failed to bind "

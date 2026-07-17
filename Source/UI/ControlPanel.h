@@ -29,6 +29,7 @@
 #include "../Agent/ControlPanelCommandRouter.h"
 #include "../Agent/AgentTransportCoordinator.h"
 #include "../Agent/AgentTransportEndpoint.h"
+#include "../Agent/AgentExperimentDirectoryEndpoint.h"
 #include "../Audio/AudioComponent.h"
 #include "../Processors/AudioNode/AudioEditor.h"
 #include "../Processors/Editors/GenericEditor.h" // for UtilityButton
@@ -326,6 +327,7 @@ private:
 
 class UtilityButton;
 class ControlPanelTransportExecutor;
+class ControlPanelExperimentAdapter;
 
 /**
 
@@ -493,6 +495,10 @@ public:
     /** Returns the shared endpoint that safely outlives this component. */
     std::shared_ptr<AgentTransportEndpoint> getAgentTransportEndpoint() const;
 
+    /** Returns the asynchronous exact-directory preparation endpoint. */
+    std::shared_ptr<AgentExperimentDirectoryEndpoint>
+        getAgentExperimentDirectoryEndpoint() const;
+
     /** Pointers to owned components */
     std::unique_ptr<FilenameEditorButton> filenameText;
     std::unique_ptr<FilenameConfigWindow> filenameConfigWindow;
@@ -500,10 +506,17 @@ public:
 
 private:
     friend class ControlPanelTransportExecutor;
+    friend class ControlPanelExperimentAdapter;
 
     /** Applies an internal target-state request through verified coordination. */
     AgentTransportApplyResult applyAgentTransportRequest (
         const AgentTransportRequest& request);
+
+    AgentDirectoryApplyResult prepareAgentRecordingDirectory (
+        const AgentDirectoryRequest& request);
+    AgentRecordingDirectorySnapshot
+        getAgentRecordingDirectorySnapshot();
+    void invalidateAgentDirectoryPreparation();
 
     /** Informs the Control Panel that recording has begun.*/
     void startRecording();
@@ -581,8 +594,13 @@ private:
     AgentStateStore agentStateStore;
     std::shared_ptr<AgentTransportEndpoint> agentTransportEndpoint;
     std::shared_ptr<ControlPanelTransportExecutor> agentTransportExecutor;
+    std::shared_ptr<AgentExperimentDirectoryEndpoint>
+        agentExperimentDirectoryEndpoint;
+    std::shared_ptr<ControlPanelExperimentAdapter>
+        agentExperimentDirectoryAdapter;
     AgentTransportCoordinator agentTransportCoordinator;
     bool agentTransportTransactionActive = false;
+    AgentRecordingDirectorySnapshot agentDirectorySnapshot;
 
     /** Internal state variables */
     bool initialize = true;

@@ -17,6 +17,7 @@
 #pragma once
 
 #include "AgentTransportEndpoint.h"
+#include "AgentExperimentDirectoryEndpoint.h"
 
 #include <optional>
 #include <string>
@@ -28,9 +29,19 @@ struct AgentControlParseResult
     std::string error;
 };
 
+struct AgentDirectoryParseResult
+{
+    std::optional<AgentDirectoryEndpointRequest> request;
+    std::string expectedSessionId;
+    std::string error;
+};
+
 namespace AgentControlProtocol
 {
 AgentControlParseResult parseTransportRequest (
+    const std::string& body);
+
+AgentDirectoryParseResult parseDirectoryRequest (
     const std::string& body);
 
 std::string serializeStatus (
@@ -46,5 +57,19 @@ std::string serializeRequestLookup (
 std::string serializeSubmitReceipt (
     const std::string& requestId,
     AgentMailboxSubmitOutcome outcome,
+    const std::string& sessionId);
+
+std::string serializeDirectorySnapshot (
+    const AgentRecordingDirectorySnapshot& snapshot,
+    const std::string& sessionId);
+
+std::string serializeDirectoryRequestLookup (
+    const std::string& requestId,
+    const AgentDirectoryLookup& lookup,
+    const std::string& sessionId);
+
+std::string serializeDirectorySubmitReceipt (
+    const std::string& requestId,
+    AgentDirectorySubmitOutcome outcome,
     const std::string& sessionId);
 }

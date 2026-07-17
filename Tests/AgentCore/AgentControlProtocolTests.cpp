@@ -17,6 +17,22 @@ void require (bool condition, const char* message)
 
 int main()
 {
+    const auto directoryParsed =
+        AgentControlProtocol::parseDirectoryRequest (
+            R"({"run_id":"run-1","command_id":"dir-1","expected_session_id":"session-1","approved_root":"D:\\recordings","directory_name":"mouseA_shank_01","expected_revision":7})");
+    require (directoryParsed.request.has_value(),
+             "A valid directory request must parse");
+    require (directoryParsed.request->request.approvedRoot
+                 == "D:\\recordings",
+             "The approved root must be preserved");
+    require (directoryParsed.request->request.directoryName
+                 == "mouseA_shank_01",
+             "The exact native directory name must be preserved");
+    require (! AgentControlProtocol::parseDirectoryRequest (
+                   R"({"run_id":"run-1","command_id":"dir-1","expected_session_id":"session-1","approved_root":"D:\\recordings","directory_name":"mouseA_shank_01","expected_revision":7,"unexpected":true})")
+                   .request.has_value(),
+             "Unknown directory fields must fail closed");
+
     const auto parsed = AgentControlProtocol::parseTransportRequest (
         R"({"request_id":"cpp-1","expected_session_id":"session-1","target_mode":"RECORD","expected_revision":7})");
     require (parsed.request.has_value(),
@@ -108,6 +124,44 @@ int main()
     require (receipt.find ("\"state\":\"PENDING\"")
                  != std::string::npos,
              "Accepted submission must return PENDING");
+
+    const auto directorySnapshot =
+        AgentControlProtocol::serializeDirectorySnapshot (
+            {
+                "D:\\recordings",
+                "mouseA_shank_01",
+                "D:\\recordings\\mouseA_shank_01",
+                true,
+                false,
+                AgentObservedMode::idle,
+                8
+            },
+            "session-1");
+    require (directorySnapshot.find ("\"prepared\":true")
+                 != std::string::npos,
+             "Directory snapshot must expose prepared readback");
+    require (directorySnapshot.find (
+                 "\"directory_name\":\"mouseA_shank_01\"")
+                 != std::string::npos,
+             "Directory snapshot must expose exact native name");
+
+    const AgentDirectoryLookup collision {
+        AgentDirectoryRequestState::completed,
+        AgentDirectoryApplyResult {
+            {
+                AgentDirectoryOutcome::alreadyExists,
+                "D:\\recordings\\mouseA_shank_01"
+            },
+            {}
+        }
+    };
+    const auto directoryLookup =
+        AgentControlProtocol::serializeDirectoryRequestLookup (
+            "dir-2", collision, "session-1");
+    require (directoryLookup.find (
+                 "\"outcome\":\"DIRECTORY_COLLISION\"")
+                 != std::string::npos,
+             "Existing native directory must serialize as collision");
 
     std::cout << "PASS AgentControlProtocolTests\n";
     return 0;

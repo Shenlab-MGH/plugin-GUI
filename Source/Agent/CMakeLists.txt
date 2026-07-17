@@ -15,6 +15,10 @@ add_sources(open-ephys
     AgentStateSnapshotCache.cpp
     AgentExperimentDirectory.h
     AgentExperimentDirectory.cpp
+    AgentExperimentDirectoryEndpoint.h
+    AgentExperimentDirectoryEndpoint.cpp
+    ControlPanelExperimentAdapter.h
+    ControlPanelExperimentAdapter.cpp
     AgentTransportPlanner.h
     AgentTransportPlanner.cpp
     AgentTransportCoordinator.h
