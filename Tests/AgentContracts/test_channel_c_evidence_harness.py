@@ -75,6 +75,7 @@ def test_agent_checks_wrapper_is_repo_scoped_and_machine_verifiable() -> None:
             "FinalLine",
             "ExitCode",
             "Resolve-PathWithinEvidenceRoot",
+            "ReparsePoint",
         ),
     )
     with tempfile.TemporaryDirectory() as temporary:
@@ -95,4 +96,3 @@ def test_agent_checks_wrapper_is_repo_scoped_and_machine_verifiable() -> None:
         )
         assert completed.returncode != 0
         assert "docs\\agent\\evidence" in (completed.stderr + completed.stdout)
-

@@ -17,6 +17,19 @@ function Resolve-PathWithinEvidenceRoot {
     if ($full -ne $root -and -not $full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw "OutputDirectory must stay within docs\agent\evidence: $full"
     }
+    $cursor = $full
+    while ($cursor.Length -ge $root.Length) {
+        if (Test-Path -LiteralPath $cursor) {
+            $item = Get-Item -LiteralPath $cursor -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "OutputDirectory must not traverse a ReparsePoint: $cursor"
+            }
+        }
+        if ($cursor -eq $root) { break }
+        $parent = [IO.Directory]::GetParent($cursor)
+        if ($null -eq $parent) { break }
+        $cursor = $parent.FullName.TrimEnd('\')
+    }
     return $full
 }
 
