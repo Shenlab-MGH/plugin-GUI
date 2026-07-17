@@ -4,7 +4,10 @@ param(
     [string] $ReleaseDirectory,
 
     [Parameter(Mandatory)]
-    [string] $Destination
+    [string] $Destination,
+
+    [Parameter(Mandatory)]
+    [string] $McpExecutable
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +31,22 @@ if (Get-ChildItem -LiteralPath $release -Filter 'gui_testable_source.*') {
 }
 
 $destinationPath = [System.IO.Path]::GetFullPath($Destination)
+$mcpExecutablePath = [System.IO.Path]::GetFullPath($McpExecutable)
+if (-not (Test-Path -LiteralPath $mcpExecutablePath -PathType Leaf) -or
+    [System.IO.Path]::GetFileName($mcpExecutablePath) -ne
+        'open-ephys-agent-mcp.exe') {
+    throw 'McpExecutable must identify open-ephys-agent-mcp.exe.'
+}
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$mcpLock = Join-Path $repoRoot 'integrations\mcp\uv.lock'
+$mcpProject = Join-Path $repoRoot 'integrations\mcp\pyproject.toml'
+$skillSource = Join-Path $repoRoot (
+    'integrations\skills\open-ephys-operator'
+)
+if (-not (Test-Path -LiteralPath $mcpLock -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $skillSource -PathType Container)) {
+    throw 'Canonical MCP lockfile or Open Ephys Skill is missing.'
+}
 New-Item -ItemType Directory -Force -Path $destinationPath | Out-Null
 Copy-Item -Path (Join-Path $release '*') `
     -Destination $destinationPath `
@@ -42,6 +61,29 @@ Copy-Item -LiteralPath (
 Copy-Item -LiteralPath (
     Join-Path $PSScriptRoot 'Test-AgentAccessibility.ps1'
 ) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'Start-OpenEphysAgentMcp.ps1'
+) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'New-OpenEphysAgentMcpConfig.ps1'
+) -Destination $destinationPath -Force
+
+$mcpDestination = Join-Path $destinationPath 'mcp'
+New-Item -ItemType Directory -Path $mcpDestination | Out-Null
+Copy-Item -LiteralPath $mcpExecutablePath `
+    -Destination (Join-Path $mcpDestination 'open-ephys-agent-mcp.exe')
+Copy-Item -LiteralPath $mcpLock -Destination $mcpDestination
+Copy-Item -LiteralPath $mcpProject -Destination $mcpDestination
+
+$skillDestination = Join-Path $destinationPath 'skills\open-ephys-operator'
+New-Item -ItemType Directory -Path $skillDestination | Out-Null
+Copy-Item -LiteralPath (Join-Path $skillSource 'SKILL.md') `
+    -Destination $skillDestination
+foreach ($directory in @('agents', 'references', 'scripts')) {
+    Copy-Item -LiteralPath (Join-Path $skillSource $directory) `
+        -Destination $skillDestination `
+        -Recurse
+}
 
 $files = @(
     Get-ChildItem -LiteralPath $destinationPath -File -Recurse |

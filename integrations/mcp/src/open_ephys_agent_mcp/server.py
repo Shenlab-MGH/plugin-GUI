@@ -6,8 +6,10 @@ import json
 import sys
 from typing import Any
 
+import anyio
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.stdio import stdio_server
 from mcp.types import ToolAnnotations
 
 from .config import ConfigurationError, Settings
@@ -36,6 +38,20 @@ class StrictNoInputFastMCP(FastMCP):
         if arguments:
             raise ToolError(f"Tool {name} accepts no input fields.")
         return await super().call_tool(name, arguments)
+
+    async def run_stdio_async(self) -> None:
+        if hasattr(sys.stdin, "reconfigure"):
+            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+        stdin = anyio.wrap_file(sys.stdin)
+        stdout = anyio.wrap_file(sys.stdout)
+        async with stdio_server(stdin=stdin, stdout=stdout) as (read, write):
+            await self._mcp_server.run(
+                read,
+                write,
+                self._mcp_server.create_initialization_options(),
+            )
 
 
 def create_server(service: ObservationService) -> FastMCP:

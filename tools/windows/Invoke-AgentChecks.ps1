@@ -14,6 +14,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Agent Gateway tests failed with exit code $LASTEXITCODE"
 }
 
+& (Join-Path $PSScriptRoot 'Invoke-OpenEphysAgentMcpTests.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Open Ephys MCP tests failed with exit code $LASTEXITCODE"
+}
+
 $contracts = @(
     'Tests\AgentContracts\test_transport_accessibility_source.py',
     'Tests\AgentContracts\test_windows_automation_id_source.py',
@@ -25,8 +30,9 @@ $contracts = @(
     'Tests\AgentContracts\test_official_baseline_verifier_source.py',
     'Tests\AgentContracts\test_official_build_wrapper_source.py',
     'Tests\AgentContracts\test_build_tools_installer_source.py',
-    'Tests\AgentContracts\test_runtime_isolation_wiring_source.py'
-    'Tests\AgentContracts\test_isolated_runtime_launcher_source.py'
+    'Tests\AgentContracts\test_runtime_isolation_wiring_source.py',
+    'Tests\AgentContracts\test_isolated_runtime_launcher_source.py',
+    'Tests\AgentContracts\test_mcp_skill_packaging_source.py'
 )
 
 foreach ($contract in $contracts) {
