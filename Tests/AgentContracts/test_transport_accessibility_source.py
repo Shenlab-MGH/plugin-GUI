@@ -31,6 +31,16 @@ def main() -> None:
             "Transport nodes must provide a read-only value")
     require("isReadOnly() const override", BRIDGE,
             "The UIA value must reject writes")
+    require("modalResilientReadOnlyState", BRIDGE,
+            "Read-only Agent UIA must remain enumerable behind modal dialogs")
+    require("withFocusable().withAccessibleOffscreen()", BRIDGE,
+            "Modal-resilient UIA state must be focusable and explicitly offscreen")
+    require("FocusContainerType::focusContainer", BRIDGE,
+            "The Agent root must own its two transport nodes in the UIA tree")
+    if BRIDGE.count("modalResilientReadOnlyState()") != 3:
+        raise AssertionError(
+            "The modal-resilient state must serve the root and both transport nodes"
+        )
     require("enableAgentUiaReadOnly", MAIN_WINDOW,
             "The branch must be explicitly enabled")
     require("ui->setAccessible (false)", MAIN_WINDOW,

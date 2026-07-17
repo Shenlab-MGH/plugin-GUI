@@ -16,6 +16,11 @@
 
 namespace
 {
+AccessibleState modalResilientReadOnlyState()
+{
+    return AccessibleState().withFocusable().withAccessibleOffscreen();
+}
+
 class ReadOnlyTransportValue final
     : public AccessibilityTextValueInterface
 {
@@ -75,8 +80,24 @@ public:
 
     AccessibleState getCurrentState() const override
     {
-        return AccessibilityHandler::getCurrentState()
-            .withAccessibleOffscreen();
+        return modalResilientReadOnlyState();
+    }
+};
+
+class ReadOnlyAgentRootHandler final : public AccessibilityHandler
+{
+public:
+    explicit ReadOnlyAgentRootHandler (Component& component)
+        : AccessibilityHandler (
+              component,
+              AccessibilityRole::group,
+              AccessibilityActions {})
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        return modalResilientReadOnlyState();
     }
 };
 }
@@ -127,6 +148,7 @@ AgentAccessibilityBridge::AgentAccessibilityBridge (
     setHelpText (
         "Exposes allowlisted transport state without control actions.");
     setAccessible (true);
+    setFocusContainerType (FocusContainerType::focusContainer);
     setInterceptsMouseClicks (false, false);
 
     acquisitionNode = std::make_unique<TransportNode> (
@@ -145,8 +167,5 @@ AgentAccessibilityBridge::AgentAccessibilityBridge (
 std::unique_ptr<AccessibilityHandler>
 AgentAccessibilityBridge::createAccessibilityHandler()
 {
-    return std::make_unique<AccessibilityHandler> (
-        *this,
-        AccessibilityRole::group,
-        AccessibilityActions {});
+    return std::make_unique<ReadOnlyAgentRootHandler> (*this);
 }
