@@ -12,6 +12,7 @@ from .native_client import NativeClientError
 PRODUCT_VERSION = "0.0.1"
 NATIVE_SCHEMA_VERSION = "oe-agent-control-preview/v0.0.1"
 COMPATIBLE_GUI_VERSION = "1.0.2"
+COMPATIBLE_FORK_GUI_VERSION = "1.0.2-agent-v0.0.1"
 TOOLS = [
     "oe_get_identity",
     "oe_get_capabilities",
@@ -107,9 +108,12 @@ class ObservationService:
             },
             {
                 "name": "gui_version_compatible",
-                "pass": status.gui_version == COMPATIBLE_GUI_VERSION,
+                "pass": status.gui_version
+                in {COMPATIBLE_GUI_VERSION, COMPATIBLE_FORK_GUI_VERSION},
                 "observed": status.gui_version,
-                "expected": COMPATIBLE_GUI_VERSION,
+                "expected": (
+                    f"{COMPATIBLE_GUI_VERSION} or {COMPATIBLE_FORK_GUI_VERSION}"
+                ),
             },
             {
                 "name": "online",

@@ -38,8 +38,13 @@ class NativeClient:
             with urllib.request.urlopen(request, timeout=5) as response:
                 body = response.read(self._MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as error:
+            code = (
+                "NATIVE_UNAUTHORIZED"
+                if error.code in {401, 403}
+                else "NATIVE_HTTP_ERROR"
+            )
             raise NativeClientError(
-                "NATIVE_HTTP_ERROR", f"Native endpoint returned HTTP {error.code}."
+                code, f"Native endpoint returned HTTP {error.code}."
             ) from error
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise NativeClientError(

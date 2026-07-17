@@ -1,0 +1,36 @@
+{
+  "schema_version": "oe-agent-mcp-live-acceptance/v0.0.1",
+  "observed_at_utc": "2026-07-17T02:25:22.650530+00:00",
+  "process_id": 33060,
+  "native_executable": "D:\\cong\\.worktrees\\06-open-ephys-agent-v0.0.1\\Build-runtime\\Release\\open-ephys.exe",
+  "native_sha256": "7372F47050B2478BD8BE1B5210B300243C1A437C7E79963594FC9D6AB0695823",
+  "mcp_executable": "D:\\cong\\artifacts\\open-ephys-agent-v0.0.1\\mcp-staging\\open-ephys-agent-mcp.exe",
+  "mcp_sha256": "926E8B8243D18D7B902BBAFFB78069C0A8C435A205B255DAF4C2E3FD41B4114D",
+  "transport": "stdio MCP -> authenticated loopback native fork endpoint",
+  "base_url_redacted": "http://127.0.0.1:38498",
+  "token_persisted": false,
+  "before": {
+    "mode": "IDLE",
+    "revision": 1,
+    "session_id": "18563ace239c18014b39eeb802a0e4f7"
+  },
+  "after": {
+    "mode": "IDLE",
+    "revision": 1,
+    "session_id": "18563ace239c18014b39eeb802a0e4f7"
+  },
+  "checks": {
+    "exact_tool_allowlist": true,
+    "exact_resource_allowlist": true,
+    "all_tools_ok": true,
+    "all_resources_ok": true,
+    "readonly_preflight_pass": true,
+    "state_unchanged": true,
+    "mutation_unavailable": true,
+    "wrong_token_fails_closed": true,
+    "native_port_not_used": true,
+    "unknown_tool_rejected": true,
+    "unknown_field_rejected": true
+  },
+  "result": "PASS"
+}

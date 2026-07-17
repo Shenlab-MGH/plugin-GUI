@@ -92,8 +92,17 @@ def test_rejects_invalid_or_oversized_status(body: bytes, code: str) -> None:
     assert caught.value.code == code
 
 
-def test_maps_http_failure_without_leaking_token() -> None:
+def test_maps_unauthorized_without_leaking_token() -> None:
     with fake_status_server(b'{"error":"UNAUTHORIZED"}', status=401) as (url, _):
+        with pytest.raises(NativeClientError) as caught:
+            client_for(url).get_status()
+
+    assert caught.value.code == "NATIVE_UNAUTHORIZED"
+    assert TOKEN not in str(caught.value)
+
+
+def test_maps_other_http_failure_without_leaking_token() -> None:
+    with fake_status_server(b'{"error":"FAIL"}', status=500) as (url, _):
         with pytest.raises(NativeClientError) as caught:
             client_for(url).get_status()
 

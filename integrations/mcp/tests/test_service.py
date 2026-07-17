@@ -103,6 +103,21 @@ def test_preflight_fails_closed(
     assert result["revision"] == 3
 
 
+def test_preflight_accepts_the_versioned_agent_fork() -> None:
+    result = ObservationService(
+        StubClient(status(gui_version="1.0.2-agent-v0.0.1"))
+    ).run_readonly_preflight()
+
+    assert result["pass"] is True
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["gui_version_compatible"] == {
+        "name": "gui_version_compatible",
+        "pass": True,
+        "observed": "1.0.2-agent-v0.0.1",
+        "expected": "1.0.2 or 1.0.2-agent-v0.0.1",
+    }
+
+
 def test_native_client_error_becomes_machine_readable_failure() -> None:
     service = ObservationService(
         StubClient(NativeClientError("NATIVE_UNAVAILABLE", "offline"))
