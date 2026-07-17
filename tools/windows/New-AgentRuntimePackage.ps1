@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath $cmakeCache -PathType Leaf)) {
     throw "Release directory has no adjacent CMakeCache.txt: $release"
 }
 $cacheText = Get-Content -LiteralPath $cmakeCache -Raw
-if ($cacheText -notmatch '(?m)^BUILD_TESTS:(?:BOOL|UNINITIALIZED)=OFF$') {
+if ($cacheText -notmatch '(?m)^BUILD_TESTS:(?:BOOL|UNINITIALIZED)=OFF\r?$') {
     throw 'Runtime packages must come from a BUILD_TESTS=OFF build.'
 }
 if (Get-ChildItem -LiteralPath $release -Filter 'gui_testable_source.*') {
