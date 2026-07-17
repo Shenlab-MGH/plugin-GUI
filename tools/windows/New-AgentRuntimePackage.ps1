@@ -15,6 +15,18 @@ if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "Release directory has no open-ephys.exe: $release"
 }
 
+$cmakeCache = Join-Path (Split-Path -Parent $release) 'CMakeCache.txt'
+if (-not (Test-Path -LiteralPath $cmakeCache -PathType Leaf)) {
+    throw "Release directory has no adjacent CMakeCache.txt: $release"
+}
+$cacheText = Get-Content -LiteralPath $cmakeCache -Raw
+if ($cacheText -notmatch '(?m)^BUILD_TESTS:BOOL=OFF$') {
+    throw 'Runtime packages must come from a BUILD_TESTS=OFF build.'
+}
+if (Get-ChildItem -LiteralPath $release -Filter 'gui_testable_source.*') {
+    throw 'Runtime package contains test-only gui_testable_source artifacts.'
+}
+
 $destinationPath = [System.IO.Path]::GetFullPath($Destination)
 New-Item -ItemType Directory -Force -Path $destinationPath | Out-Null
 Copy-Item -Path (Join-Path $release '*') `

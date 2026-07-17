@@ -62,6 +62,10 @@ def main() -> None:
             "Package manifest must identify its source commit",
         "source_dirty":
             "Package manifest must disclose uncommitted source",
+        "BUILD_TESTS:BOOL=OFF":
+            "Runtime packages must reject test-linked builds",
+        "gui_testable_source.*":
+            "Runtime packages must reject test-only host artifacts",
         "Start-IsolatedAgentRuntime.ps1":
             "Package must include its safe launcher",
         "Test-IsolatedAgentRuntime.ps1":
