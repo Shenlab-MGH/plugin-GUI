@@ -41,7 +41,8 @@ $contracts = @(
     'Tests\AgentContracts\test_isolated_runtime_launcher_source.py',
     'Tests\AgentContracts\test_mcp_skill_packaging_source.py',
     'Tests\AgentContracts\test_control_panel_experiment_adapter_source.py',
-    'Tests\AgentContracts\test_recording_safety_integration_source.py'
+    'Tests\AgentContracts\test_recording_safety_integration_source.py',
+    'Tests\AgentContracts\test_preset_capability_probe_source.py'
 )
 
 foreach ($contract in $contracts) {
