@@ -72,6 +72,8 @@ def main() -> None:
             "Package must include its safe launcher",
         "Test-IsolatedAgentRuntime.ps1":
             "Package must include its read-only verifier",
+        "Test-AgentAccessibility.ps1":
+            "Package must include its native UIA acceptance verifier",
     }
     for fragment, message in package_contract.items():
         require(PACKAGER, fragment, message)

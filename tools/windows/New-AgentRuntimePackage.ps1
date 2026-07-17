@@ -39,6 +39,9 @@ Copy-Item -LiteralPath (
 Copy-Item -LiteralPath (
     Join-Path $PSScriptRoot 'Test-IsolatedAgentRuntime.ps1'
 ) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'Test-AgentAccessibility.ps1'
+) -Destination $destinationPath -Force
 
 $files = @(
     Get-ChildItem -LiteralPath $destinationPath -File -Recurse |
