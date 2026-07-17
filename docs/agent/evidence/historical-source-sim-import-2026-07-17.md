@@ -28,7 +28,7 @@ native HTTP port.
 | Required files | 5 per part, 40 total |
 | Continuous bytes | 1,051,852,800 |
 | Samples | 1,369,600 |
-| Delivery SHA-256 | `d20055ec0e1f4e78f0a5308e8bdb290e2f3f9cc71efc829e2954fd00f1e42b39` |
+| Canonical validated-evidence digest | `d20055ec0e1f4e78f0a5308e8bdb290e2f3f9cc71efc829e2954fd00f1e42b39` |
 | Qualifies current fork | `false` |
 
 The validator resolves each recording unit from the report's exact Record Node
@@ -37,6 +37,11 @@ present. It never selects the newest directory. It verifies the strict delivery
 hash manifest, required-file hashes and sizes, `structure.oebin`, continuous
 byte count, NPY array sizes/counts, sequential sample numbers, finite
 timestamps, and the report's structural checks.
+
+The JSON field remains named `delivery_sha256` for schema compatibility, but
+`delivery_sha256_kind=canonical_validated_evidence_digest` makes clear that it
+hashes the canonical validated evidence projection, not every byte in the full
+directory tree.
 
 ## Qualification boundary
 

@@ -88,3 +88,58 @@ delivery-summary entries. Raw per-part required files are independently hashed
 and included in the deterministic result because they are not entries in that
 legacy manifest. This importer proves historical feasibility only; it cannot
 qualify the current executable or replace fresh current-HEAD acceptance.
+
+## Reviewer remediation
+
+### Additional RED evidence
+
+The reviewer regression expansion was run before implementation with:
+
+```powershell
+py -3.12 -m uv run --frozen --project integrations\mcp pytest -q -p no:cacheprovider integrations\mcp\tests\experiment\test_historical_source_sim.py
+```
+
+Observed: `26 failed, 22 passed`. Failures covered strict `settings.xml`
+cross-correlation, timestamp recomputation, canonical manifest aliases,
+extended secret patterns, duplicate/non-finite/unknown JSON, same-size and
+mtime-restored content mutation, and swap-restore identity mutation. A later
+focused hard-link identity regression also failed with the expected prior
+behavior (`SETTINGS_XML_MISMATCH` instead of `FILE_IDENTITY_COLLISION`).
+
+### Reviewer fixes
+
+- Windows validation now holds verified handles for the root, every directory,
+  and every file with write/delete sharing denied for the full validation.
+  Final handle paths, reparse attributes, volume/file IDs, case collisions, and
+  hard-link identity collisions are checked. Reads and hashes use those held
+  handles rather than reopening paths.
+- `settings.xml` is bounded and parsed independently. Per-part OneBox,
+  `ProbeA`, SIM firmware, NP2013, Multishank probe, exact preset, second `NONE`
+  preset, and Record Node 101 are cross-correlated with report and
+  `structure.oebin` evidence.
+- Timestamps are recomputed from bounded NPY data and must be finite, never
+  `-1`, strictly increasing, approximately 1/30000 seconds apart, and have the
+  correct total span and count. Sample numbers are streamed without expanding
+  unbounded Python lists.
+- JSON parsing rejects duplicate keys and NaN/Infinity, then applies exact
+  object allowlists and strict scalar types. Secret scanning includes compact
+  key aliases plus GitHub, AWS, JWT, bearer and PEM patterns.
+- Manifest paths must be canonical and reject empty segments, `.` aliases,
+  traversal, separators, control characters and trailing separators.
+- File/header/count sizes are bounded and filesystem `OSError` races become
+  stable machine errors.
+- `delivery_sha256_kind=canonical_validated_evidence_digest` documents the
+  digest boundary.
+
+Real symlink creation is attempted by the integration test. On Windows hosts
+where ordinary-user symlink creation is denied, the same branch is exercised
+through reparse detection injection; junction/reparse handling is also enforced
+by the real Win32 handle attributes in the authoritative-root run.
+
+### Final GREEN evidence
+
+- Focused reviewer suite: `50 passed`.
+- Full locked MCP/Skill suite: `448 passed in 13.45s`.
+- Authoritative historical root: exit 0, 8 parts,
+  `qualifies_current_fork=false`, canonical validated-evidence digest
+  `d20055ec0e1f4e78f0a5308e8bdb290e2f3f9cc71efc829e2954fd00f1e42b39`.

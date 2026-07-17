@@ -95,7 +95,25 @@ def delivery(tmp_path: Path) -> tuple[Path, dict[str, object]]:
         unit = node / "experiment1" / "recording1"
         stream = unit / "continuous" / "OneBox-100.ProbeA"
         stream.mkdir(parents=True)
-        (node / "settings.xml").write_text("<SETTINGS/>", encoding="utf-8")
+        (node / "settings.xml").write_text(
+            f"""<SETTINGS><SIGNALCHAIN>
+<PROCESSOR name="OneBox" nodeId="100" pluginName="OneBox">
+  <STREAM name="ProbeA" sample_rate="30000.0" channel_count="384" />
+  <EDITOR><NEUROPIXELS_EDITOR>
+    <NP_PROBE bs_firmware_version="SIM 0.0" probe_part_number="NP2013"
+      probe_name="Neuropixels 2.0 - Multishank"
+      electrodeConfigurationPreset="{preset}" />
+    <NP_PROBE bs_firmware_version="SIM 0.0" probe_part_number="NP2013"
+      probe_name="Neuropixels 2.0 - Multishank"
+      electrodeConfigurationPreset="NONE" />
+  </NEUROPIXELS_EDITOR></EDITOR>
+</PROCESSOR>
+<PROCESSOR name="Record Node" nodeId="101" pluginName="Record Node">
+  <STREAM name="ProbeA" sample_rate="30000.0" channel_count="384" />
+</PROCESSOR>
+</SIGNALCHAIN></SETTINGS>""",
+            encoding="utf-8",
+        )
         (unit / "structure.oebin").write_text(
             json.dumps(
                 {
@@ -294,6 +312,54 @@ def test_rejects_record_node_identity_mismatch(
 
 
 @pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("electrodeConfigurationPreset", "All Shanks 97-192"),
+        ("bs_firmware_version", "REAL 1.0"),
+        ("probe_part_number", "NP9999"),
+    ],
+)
+def test_rejects_settings_probe_mismatch(
+    delivery: tuple[Path, dict[str, object]], attribute: str, value: str
+) -> None:
+    root, _ = delivery
+    settings = next(root.rglob("settings.xml"))
+    text = settings.read_text(encoding="utf-8")
+    text = text.replace(f'{attribute}="{PRESETS[0] if attribute == "electrodeConfigurationPreset" else "SIM 0.0" if attribute == "bs_firmware_version" else "NP2013"}"', f'{attribute}="{value}"', 1)
+    settings.write_text(text, encoding="utf-8")
+    expect_error(root, "SETTINGS_XML_MISMATCH")
+
+
+def test_rejects_settings_record_node_mismatch(
+    delivery: tuple[Path, dict[str, object]],
+) -> None:
+    root, _ = delivery
+    settings = next(root.rglob("settings.xml"))
+    text = settings.read_text(encoding="utf-8").replace(
+        'name="Record Node" nodeId="101"', 'name="Record Node" nodeId="102"'
+    )
+    settings.write_text(text, encoding="utf-8")
+    expect_error(root, "SETTINGS_XML_MISMATCH")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [0.0, 1 / 30000, float("nan"), 3 / 30000],
+        [0.0, 1 / 30000, -1.0, 3 / 30000],
+        [0.0, 1 / 30000, 1 / 30000, 3 / 30000],
+        [0.0, 1 / 20000, 2 / 20000, 3 / 20000],
+    ],
+)
+def test_rejects_invalid_recomputed_timestamps(
+    delivery: tuple[Path, dict[str, object]], values: list[float]
+) -> None:
+    root, _ = delivery
+    write_npy(next(root.rglob("timestamps.npy")), "<f8", values)
+    expect_error(root, "TIMESTAMPS_INVALID")
+
+
+@pytest.mark.parametrize(
     ("kind", "code"),
     [
         ("malformed", "HASH_MANIFEST_MALFORMED"),
@@ -328,6 +394,27 @@ def test_rejects_bad_hash_manifest(
         (root / MANIFEST_PATHS[0]).write_bytes(b"changed")
     manifest.write_text("\n".join(lines) + "\n", encoding="ascii")
     expect_error(root, code)
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "video//full_workflow.mp4",
+        "video/./full_workflow.mp4",
+        "video/full_workflow.mp4/",
+        "video/full_workflow.mp4\x01",
+        "C:drive-relative",
+    ],
+)
+def test_rejects_noncanonical_manifest_alias(
+    delivery: tuple[Path, dict[str, object]], alias: str
+) -> None:
+    root, _ = delivery
+    manifest = root / "SHA256SUMS.txt"
+    lines = manifest.read_text(encoding="ascii").splitlines()
+    lines[1] = f"{'a' * 64}  {alias}"
+    manifest.write_text("\n".join(lines) + "\n", encoding="ascii")
+    expect_error(root, "HASH_MANIFEST_PATH_INVALID")
 
 
 def test_rejects_symlink_escape(
@@ -365,11 +452,69 @@ def test_rejects_secret_like_report_field(
     expect_error(root, "SECRET_LIKE_REPORT_CONTENT")
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("accessToken", "ordinary-value"),
+        ("passwd", "ordinary-value"),
+        ("authorization", "ordinary-value"),
+        ("cookie", "ordinary-value"),
+        ("note", "ghp_abcdefghijklmnopqrstuvwxyz123456"),
+        ("note", "AKIAABCDEFGHIJKLMNOP"),
+        ("note", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature"),
+        ("note", "-----BEGIN PRIVATE KEY-----"),
+    ],
+)
+def test_rejects_extended_secret_patterns(
+    delivery: tuple[Path, dict[str, object]], field: str, value: str
+) -> None:
+    root, report = delivery
+    report[field] = value
+    write_report(root, report)
+    write_manifest(root)
+    expect_error(root, "SECRET_LIKE_REPORT_CONTENT")
+
+
+def test_rejects_json_duplicate_key(delivery: tuple[Path, dict[str, object]]) -> None:
+    root, _ = delivery
+    report_path = root / "data" / "run_report.json"
+    text = report_path.read_text(encoding="utf-8")
+    report_path.write_text(text.replace('{\n  "authorized_by"', '{\n  "ok": true,\n  "authorized_by"'), encoding="utf-8")
+    write_manifest(root)
+    expect_error(root, "JSON_DUPLICATE_KEY")
+
+
+def test_rejects_json_nan(delivery: tuple[Path, dict[str, object]]) -> None:
+    root, _ = delivery
+    report_path = root / "data" / "run_report.json"
+    text = report_path.read_text(encoding="utf-8").replace(
+        '"requested_duration_seconds": 3.0', '"requested_duration_seconds": NaN'
+    )
+    report_path.write_text(text, encoding="utf-8")
+    write_manifest(root)
+    expect_error(root, "JSON_NONFINITE")
+
+
+@pytest.mark.parametrize("mutation", ["unknown-field", "bool-as-int"])
+def test_rejects_non_strict_report_schema(
+    delivery: tuple[Path, dict[str, object]], mutation: str
+) -> None:
+    root, report = delivery
+    if mutation == "unknown-field":
+        report["unexpected"] = "value"
+    else:
+        report["parts"][0]["part"] = True
+    write_report(root, report)
+    write_manifest(root)
+    expect_error(root, "RUN_REPORT_SCHEMA_INVALID")
+
+
 def test_rejects_evidence_mutation_during_validation(
     delivery: tuple[Path, dict[str, object]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, _ = delivery
     continuous = next(root.rglob("continuous.dat"))
+    original_stat = continuous.stat()
     real_parse = historical_module._parse_manifest
 
     def parse_then_mutate(candidate: Path) -> list[dict[str, object]]:
@@ -377,10 +522,47 @@ def test_rejects_evidence_mutation_during_validation(
         payload = bytearray(continuous.read_bytes())
         payload[0] ^= 1
         continuous.write_bytes(payload)
+        os.utime(
+            continuous,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+        )
         return entries
 
     monkeypatch.setattr(historical_module, "_parse_manifest", parse_then_mutate)
     expect_error(root, "EVIDENCE_MUTATED_DURING_VALIDATION")
+
+
+def test_rejects_swap_and_restore_during_validation(
+    delivery: tuple[Path, dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root, _ = delivery
+    continuous = next(root.rglob("continuous.dat"))
+    backup = continuous.with_suffix(".original")
+    replacement = tmp_path / "replacement.dat"
+    replacement.write_bytes(continuous.read_bytes())
+    real_parse = historical_module._parse_manifest
+
+    def parse_then_swap_restore(candidate: Path) -> list[dict[str, object]]:
+        entries = real_parse(candidate)
+        os.replace(continuous, backup)
+        os.replace(replacement, continuous)
+        os.replace(backup, continuous)
+        return entries
+
+    monkeypatch.setattr(historical_module, "_parse_manifest", parse_then_swap_restore)
+    expect_error(root, "EVIDENCE_MUTATED_DURING_VALIDATION")
+
+
+def test_rejects_duplicate_file_identity_alias(
+    delivery: tuple[Path, dict[str, object]],
+) -> None:
+    root, _ = delivery
+    settings = sorted(root.rglob("settings.xml"))
+    settings[1].unlink()
+    os.link(settings[0], settings[1])
+    expect_error(root, "FILE_IDENTITY_COLLISION")
 
 
 def test_readonly_cli_prints_machine_result(
