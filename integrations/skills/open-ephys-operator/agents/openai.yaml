@@ -1,0 +1,11 @@
+interface:
+  display_name: "Open Ephys Operator"
+  short_description: "Observe Open Ephys safely through typed MCP"
+  default_prompt: "Use $open-ephys-operator to verify Open Ephys identity, status, and read-only preflight."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "open-ephys-agent"
+      description: "Local read-only Open Ephys Agent MCP server"
+      transport: "stdio"
