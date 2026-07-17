@@ -26,6 +26,13 @@ def main() -> None:
     assert "Record Engine | UNCHANGED_BOUNDARY" in registry, (
         "The unchanged Record Engine boundary must be explicit"
     )
+    gate = read("tools/windows/Test-OfficialDiffCoverage.ps1")
+    assert "ls-files" in gate and "--others" in gate, (
+        "The disclosure gate must include untracked production files"
+    )
+    assert "SOURCE_DIRTY" in package, (
+        "Runtime packaging must reject a dirty source tree"
+    )
     print("PASS official difference coverage source contract")
 
 

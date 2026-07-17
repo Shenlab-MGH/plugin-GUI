@@ -80,6 +80,12 @@ add_agent_core_test(
 )
 
 add_agent_core_test(
+    AgentExperimentDirectoryTests
+    AgentExperimentDirectoryTests.cpp
+    ../../Source/Agent/AgentExperimentDirectory.cpp
+)
+
+add_agent_core_test(
     RuntimeOptionsTests
     RuntimeOptionsTests.cpp
     ../../Source/Agent/RuntimeOptions.cpp

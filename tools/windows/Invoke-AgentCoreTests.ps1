@@ -121,3 +121,8 @@ Invoke-CompileAndRun -Name 'AgentStateSnapshotCacheTests' -Sources @(
     'Tests\AgentCore\AgentStateSnapshotCacheTests.cpp',
     'Source\Agent\AgentStateSnapshotCache.cpp'
 )
+
+Invoke-CompileAndRun -Name 'AgentExperimentDirectoryTests' -Sources @(
+    'Tests\AgentCore\AgentExperimentDirectoryTests.cpp',
+    'Source\Agent\AgentExperimentDirectory.cpp'
+)

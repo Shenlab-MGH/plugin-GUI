@@ -18,13 +18,21 @@ if ($LASTEXITCODE -ne 0) {
     throw "OFFICIAL_BASELINE_MISSING: $officialCommit"
 }
 
-$changed = @(
-    & git -C $repo diff --name-only "$officialCommit...HEAD" -- `
+$changedTracked = @(
+    & git -C $repo diff --name-only $officialCommit -- `
         Source Plugins CMakeLists.txt JuceLibraryCode
 )
 if ($LASTEXITCODE -ne 0) {
     throw 'OFFICIAL_DIFF_FAILED: git diff failed.'
 }
+$untracked = @(
+    & git -C $repo ls-files --others --exclude-standard -- `
+        Source Plugins CMakeLists.txt JuceLibraryCode
+)
+if ($LASTEXITCODE -ne 0) {
+    throw 'OFFICIAL_DIFF_FAILED: git ls-files failed.'
+}
+$changed = @($changedTracked + $untracked | Sort-Object -Unique)
 
 $registered = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::Ordinal
@@ -50,4 +58,3 @@ if ($undisclosed.Count -gt 0) {
     changed_production_files = $changed.Count
     registered_changed_files = $changed.Count
 } | ConvertTo-Json
-

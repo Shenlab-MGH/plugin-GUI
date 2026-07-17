@@ -12,6 +12,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$dirty = @(& git -C $repoRoot status --porcelain=v1)
+if ($dirty.Count -ne 0) {
+    throw 'SOURCE_DIRTY: commit or remove every worktree change before packaging.'
+}
 & pwsh -NoProfile -File (
     Join-Path $PSScriptRoot 'Test-OfficialDiffCoverage.ps1'
 ) -Repository $repoRoot

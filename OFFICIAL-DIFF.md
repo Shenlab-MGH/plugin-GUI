@@ -19,6 +19,8 @@ otherwise. Scientific acquisition and recording parity remains a release gate.
 | Source/Agent/AgentCommand.h | ADDED | No typed Agent commands | Defines typed command origin and kind | Incorrect dispatch | AgentCommandTests | Agent mode off |
 | Source/Agent/AgentControlProtocol.cpp | ADDED | No Agent JSON contract | Strict authenticated protocol serialization | Parser exposure | AgentControlProtocolTests | Agent mode off |
 | Source/Agent/AgentControlProtocol.h | ADDED | No Agent JSON contract | Declares strict protocol | Parser exposure | AgentControlProtocolTests | Agent mode off |
+| Source/Agent/AgentExperimentDirectory.cpp | ADDED | No Agent directory policy | Validates exact independent per-part directory targets | Stricter Agent naming behavior | AgentExperimentDirectoryTests | Agent mode off |
+| Source/Agent/AgentExperimentDirectory.h | ADDED | No Agent directory policy | Declares fail-closed directory request and decision types | Stricter Agent naming behavior | AgentExperimentDirectoryTests | Agent mode off |
 | Source/Agent/AgentLoopbackServer.cpp | ADDED | No Agent listener | Authenticated literal-loopback server | New local control surface | AgentLoopbackServerTests | Agent mode off |
 | Source/Agent/AgentLoopbackServer.h | ADDED | No Agent listener | Declares loopback server | New local control surface | AgentLoopbackServerTests | Agent mode off |
 | Source/Agent/AgentState.cpp | ADDED | No Agent state revision | Observed state and monotonic revision | Stale state | AgentStateTests | Agent mode off |
@@ -64,4 +66,3 @@ otherwise. Scientific acquisition and recording parity remains a release gate.
 | Record Engine | UNCHANGED_BOUNDARY | Native recording engines and write threads are not modified. |
 | Binary format | UNCHANGED_BOUNDARY | Native hierarchy and file format remain official. |
 | Sampling and signal processing | UNCHANGED_BOUNDARY | Sample transport and processor algorithms are not modified. |
-
