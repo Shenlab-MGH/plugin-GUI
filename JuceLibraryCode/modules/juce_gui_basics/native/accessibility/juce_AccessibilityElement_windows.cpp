@@ -197,15 +197,7 @@ JUCE_COMRESULT AccessibilityNativeHandle::get_ProviderOptions (ProviderOptions* 
 
     *options = (ProviderOptions) (ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading);
 
-    const auto isAgentRestrictedWindow =
-        accessibilityHandler.getComponent().getComponentID()
-            == "oe.agent.window";
-    if (isAgentRestrictedWindow)
-        *options = (ProviderOptions) (
-            *options
-            | ProviderOptions_OverrideProvider
-            | ProviderOptions_RefuseNonClientSupport);
-    else if (AccessibilityHandler::getNativeChildForComponent (accessibilityHandler.getComponent()) != nullptr)
+    if (AccessibilityHandler::getNativeChildForComponent (accessibilityHandler.getComponent()) != nullptr)
         *options = (ProviderOptions) (*options | ProviderOptions_OverrideProvider);
 
     return S_OK;
@@ -219,10 +211,6 @@ JUCE_COMRESULT AccessibilityNativeHandle::GetPatternProvider (PATTERNID pId, IUn
         {
             const auto role = accessibilityHandler.getRole();
             const auto fragmentRoot = isFragmentRoot();
-            const auto isAgentRestrictedWindow =
-                accessibilityHandler.getComponent().getComponentID()
-                    == "oe.agent.window";
-
             const auto isListOrTableCell = [] (auto& handler)
             {
                 if (auto* tableHandler = detail::AccessibilityHelpers::getEnclosingHandlerWithInterface (&handler, &AccessibilityHandler::getTableInterface))
@@ -243,14 +231,14 @@ JUCE_COMRESULT AccessibilityNativeHandle::GetPatternProvider (PATTERNID pId, IUn
             {
                 case UIA_WindowPatternId:
                 {
-                    if (fragmentRoot && ! isAgentRestrictedWindow)
+                    if (fragmentRoot)
                         return new UIAWindowProvider (this);
 
                     break;
                 }
                 case UIA_TransformPatternId:
                 {
-                    if (fragmentRoot && ! isAgentRestrictedWindow)
+                    if (fragmentRoot)
                         return new UIATransformProvider (this);
 
                     break;

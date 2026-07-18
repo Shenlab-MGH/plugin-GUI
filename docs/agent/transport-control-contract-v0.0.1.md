@@ -117,18 +117,28 @@ Each descriptor is schema-versioned and declares its semantic control kind,
 required UIA pattern, and whether recording preflight is mandatory. Button
 metadata is populated from this single registry by strong control kind.
 
-The ordinary Open Ephys accessibility tree remains disabled in Agent mode.
+The ordinary Open Ephys editor accessibility subtree remains disabled in Agent
+mode. The standard top-level Windows HWND remains an operating-system UIA
+element and exposes WindowPattern and TransformPattern; therefore raw desktop
+automation with access to the user session can still close, move, or resize the
+window. `--agent-uia-readonly` is a transport-bridge policy, not a Windows
+desktop security boundary.
+
 The explicit `--agent-uia-readonly` option exposes one `oe.agent.root` group
 with exactly the two allowlisted transport nodes as direct children. Each node
 implements a read-only ValuePattern backed by the cached authoritative state.
-Neither node exposes InvokePattern or TogglePattern, so UIA cannot mutate the
-transport in v0.0.1.
+Neither transport node exposes InvokePattern or TogglePattern. The separate
+`--agent-uia-interactive` option adds InvokePattern only to those two nodes and
+routes each press through the verified, deadline-bounded transport endpoint.
 
 The provider deliberately remains enumerable while an Open Ephys modal dialog
 is open. It uses stable ComponentID-backed native AutomationId values and is
 enabled by the isolated launcher. `Test-AgentAccessibility.ps1` verifies the
-exact hierarchy, read-only patterns, 10,000 repeated reads, and unchanged
-native mode/revision before and after observation.
+exact hierarchy, read-only values, 10,000 repeated reads, unchanged native
+mode/revision before and after observation, and the exact full-process
+Invoke/Toggle/Window/Transform signature inventory. That inventory is limited
+to those four pattern families; it is not a claim that every possible UIA
+pattern family has been audited.
 
 Signal-chain editing, plugin parameters, recording paths, plugin installation,
 quit, and other controls are outside the v0.0.1 accessibility allowlist.
@@ -142,11 +152,11 @@ quit, and other controls are outside the v0.0.1 accessibility allowlist.
   endpoint directly. It binds only to `127.0.0.1:37498`, remains disabled
   unless `OE_AGENT_TOKEN` contains at least 32 characters, accepts explicit
   target-state request documents, and exposes request-result lookup. The
-  MainWindow integration deliberately starts it in observe-only mode, so POST
-  returns `403 MUTATION_NOT_ARMED`. Mutation is exercised only against a fake
-  executor in the isolated C++ HTTP integration test. The adapter is not
-  approved for research acquisition because the complete Open Ephys
-  application has not been built with MSVC or accepted against Source Sim.
+  MainWindow integration defaults to observe-only, so POST returns
+  `403 MUTATION_NOT_ARMED` unless the process is explicitly launched with the
+  mutation flag, a valid one-launch token, and a bounded process approval ID.
+  The adapter is not approved for research acquisition until the applicable
+  simulation and hardware acceptance gates pass.
 - The in-process adapter currently has no rate limiter, browser dashboard,
   operator approval exchange, or durable audit writer. Treat its bearer token
   as a local development credential and do not expose port 37498 beyond the
@@ -155,8 +165,10 @@ quit, and other controls are outside the v0.0.1 accessibility allowlist.
   does not yet include an observation timestamp or prove first-block arrival,
   sustained file growth, disk flush, or writer health; it must not be treated
   as experiment-quality recording evidence.
-- The native UIA adapter is observe-only. No UIA mutation, MCP server, or
-  named-pipe adapter consumes the endpoint yet.
+- The native UIA transport bridge defaults to read-only. Explicit interactive
+  mode adds only Acquisition and Recording Invoke actions. Separately, the
+  standard top-level HWND retains OS Window/Transform capabilities, so every
+  Agent still requires a tool-permission allowlist and human takeover policy.
 - A stopped endpoint retains the last observed transport mode as evidence, but
   reports `STOPPED` separately. Remote clients must never interpret the retained
   mode as proof that the application is still online.
@@ -225,5 +237,6 @@ The preview request body is:
 The parser rejects missing and unknown fields. Command, run, idempotency,
 approval, parameter-hash, and session identifiers are restricted to 1-128 ASCII
 alphanumeric characters plus `.`, `_`, `:`, and `-`. The MainWindow-hosted
-server currently rejects this POST regardless of body because v0.0.1 is
-observe-only.
+server accepts this POST only when mutation was explicitly armed for the
+process and the request approval matches the process approval; otherwise it
+fails closed.

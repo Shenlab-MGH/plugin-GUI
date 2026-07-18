@@ -71,6 +71,8 @@ def main() -> None:
             "Verifier must detect top-level close and visual-state control",
         "TransformPattern]::Pattern":
             "Verifier must detect top-level move and resize control",
+        "os_window_patterns_acknowledged":
+            "Verifier must report the unavoidable top-level HWND boundary",
         "ApprovedSimulationProfile":
             "Transport exercise must require a named simulation profile",
         "FILE_READER_GUI_SMOKE":

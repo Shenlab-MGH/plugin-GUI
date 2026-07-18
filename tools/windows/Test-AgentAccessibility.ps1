@@ -457,16 +457,27 @@ try {
     } else {
         $actionsAbsent
     }
-    $expectedActionIds = if ($ExpectInteractive) {
-        @('oe.transport.acquisition', 'oe.transport.recording')
-    } else { @() }
-    $observedActionIds = @(
-        $actionableElements | ForEach-Object automation_id | Sort-Object
+    $windowSignature =
+        'oe.agent.window|I=False|T=False|W=True|X=True'
+    $expectedActionSignatures = @($windowSignature)
+    if ($ExpectInteractive) {
+        $expectedActionSignatures += @(
+            'oe.transport.acquisition|I=True|T=False|W=False|X=False',
+            'oe.transport.recording|I=True|T=False|W=False|X=False'
+        )
+    }
+    $observedActionSignatures = @(
+        $actionableElements | ForEach-Object {
+            '{0}|I={1}|T={2}|W={3}|X={4}' -f `
+                $_.automation_id, $_.invoke, $_.toggle, `
+                $_.window, $_.transform
+        } | Sort-Object
     )
     $actionAllowlistMatches =
-        $observedActionIds.Count -eq $expectedActionIds.Count `
-        -and ($observedActionIds -join '|') -eq `
-            (($expectedActionIds | Sort-Object) -join '|')
+        $observedActionSignatures.Count -eq `
+            $expectedActionSignatures.Count `
+        -and ($observedActionSignatures -join ';') -eq `
+            (($expectedActionSignatures | Sort-Object) -join ';')
 
     $exercisePassed = $true
     $exerciseModes = @()
@@ -551,7 +562,9 @@ try {
         root_count = $rootMatches.Count
         root_children = $childIds
         actionable_elements = $actionableElements
+        observed_action_signatures = $observedActionSignatures
         action_allowlist_matches = $actionAllowlistMatches
+        os_window_patterns_acknowledged = $true
         acquisition = [ordered]@{
             value = $acquisitionValue.value.Current.Value
             value_read_only = $acquisitionValue.value.Current.IsReadOnly

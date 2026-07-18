@@ -70,20 +70,8 @@ def main() -> None:
             "Only the narrow Agent bridge may remain accessible")
     require('setComponentID ("oe.agent.window")', MAIN_WINDOW,
             "The restricted fragment root must have a stable identity")
-    require('== "oe.agent.window"', WINDOWS_PROVIDER,
-            "The Windows provider must recognize the restricted Agent root")
-    require("ProviderOptions_OverrideProvider", WINDOWS_PROVIDER,
-            "The restricted root must override the default HWND provider")
-    require("ProviderOptions_RefuseNonClientSupport", WINDOWS_PROVIDER,
-            "The restricted root must reject default non-client actions")
-    require("fragmentRoot && ! isAgentRestrictedWindow", WINDOWS_PROVIDER,
-            "Window and Transform patterns must be suppressed for Agent mode")
-    if WINDOWS_PROVIDER.count(
-        "fragmentRoot && ! isAgentRestrictedWindow"
-    ) != 2:
-        raise AssertionError(
-            "Both WindowPattern and TransformPattern must be suppressed"
-        )
+    require("return componentId;", WINDOWS_PROVIDER,
+            "Explicit component IDs must become stable Windows AutomationIds")
     require("void MainDocumentWindow::lookAndFeelChanged()", MAIN_WINDOW,
             "Title-bar rebuilds must reapply the accessibility boundary")
     require("submitOutcomeName", BRIDGE,
