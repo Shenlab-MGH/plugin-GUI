@@ -72,6 +72,10 @@ def main() -> None:
             "The restricted fragment root must have a stable identity")
     require('== "oe.agent.window"', WINDOWS_PROVIDER,
             "The Windows provider must recognize the restricted Agent root")
+    require("ProviderOptions_OverrideProvider", WINDOWS_PROVIDER,
+            "The restricted root must override the default HWND provider")
+    require("ProviderOptions_RefuseNonClientSupport", WINDOWS_PROVIDER,
+            "The restricted root must reject default non-client actions")
     require("fragmentRoot && ! isAgentRestrictedWindow", WINDOWS_PROVIDER,
             "Window and Transform patterns must be suppressed for Agent mode")
     if WINDOWS_PROVIDER.count(

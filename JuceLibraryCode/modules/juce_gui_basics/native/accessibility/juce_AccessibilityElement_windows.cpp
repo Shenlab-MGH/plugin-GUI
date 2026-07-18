@@ -197,7 +197,15 @@ JUCE_COMRESULT AccessibilityNativeHandle::get_ProviderOptions (ProviderOptions* 
 
     *options = (ProviderOptions) (ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading);
 
-    if (AccessibilityHandler::getNativeChildForComponent (accessibilityHandler.getComponent()) != nullptr)
+    const auto isAgentRestrictedWindow =
+        accessibilityHandler.getComponent().getComponentID()
+            == "oe.agent.window";
+    if (isAgentRestrictedWindow)
+        *options = (ProviderOptions) (
+            *options
+            | ProviderOptions_OverrideProvider
+            | ProviderOptions_RefuseNonClientSupport);
+    else if (AccessibilityHandler::getNativeChildForComponent (accessibilityHandler.getComponent()) != nullptr)
         *options = (ProviderOptions) (*options | ProviderOptions_OverrideProvider);
 
     return S_OK;
