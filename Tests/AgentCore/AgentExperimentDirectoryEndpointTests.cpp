@@ -68,6 +68,13 @@ int main()
     });
     require (endpoint->snapshot().revision == 7,
              "Authoritative GUI observations must be publishable");
+    endpoint->publishTransportState (AgentObservedMode::acquire, 8);
+    const auto transportRefreshedSnapshot = endpoint->snapshot();
+    require (transportRefreshedSnapshot.approvedRoot == "D:\\recordings",
+             "Transport refresh must preserve prepared directory fields");
+    require (transportRefreshedSnapshot.mode == AgentObservedMode::acquire
+                 && transportRefreshedSnapshot.revision == 8,
+             "Transport refresh must publish the current mode and revision");
 
     const AgentDirectoryEndpointRequest request {
         "run-1",

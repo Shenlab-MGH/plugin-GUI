@@ -89,6 +89,9 @@ public:
         const AgentDirectoryEndpointRequest& request);
     AgentDirectoryLookup query (const std::string& commandId) const;
     void publish (AgentRecordingDirectorySnapshot snapshot);
+    void publishTransportState (
+        AgentObservedMode mode,
+        std::uint64_t revision);
     AgentRecordingDirectorySnapshot snapshot() const;
     void beginShutdown();
 

@@ -1610,6 +1610,8 @@ AgentStateSnapshot ControlPanel::readState()
     const auto state = agentStateStore.observe (
         getAuthoritativeAgentMode());
     agentTransportEndpoint->publish (state);
+    agentExperimentDirectoryEndpoint->publishTransportState (
+        state.mode, state.revision);
     return state;
 }
 

@@ -149,6 +149,15 @@ void AgentExperimentDirectoryEndpoint::publish (
     currentSnapshot = std::move (snapshot);
 }
 
+void AgentExperimentDirectoryEndpoint::publishTransportState (
+    AgentObservedMode mode,
+    std::uint64_t revision)
+{
+    const std::lock_guard<std::mutex> lock (mutex);
+    currentSnapshot.mode = mode;
+    currentSnapshot.revision = revision;
+}
+
 void AgentExperimentDirectoryEndpoint::beginShutdown()
 {
     const std::lock_guard<std::mutex> lock (mutex);

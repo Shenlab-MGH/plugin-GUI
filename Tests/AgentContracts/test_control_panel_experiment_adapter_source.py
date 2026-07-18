@@ -26,6 +26,9 @@ def main() -> None:
     assert 'field->value = ""' in implementation
     assert "CoreServices::setRecordingStatus" not in adapter
     assert "AgentExperimentDirectoryEndpoint" in endpoint
+    assert "publishTransportState" in endpoint
+    assert "agentExperimentDirectoryEndpoint->publishTransportState (" in implementation
+    assert "state.mode, state.revision" in implementation
     assert 'Put ("/v1/experiment/directory"' in server
     assert "serializeDirectorySnapshot" in protocol
     assert "parseDirectoryRequest" in protocol
