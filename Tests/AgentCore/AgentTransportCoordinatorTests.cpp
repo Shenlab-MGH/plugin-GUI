@@ -138,6 +138,53 @@ int main()
                         == AgentTransportAction::requestSafeRecordingStart,
              "Recording must use only the safe recording action");
 
+    FakeRuntime expiredStart;
+    expiredStart.scriptedStates = {
+        { "1.0.2-agent", AgentObservedMode::idle, 30 },
+        { "1.0.2-agent", AgentObservedMode::idle, 30 }
+    };
+    const AgentTransportRequest expiredStartRequest {
+        "coordinator-expired-start",
+        AgentObservedMode::acquire,
+        30,
+        AgentObservedMode::idle,
+        {}, {}, {}, {},
+        1
+    };
+    const auto expiredStartResult = coordinator.apply (
+        expiredStartRequest,
+        expiredStart);
+    require (expiredStartResult.outcome
+                 == AgentTransportApplyOutcome::rejected,
+             "An expired start request must fail closed at commit");
+    require (expiredStart.executed.empty(),
+             "An expired start request must execute no action");
+
+    FakeRuntime expiredStop;
+    expiredStop.scriptedStates = {
+        { "1.0.2-agent", AgentObservedMode::acquire, 40 },
+        { "1.0.2-agent", AgentObservedMode::acquire, 40 },
+        { "1.0.2-agent", AgentObservedMode::idle, 41 }
+    };
+    const AgentTransportRequest expiredStopRequest {
+        "coordinator-expired-stop",
+        AgentObservedMode::idle,
+        40,
+        AgentObservedMode::acquire,
+        {}, {}, {}, {},
+        1
+    };
+    const auto expiredStopResult = coordinator.apply (
+        expiredStopRequest,
+        expiredStop);
+    require (expiredStopResult.outcome
+                 == AgentTransportApplyOutcome::completed,
+             "An expired failsafe stop must remain available");
+    require (expiredStop.executed.size() == 1
+                 && expiredStop.executed[0]
+                        == AgentTransportAction::stopAcquisition,
+             "Expired requests may execute only the safe stop action");
+
     std::cout << "PASS AgentTransportCoordinatorTests\n";
     return 0;
 }

@@ -16,6 +16,7 @@
 
 #include "AgentTransportCoordinator.h"
 
+#include <chrono>
 #include <utility>
 
 namespace
@@ -26,6 +27,19 @@ AgentTransportApplyResult makeResult (
     AgentStateSnapshot state)
 {
     return { outcome, std::move (plan), std::move (state) };
+}
+
+std::uint64_t monotonicMilliseconds()
+{
+    return static_cast<std::uint64_t> (
+        std::chrono::duration_cast<std::chrono::milliseconds> (
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+bool isStartAction (AgentTransportAction action)
+{
+    return action == AgentTransportAction::startAcquisition
+        || action == AgentTransportAction::requestSafeRecordingStart;
 }
 }
 
@@ -67,6 +81,17 @@ AgentTransportApplyResult AgentTransportCoordinator::apply (
         {
             return makeResult (
                 AgentTransportApplyOutcome::preconditionChanged,
+                std::move (transitionPlan),
+                before);
+        }
+
+        if (isStartAction (step.action)
+            && request.deadlineMonotonicMs != 0
+            && monotonicMilliseconds()
+                   > request.deadlineMonotonicMs)
+        {
+            return makeResult (
+                AgentTransportApplyOutcome::rejected,
                 std::move (transitionPlan),
                 before);
         }

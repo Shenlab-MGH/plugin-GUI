@@ -29,6 +29,8 @@ int main()
              "User plugins must retain official default behavior");
     require (! defaults.options.enableAgentUiaReadOnly,
              "Agent UIA must remain disabled by default");
+    require (! defaults.options.enableAgentUiaInteractive,
+             "Interactive Agent UIA must remain disabled by default");
     require (! defaults.options.enableAgentMutation,
              "Agent mutation must remain disabled by default");
     require (defaults.options.agentPort == 37498,
@@ -72,6 +74,14 @@ int main()
     require (uia.options.enableAgentUiaReadOnly,
              "The read-only UIA option must be preserved");
 
+    const auto interactiveUia = RuntimeOptions::parse ({
+        "--agent-uia-interactive"
+    });
+    require (interactiveUia.ok(),
+             "The interactive UIA option must parse");
+    require (interactiveUia.options.enableAgentUiaInteractive,
+             "The interactive UIA option must be preserved");
+
     const auto mutation = RuntimeOptions::parse ({
         "--agent-mutation"
     });
@@ -105,6 +115,21 @@ int main()
                    "--agent-uia-readonly"
                }).ok(),
              "Duplicate UIA switches must fail closed");
+    require (! RuntimeOptions::parse ({
+                   "--agent-uia-interactive",
+                   "--agent-uia-interactive"
+               }).ok(),
+             "Duplicate interactive UIA switches must fail closed");
+    require (! RuntimeOptions::parse ({
+                   "--agent-uia-readonly",
+                   "--agent-uia-interactive"
+               }).ok(),
+             "Read-only and interactive UIA must be mutually exclusive");
+    require (! RuntimeOptions::parse ({
+                   "--agent-uia-interactive",
+                   "--agent-uia-readonly"
+               }).ok(),
+             "Interactive and read-only UIA must be mutually exclusive");
     require (! RuntimeOptions::parse ({
                    "--agent-mutation",
                    "--agent-mutation"

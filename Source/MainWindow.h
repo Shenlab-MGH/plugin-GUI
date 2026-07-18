@@ -45,10 +45,16 @@ class MainDocumentWindow : public DocumentWindow
 {
 public:
     /** Constructor */
-    explicit MainDocumentWindow (bool enableAgentUiaReadOnly = false);
+    explicit MainDocumentWindow (bool enableAgentUia = false);
 
     /** Destructor */
     virtual ~MainDocumentWindow() {}
+
+    /** Re-applies the Agent accessibility boundary after title-bar rebuilds. */
+    void lookAndFeelChanged() override;
+
+    /** Hides every direct window subtree except the allowlisted Agent bridge. */
+    void enforceAgentAccessibilityBoundary();
 
     /** Called when the user hits the close button of the MainWindow. This destroys
         the MainWindow and closes the application. */
@@ -59,6 +65,9 @@ public:
     {
         return BorderSize<int> (1);
     }
+
+private:
+    bool agentUiaEnabled = false;
 };
 
 /**
@@ -163,7 +172,7 @@ private:
     /** A pointer to the DocumentWindow (only instantiated if running in GUI mode). */
     std::unique_ptr<MainDocumentWindow> documentWindow;
 
-    /** Narrow, read-only Agent accessibility branch. */
+    /** Narrow Agent accessibility branch with an explicit action mode. */
     std::unique_ptr<AgentAccessibilityBridge>
         agentAccessibilityBridge;
 

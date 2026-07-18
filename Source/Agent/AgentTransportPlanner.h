@@ -33,7 +33,8 @@ struct AgentTransportRequest
         std::string runIdToUse = {},
         std::string idempotencyKeyToUse = {},
         std::string approvalIdToUse = {},
-        std::string actionParametersHashToUse = {})
+        std::string actionParametersHashToUse = {},
+        std::uint64_t deadlineMonotonicMsToUse = 0)
         : requestId (std::move (requestIdToUse)),
           targetMode (targetModeToUse),
           expectedRevision (expectedRevisionToUse),
@@ -41,7 +42,8 @@ struct AgentTransportRequest
           runId (std::move (runIdToUse)),
           idempotencyKey (std::move (idempotencyKeyToUse)),
           approvalId (std::move (approvalIdToUse)),
-          actionParametersHash (std::move (actionParametersHashToUse))
+          actionParametersHash (std::move (actionParametersHashToUse)),
+          deadlineMonotonicMs (deadlineMonotonicMsToUse)
     {
     }
 
@@ -53,6 +55,7 @@ struct AgentTransportRequest
     std::string idempotencyKey;
     std::string approvalId;
     std::string actionParametersHash;
+    std::uint64_t deadlineMonotonicMs = 0;
 };
 
 enum class AgentTransportAction

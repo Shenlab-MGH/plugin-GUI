@@ -211,6 +211,9 @@ JUCE_COMRESULT AccessibilityNativeHandle::GetPatternProvider (PATTERNID pId, IUn
         {
             const auto role = accessibilityHandler.getRole();
             const auto fragmentRoot = isFragmentRoot();
+            const auto isAgentRestrictedWindow =
+                accessibilityHandler.getComponent().getComponentID()
+                    == "oe.agent.window";
 
             const auto isListOrTableCell = [] (auto& handler)
             {
@@ -232,14 +235,14 @@ JUCE_COMRESULT AccessibilityNativeHandle::GetPatternProvider (PATTERNID pId, IUn
             {
                 case UIA_WindowPatternId:
                 {
-                    if (fragmentRoot)
+                    if (fragmentRoot && ! isAgentRestrictedWindow)
                         return new UIAWindowProvider (this);
 
                     break;
                 }
                 case UIA_TransformPatternId:
                 {
-                    if (fragmentRoot)
+                    if (fragmentRoot && ! isAgentRestrictedWindow)
                         return new UIATransformProvider (this);
 
                     break;

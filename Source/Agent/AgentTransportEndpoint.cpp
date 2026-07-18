@@ -16,7 +16,27 @@
 
 #include "AgentTransportEndpoint.h"
 
+#include <chrono>
 #include <utility>
+
+namespace
+{
+std::uint64_t monotonicMilliseconds()
+{
+    return static_cast<std::uint64_t> (
+        std::chrono::duration_cast<std::chrono::milliseconds> (
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+bool isFailsafeTarget (
+    AgentObservedMode current,
+    AgentObservedMode target)
+{
+    return target == AgentObservedMode::idle
+        || (current == AgentObservedMode::record
+            && target == AgentObservedMode::acquire);
+}
+}
 
 std::shared_ptr<AgentTransportEndpoint>
 AgentTransportEndpoint::create (
@@ -171,6 +191,30 @@ void AgentTransportEndpoint::drain (
     const auto request = mailbox.takePending();
     if (! request || request->requestId != requestId)
         return;
+
+    const auto currentState = stateCache.snapshot();
+    if (request->deadlineMonotonicMs != 0
+        && monotonicMilliseconds() > request->deadlineMonotonicMs
+        && ! isFailsafeTarget (
+            currentState.mode,
+            request->targetMode))
+    {
+        mailbox.complete (
+            request->requestId,
+            {
+                AgentTransportApplyOutcome::rejected,
+                {
+                    AgentTransportPlanOutcome::invalidRequest,
+                    request->requestId,
+                    currentState.mode,
+                    request->targetMode,
+                    request->expectedRevision,
+                    {}
+                },
+                currentState
+            });
+        return;
+    }
 
     AgentTransportApplyResult result;
 

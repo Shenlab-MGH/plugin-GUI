@@ -15,6 +15,8 @@ param(
 
     [switch] $MaintenanceWindowApproved,
 
+    [switch] $EnableInteractiveUia,
+
     [switch] $EnableAgentMutation,
 
     [string] $ApprovalId
@@ -114,9 +116,14 @@ $arguments = @(
     '--state-dir', $statePath,
     '--no-http',
     '--agent-port', [string]$AgentPort,
-    '--no-user-plugins',
-    '--agent-uia-readonly'
+    '--no-user-plugins'
 )
+if (-not $EnableInteractiveUia) {
+    $arguments += '--agent-uia-readonly'
+}
+else {
+    $arguments += '--agent-uia-interactive'
+}
 if ($EnableAgentMutation) {
     $arguments += '--agent-mutation'
 }
@@ -173,7 +180,8 @@ $result = [ordered]@{
     agent_port = $AgentPort
     native_http_locked_off = $true
     user_plugins_locked_off = $true
-    agent_uia_readonly = $true
+    agent_uia_readonly = -not [bool]$EnableInteractiveUia
+    interactive_uia_enabled = [bool]$EnableInteractiveUia
     agent_mutation_enabled = [bool]$EnableAgentMutation
     approval_id = if ($EnableAgentMutation) { $ApprovalId } else { $null }
     token_present = $tokenPresent

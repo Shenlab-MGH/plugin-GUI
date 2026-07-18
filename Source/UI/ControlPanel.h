@@ -606,6 +606,7 @@ private:
     AgentTransportCoordinator agentTransportCoordinator;
     bool agentTransportTransactionActive = false;
     std::uint64_t agentActiveExpectedRevision = 0;
+    std::uint64_t agentActiveDeadlineMonotonicMs = 0;
     AgentRecordingDirectorySnapshot agentDirectorySnapshot;
 
     /** Internal state variables */

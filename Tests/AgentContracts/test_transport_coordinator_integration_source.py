@@ -29,6 +29,8 @@ def main() -> None:
             "Internal adapters need the coordinator entrypoint",
         "bool agentTransportTransactionActive = false;":
             "ControlPanel must reject re-entrant transport transactions",
+        "agentActiveDeadlineMonotonicMs":
+            "ControlPanel must retain the active monotonic deadline",
         "AgentStateSnapshot readState() override;":
             "The coordinator must read authoritative ControlPanel state",
         "AgentObservedMode getAuthoritativeAgentMode();":
@@ -50,6 +52,10 @@ def main() -> None:
             "Transport mutation must be restricted to the JUCE message thread",
         "AgentTransportApplyOutcome::busy":
             "A concurrent or re-entrant transaction must fail closed",
+        "request.deadlineMonotonicMs":
+            "The native mutation transaction must bind the request deadline",
+        "monotonicMilliseconds()":
+            "The native start entry must re-check the monotonic deadline",
         "AgentStateSnapshot ControlPanel::readState()":
             "ControlPanel must implement authoritative readback",
         "ControlPanel::getAgentTransportEndpoint() const":

@@ -20,6 +20,15 @@ def main() -> None:
     assert implementation.count("requestValidatedRecordingStart (") >= 3
     assert "AgentRecordingSafety" in implementation
     assert "Agent recording blocked: data streams not synchronized" in implementation
+    assert "Agent recording blocked: request deadline expired" in implementation
+    deadline_guard = implementation.index(
+        "Agent recording blocked: request deadline expired"
+    )
+    native_start = implementation.index(
+        "if (playButton->getToggleState())",
+        deadline_guard,
+    )
+    assert deadline_guard < native_start
     assert "CoreServices::setRecordingStatus (true" not in agent_sources
     assert "forceRecording = true" not in agent_sources
     print("PASS recording safety integration source contract")

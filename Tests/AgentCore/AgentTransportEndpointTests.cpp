@@ -153,6 +153,39 @@ int main()
                  == AgentMailboxTerminalReason::dispatchUnavailable,
              "Scheduler failure must report dispatchUnavailable");
 
+    auto expiring = AgentTransportEndpoint::create (
+        [&scheduled] (std::function<void()> callback)
+        {
+            scheduled.push_back (std::move (callback));
+            return true;
+        },
+        { "1.0.2-agent", AgentObservedMode::idle, 3 });
+    auto expiryExecutor = std::make_shared<FakeExecutor>();
+    expiring->attachExecutor (expiryExecutor);
+    const AgentTransportRequest expiredRequest {
+        "endpoint-expired",
+        AgentObservedMode::acquire,
+        3,
+        AgentObservedMode::idle,
+        {}, {}, {}, {},
+        1
+    };
+    require (expiring->submit (expiredRequest)
+                 == AgentMailboxSubmitOutcome::accepted,
+             "A bounded request must enter the mailbox");
+    scheduled.back()();
+    const auto expiredResult = expiring->query (
+        expiredRequest.requestId);
+    require (expiredResult.state
+                 == AgentMailboxRequestState::completed,
+             "An expired request must reach a terminal state");
+    require (expiredResult.result.has_value()
+                 && expiredResult.result->outcome
+                        == AgentTransportApplyOutcome::rejected,
+             "An expired request must fail closed before execution");
+    require (expiryExecutor->applyCount == 0,
+             "An expired request must never reach the executor");
+
     auto throwing = AgentTransportEndpoint::create (
         [&scheduled] (std::function<void()> callback)
         {

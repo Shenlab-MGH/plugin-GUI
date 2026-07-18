@@ -16,6 +16,12 @@ add_agent_core_test(
 )
 
 add_agent_core_test(
+    AgentAccessibilityActionTests
+    AgentAccessibilityActionTests.cpp
+    ../../Source/Agent/AgentAccessibilityAction.cpp
+)
+
+add_agent_core_test(
     ControlPanelCommandRouterTests
     ControlPanelCommandRouterTests.cpp
     ../../Source/Agent/ControlPanelCommandRouter.cpp

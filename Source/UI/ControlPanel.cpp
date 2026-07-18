@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "../Processors/RecordNode/RecordEngine.h"
 #include "FilenameConfigWindow.h"
 #include "UIComponent.h"
+#include <chrono>
 #include <math.h>
 #include <mutex>
 #include <stdio.h>
@@ -41,6 +42,13 @@ const int SIZE_AUDIO_EDITOR_MAX_WIDTH = 500;
 
 namespace
 {
+std::uint64_t monotonicMilliseconds()
+{
+    return static_cast<std::uint64_t> (
+        std::chrono::duration_cast<std::chrono::milliseconds> (
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 AgentTransportApplyResult makeRejectedTransportResult (
     const AgentTransportRequest& request,
     AgentTransportApplyOutcome outcome)
@@ -75,6 +83,7 @@ void applyTransportAccessibilityMetadata (
     button.setDescription (descriptor.description);
     button.setHelpText (descriptor.helpText);
     button.setTooltip (descriptor.helpText);
+    button.setAccessible (false);
 }
 
 }
@@ -1390,6 +1399,19 @@ bool ControlPanel::requestValidatedRecordingStart (
         return false;
     }
 
+    if (context.agentInitiated
+        && agentActiveDeadlineMonotonicMs != 0
+        && monotonicMilliseconds()
+               > agentActiveDeadlineMonotonicMs)
+    {
+        recordButton->setToggleState (
+            false,
+            dontSendNotification);
+        CoreServices::sendStatusMessage (
+            "Agent recording blocked: request deadline expired.");
+        return false;
+    }
+
     if (playButton->getToggleState())
     {
         startRecording();
@@ -1576,6 +1598,10 @@ AgentTransportApplyResult ControlPanel::applyAgentTransportRequest (
         agentActiveExpectedRevision,
         request.expectedRevision);
 
+    const ScopedValueSetter<std::uint64_t> deadlineGuard (
+        agentActiveDeadlineMonotonicMs,
+        request.deadlineMonotonicMs);
+
     return agentTransportCoordinator.apply (request, *this);
 }
 
@@ -1618,6 +1644,10 @@ bool ControlPanel::execute (AgentTransportAction action)
     switch (action)
     {
         case AgentTransportAction::startAcquisition:
+            if (agentActiveDeadlineMonotonicMs != 0
+                && monotonicMilliseconds()
+                       > agentActiveDeadlineMonotonicMs)
+                return false;
             playButton->setToggleState (
                 true,
                 dontSendNotification);
@@ -1636,6 +1666,10 @@ bool ControlPanel::execute (AgentTransportAction action)
             return ! audio->callbacksAreActive();
 
         case AgentTransportAction::requestSafeRecordingStart:
+            if (agentActiveDeadlineMonotonicMs != 0
+                && monotonicMilliseconds()
+                       > agentActiveDeadlineMonotonicMs)
+                return false;
             forceRecording = false;
             recordButton->setToggleState (
                 true,

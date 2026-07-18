@@ -18,6 +18,7 @@ struct RuntimeIsolationOptions
     bool disableNativeHttp = false;
     bool disableUserPlugins = false;
     bool enableAgentUiaReadOnly = false;
+    bool enableAgentUiaInteractive = false;
     bool enableAgentMutation = false;
     bool agentPortExplicit = false;
     int agentPort = 37498;

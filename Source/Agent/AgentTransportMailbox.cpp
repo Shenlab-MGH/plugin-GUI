@@ -27,7 +27,8 @@ bool AgentTransportMailbox::samePayload (
         && lhs.runId == rhs.runId
         && lhs.idempotencyKey == rhs.idempotencyKey
         && lhs.approvalId == rhs.approvalId
-        && lhs.actionParametersHash == rhs.actionParametersHash;
+        && lhs.actionParametersHash == rhs.actionParametersHash
+        && lhs.deadlineMonotonicMs == rhs.deadlineMonotonicMs;
 }
 
 AgentMailboxSubmitOutcome AgentTransportMailbox::submit (

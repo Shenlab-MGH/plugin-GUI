@@ -38,6 +38,7 @@ RuntimeOptionsParseResult RuntimeOptions::parse (
     bool sawNoHttp = false;
     bool sawNoUserPlugins = false;
     bool sawAgentUiaReadOnly = false;
+    bool sawAgentUiaInteractive = false;
     bool sawAgentMutation = false;
     bool sawStateDirectory = false;
     bool sawAgentPort = false;
@@ -82,7 +83,28 @@ RuntimeOptionsParseResult RuntimeOptions::parse (
                     result,
                     "--agent-uia-readonly"))
                 return result;
+            if (sawAgentUiaInteractive)
+            {
+                result.error =
+                    "Agent UIA modes are mutually exclusive";
+                return result;
+            }
             result.options.enableAgentUiaReadOnly = true;
+        }
+        else if (argument == "--agent-uia-interactive")
+        {
+            if (! consumeOnce (
+                    sawAgentUiaInteractive,
+                    result,
+                    "--agent-uia-interactive"))
+                return result;
+            if (sawAgentUiaReadOnly)
+            {
+                result.error =
+                    "Agent UIA modes are mutually exclusive";
+                return result;
+            }
+            result.options.enableAgentUiaInteractive = true;
         }
         else if (argument == "--agent-mutation")
         {

@@ -18,7 +18,8 @@ class AgentAccessibilityBridge final : public Component
 {
 public:
     explicit AgentAccessibilityBridge (
-        std::shared_ptr<AgentTransportEndpoint> endpoint);
+        std::shared_ptr<AgentTransportEndpoint> endpoint,
+        bool interactive);
     ~AgentAccessibilityBridge() override;
 
     std::unique_ptr<AccessibilityHandler>

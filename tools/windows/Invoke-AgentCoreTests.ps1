@@ -68,6 +68,11 @@ Invoke-CompileAndRun -Name 'AgentAccessibilityStateTests' -Sources @(
     'Source\Agent\AgentAccessibilityState.cpp'
 )
 
+Invoke-CompileAndRun -Name 'AgentAccessibilityActionTests' -Sources @(
+    'Tests\AgentCore\AgentAccessibilityActionTests.cpp',
+    'Source\Agent\AgentAccessibilityAction.cpp'
+)
+
 Invoke-CompileAndRun -Name 'ControlPanelCommandRouterTests' -Sources @(
     'Tests\AgentCore\ControlPanelCommandRouterTests.cpp',
     'Source\Agent\ControlPanelCommandRouter.cpp'

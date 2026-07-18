@@ -31,12 +31,15 @@
 #include <stdio.h>
 #include <utility>
 
-MainDocumentWindow::MainDocumentWindow (bool enableAgentUiaReadOnly)
+MainDocumentWindow::MainDocumentWindow (bool enableAgentUia)
     : DocumentWindow (JUCEApplication::getInstance()->getApplicationName(),
                       Colour (25, 25, 25),
                       DocumentWindow::allButtons,
                       false)
 {
+    agentUiaEnabled = enableAgentUia;
+    if (agentUiaEnabled)
+        setComponentID ("oe.agent.window");
 #ifdef __APPLE__
     File iconDir = File::getSpecialLocation (File::currentApplicationFile).getChildFile ("Contents/Resources");
 #else
@@ -45,7 +48,28 @@ MainDocumentWindow::MainDocumentWindow (bool enableAgentUiaReadOnly)
     Image titleBarIcon = ImageCache::getFromFile (iconDir.getChildFile ("icon-small.png"));
     setIcon (titleBarIcon);
 
-    setAccessible (enableAgentUiaReadOnly);
+    setAccessible (enableAgentUia);
+    enforceAgentAccessibilityBoundary();
+}
+
+void MainDocumentWindow::lookAndFeelChanged()
+{
+    DocumentWindow::lookAndFeelChanged();
+    enforceAgentAccessibilityBoundary();
+}
+
+void MainDocumentWindow::enforceAgentAccessibilityBoundary()
+{
+    if (! agentUiaEnabled)
+        return;
+
+    for (int index = 0; index < getNumChildComponents(); ++index)
+    {
+        auto* child = getChildComponent (index);
+        if (child != nullptr
+            && child->getComponentID() != "oe.agent.root")
+            child->setAccessible (false);
+    }
 }
 
 MainWindow::MainWindow (
@@ -64,7 +88,8 @@ MainWindow::MainWindow (
     if (! isConsoleApp)
     {
         documentWindow = std::make_unique<MainDocumentWindow> (
-            runtimeOptions.enableAgentUiaReadOnly);
+            runtimeOptions.enableAgentUiaReadOnly
+                || runtimeOptions.enableAgentUiaInteractive);
 
         documentWindow->setResizable (true, // isResizable
                                       false); // useBottomCornerRisizer -- doesn't work very well
@@ -134,15 +159,18 @@ MainWindow::MainWindow (
 
         UIComponent* ui = (UIComponent*) documentWindow->getContentComponent();
 
-        if (runtimeOptions.enableAgentUiaReadOnly)
+        if (runtimeOptions.enableAgentUiaReadOnly
+            || runtimeOptions.enableAgentUiaInteractive)
         {
             ui->setAccessible (false);
             agentAccessibilityBridge =
                 std::make_unique<AgentAccessibilityBridge> (
-                    controlPanel->getAgentTransportEndpoint());
+                    controlPanel->getAgentTransportEndpoint(),
+                    runtimeOptions.enableAgentUiaInteractive);
             documentWindow->addAndMakeVisible (
                 agentAccessibilityBridge.get());
             agentAccessibilityBridge->setBounds (0, 0, 1, 1);
+            documentWindow->enforceAgentAccessibilityBoundary();
         }
 
 #if JUCE_MAC
@@ -180,6 +208,7 @@ MainWindow::MainWindow (
 #else
         documentWindow->setUsingNativeTitleBar (true); // Use native title bar on Mac and Linux
 #endif
+        documentWindow->enforceAgentAccessibilityBoundary();
 
         documentWindow->addToDesktop();
         documentWindow->setVisible (true);

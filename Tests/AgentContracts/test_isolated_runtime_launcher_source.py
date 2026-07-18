@@ -27,6 +27,8 @@ def main() -> None:
             "Launcher must default to inspect-only",
         "[switch] $MaintenanceWindowApproved":
             "Launch must require a separate maintenance approval",
+        "[switch] $EnableInteractiveUia":
+            "Interactive UIA must require an explicit opt-in",
         "Get-Process -Name 'open-ephys'":
             "Any running Open Ephys process must block launch",
         "'--no-http'":
@@ -35,6 +37,12 @@ def main() -> None:
             "User-installed plugins must be locked off",
         "'--agent-uia-readonly'":
             "Read-only Agent UIA must be enabled in isolation",
+        "interactive_uia_enabled":
+            "Launcher output must disclose interactive UIA mode",
+        "if (-not $EnableInteractiveUia)":
+            "Read-only UIA must remain the default",
+        "'--agent-uia-interactive'":
+            "Interactive UIA must be an explicit runtime argument",
         "'--state-dir'":
             "A dedicated state directory must be passed",
         "OE_AGENT_TOKEN":
@@ -89,8 +97,24 @@ def main() -> None:
             "Verifier must prove native HTTP is not owned",
         "LocalAddress -in @('127.0.0.1', '::1')":
             "Agent endpoint must be loopback-only",
-        "agent_uia_readonly_argument":
-            "Verifier must prove read-only UIA was explicitly enabled",
+        "agent_uia_mode_argument_matches":
+            "Verifier must prove the expected explicit UIA mode",
+        "[switch] $ExpectInteractiveUia":
+            "Verifier must require an explicit interactive-mode expectation",
+        "interactive_uia_mode_matches":
+            "Verifier must distinguish read-only and interactive UIA",
+        "$hasAgentUiaReadOnlyArgument":
+            "Verifier must evaluate the UIA flag once",
+        "$hasAgentUiaInteractiveArgument":
+            "Verifier must inspect the explicit interactive UIA argument",
+        "uia_mode_is_exactly_one":
+            "Verifier must require exactly one explicit UIA mode",
+        "ExpectedExecutable":
+            "Interactive verification must bind the expected executable",
+        "ExpectedExecutableSha256":
+            "Interactive verification must bind a manifest-derived digest",
+        "executable_sha256_matches":
+            "Verifier must compare against the independent expected hash",
     }
     for fragment, message in verifier_contract.items():
         require(VERIFIER, fragment, message)
