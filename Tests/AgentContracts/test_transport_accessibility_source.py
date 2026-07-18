@@ -37,6 +37,13 @@ def main() -> None:
             "Interactive actions must use the fail-closed target planner")
     require("endpoint->submit", BRIDGE,
             "Interactive actions must use the verified transport endpoint")
+    require(
+        "std::make_unique<ReadOnlyTransportValue> (\n"
+        "                      endpoint,\n"
+        "                      tracker,",
+        BRIDGE,
+        "Value and Invoke handlers must retain independent shared endpoint copies",
+    )
     require("AccessibilityTextValueInterface", BRIDGE,
             "Transport nodes must provide a read-only value")
     require("isReadOnly() const override", BRIDGE,

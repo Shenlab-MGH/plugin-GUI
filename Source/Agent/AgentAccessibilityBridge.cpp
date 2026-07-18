@@ -246,8 +246,8 @@ public:
               transportActions (endpoint, tracker, kind, interactive),
               Interfaces {
                   std::make_unique<ReadOnlyTransportValue> (
-                      std::move (endpoint),
-                      std::move (tracker),
+                      endpoint,
+                      tracker,
                       kind) })
     {
     }
