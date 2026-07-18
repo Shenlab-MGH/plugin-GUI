@@ -78,6 +78,12 @@ Copy-Item -LiteralPath (
     Join-Path $PSScriptRoot 'Invoke-FileReaderGuiQualification.ps1'
 ) -Destination $destinationPath -Force
 Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'Audit-FileReaderQualification.py'
+) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'qualification-requirements.txt'
+) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (
     Join-Path $PSScriptRoot 'Start-OpenEphysAgentMcp.ps1'
 ) -Destination $destinationPath -Force
 Copy-Item -LiteralPath (

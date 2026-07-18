@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Use only bundled File Reader data; do not initialize Neuropixels or OneBox hardware.
+- Derive a manifest-bound 120-second source from bundled File Reader data so no five-second source-loop boundary can occur; do not initialize Neuropixels or OneBox hardware.
 - Use a unique local-SSD run root under `C:\OE-Agent-Simulation`.
 - Native HTTP port 37497 must remain disabled; the agent endpoint must bind only to `127.0.0.1` on a non-37497 port.
 - Generate a fresh 384-bit token only in the launched process environment and never persist it.
@@ -18,6 +18,7 @@
 - Every block gets an exact independent directory; collisions and stale revisions fail closed.
 - Target duration is 10 seconds per block, minimum accepted persisted duration is 10 seconds, maximum is 12 seconds.
 - Closed payloads must be stable for three observations spanning at least 10 seconds.
+- Require monotonic contiguous `sample_numbers.npy` and finite monotonic 40-kHz `timestamps.npy`, verified with pinned official `open-ephys-python-tools==1.0.1`.
 - File Reader evidence may qualify technical integrity only. `NEUROPIXELS_SIM_CAPABILITY=UNVERIFIED` and `EIGHT_SHANK_CLAIM=PROHIBITED` are mandatory.
 
 ---

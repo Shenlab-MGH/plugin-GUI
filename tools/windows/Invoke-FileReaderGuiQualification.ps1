@@ -464,6 +464,23 @@ $configurationHash = (Get-FileHash -LiteralPath $configuration -Algorithm SHA256
 if ($configurationHash -ne $runManifest.derived_config_sha256) {
     throw 'Derived configuration hash does not match run manifest.'
 }
+$derivedSource = Get-FullPath $runManifest.derived_source_continuous
+$runPrefix = $run.TrimEnd('\') + '\'
+if (-not $derivedSource.StartsWith(
+        $runPrefix,
+        [System.StringComparison]::OrdinalIgnoreCase) `
+    -or -not (Test-Path -LiteralPath $derivedSource -PathType Leaf)) {
+    throw 'Derived File Reader source is outside the isolated run or missing.'
+}
+$derivedSourceFile = Get-Item -LiteralPath $derivedSource
+$derivedSourceHash = (
+    Get-FileHash -LiteralPath $derivedSource -Algorithm SHA256
+).Hash
+if ($derivedSourceFile.Length -ne [int64]$runManifest.derived_source_continuous_bytes `
+    -or $derivedSourceHash -ne $runManifest.derived_source_continuous_sha256 `
+    -or [int]$runManifest.derived_source_duration_seconds -ne 120) {
+    throw 'Derived File Reader source manifest verification failed.'
+}
 $executable = Join-Path $package 'open-ephys.exe'
 $executableHash = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
 
@@ -489,6 +506,13 @@ $result = [ordered]@{
         'Eight synthetic blocks are workflow repetitions, not shanks.',
         'Eight-shank claims remain prohibited.'
     )
+    source_verification = [ordered]@{
+        path = $derivedSource
+        bytes = $derivedSourceFile.Length
+        sha256 = $derivedSourceHash
+        duration_seconds = $runManifest.derived_source_duration_seconds
+        pass = $true
+    }
 }
 
 try {

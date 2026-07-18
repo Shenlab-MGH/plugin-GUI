@@ -6,7 +6,8 @@ param(
     [ValidateRange(8, 8)] [int] $BlockCount = 8,
     [ValidateRange(10.0, 10.0)] [double] $TargetSeconds = 10.0,
     [ValidateRange(10.0, 10.0)] [double] $MinimumSeconds = 10.0,
-    [ValidateRange(12.0, 12.0)] [double] $MaximumSeconds = 12.0
+    [ValidateRange(12.0, 12.0)] [double] $MaximumSeconds = 12.0,
+    [ValidateRange(120, 120)] [int] $SourceDurationSeconds = 120
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,8 +68,62 @@ if ($hashFailures.Count -ne 0) {
 $state = Join-Path $run 'state'
 $recordings = Join-Path $run 'recordings'
 $evidence = Join-Path $run 'evidence'
-New-Item -ItemType Directory -Path $state, $recordings, $evidence |
+$derivedSource = Join-Path $run 'file-reader-source'
+New-Item -ItemType Directory -Path $state, $recordings, $evidence, $derivedSource |
     Out-Null
+
+$sourceStructurePath = Join-Path $package 'resources\structure.oebin'
+$sourceContinuousPath = Join-Path $package `
+    'resources\continuous\example_data\continuous.dat'
+if (-not (Test-Path -LiteralPath $sourceStructurePath -PathType Leaf) `
+    -or -not (Test-Path -LiteralPath $sourceContinuousPath -PathType Leaf)) {
+    throw 'Bundled File Reader source is incomplete.'
+}
+$derivedStructurePath = Join-Path $derivedSource 'structure.oebin'
+$structure = Get-Content -Raw -LiteralPath $sourceStructurePath | ConvertFrom-Json
+$sourceStreams = @($structure.continuous)
+if ($sourceStreams.Count -ne 1 `
+    -or [int]$sourceStreams[0].num_channels -ne 16 `
+    -or [double]$sourceStreams[0].sample_rate -ne 40000.0) {
+    throw 'Bundled File Reader source contract changed.'
+}
+$structure.events = @()
+$structure | ConvertTo-Json -Depth 20 |
+    Set-Content -LiteralPath $derivedStructurePath -Encoding utf8NoBOM
+$streamFolder = Join-Path $derivedSource (
+    'continuous\' + [string]$sourceStreams[0].folder_name
+)
+New-Item -ItemType Directory -Path $streamFolder | Out-Null
+$derivedContinuousPath = Join-Path $streamFolder 'continuous.dat'
+$targetSourceBytes = [int64]$SourceDurationSeconds * 40000 * 16 * 2
+$inputStream = [IO.File]::OpenRead($sourceContinuousPath)
+$outputStream = [IO.File]::Open(
+    $derivedContinuousPath,
+    [IO.FileMode]::CreateNew,
+    [IO.FileAccess]::Write,
+    [IO.FileShare]::None
+)
+try {
+    $buffer = [byte[]]::new(1024 * 1024)
+    $remaining = $targetSourceBytes
+    while ($remaining -gt 0) {
+        $read = $inputStream.Read($buffer, 0, $buffer.Length)
+        if ($read -eq 0) {
+            $inputStream.Position = 0
+            continue
+        }
+        $write = [int][Math]::Min([int64]$read, $remaining)
+        $outputStream.Write($buffer, 0, $write)
+        $remaining -= $write
+    }
+}
+finally {
+    $outputStream.Dispose()
+    $inputStream.Dispose()
+}
+if ((Get-Item -LiteralPath $derivedContinuousPath).Length -ne $targetSourceBytes) {
+    throw 'Derived File Reader source length mismatch.'
+}
 
 [xml] $configuration = Get-Content -Raw -LiteralPath $sourceConfig
 $processors = @($configuration.SETTINGS.SIGNALCHAIN.PROCESSOR)
@@ -84,6 +139,18 @@ $recordNodes = @(
 if ($recordNodes.Count -ne 1 -or [string] $recordNodes[0].nodeId -ne '101') {
     throw 'Derived configuration must contain exactly Record Node 101.'
 }
+$fileReaders = @(
+    $configuration.SETTINGS.SIGNALCHAIN.PROCESSOR |
+        Where-Object { $_.name -eq 'File Reader' }
+)
+if ($fileReaders.Count -ne 1 -or [string]$fileReaders[0].nodeId -ne '100') {
+    throw 'Derived configuration must contain exactly File Reader 100.'
+}
+$fileReaders[0].PROCESSOR_PARAMETERS.SetAttribute(
+    'selected_file', $derivedStructurePath
+)
+$fileReaders[0].PROCESSOR_PARAMETERS.SetAttribute('start_time', '00:00:00.000')
+$fileReaders[0].PROCESSOR_PARAMETERS.SetAttribute('end_time', '00:01:59.999')
 $recordNodes[0].PROCESSOR_PARAMETERS.SetAttribute('directory', $recordings)
 $configuration.SETTINGS.CONTROLPANEL.SetAttribute('recordPath', $recordings)
 $configuration.SETTINGS.CONTROLPANEL.SetAttribute('forceNewDirectory', '1')
@@ -135,6 +202,13 @@ $runManifest = [ordered]@{
     ).Hash
     derived_config_sha256 = (
         Get-FileHash -LiteralPath $derivedConfig -Algorithm SHA256
+    ).Hash
+    derived_source_structure = $derivedStructurePath
+    derived_source_continuous = $derivedContinuousPath
+    derived_source_duration_seconds = $SourceDurationSeconds
+    derived_source_continuous_bytes = $targetSourceBytes
+    derived_source_continuous_sha256 = (
+        Get-FileHash -LiteralPath $derivedContinuousPath -Algorithm SHA256
     ).Hash
     state_directory = $state
     recording_root = $recordings

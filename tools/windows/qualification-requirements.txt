@@ -1,0 +1,2 @@
+open-ephys-python-tools==1.0.1
+numpy==2.5.1

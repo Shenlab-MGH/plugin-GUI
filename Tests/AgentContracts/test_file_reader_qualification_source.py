@@ -13,6 +13,8 @@ def read(relative: str) -> str:
 def main() -> None:
     creator = read("tools/windows/New-FileReaderSimulationRun.ps1")
     runner = read("tools/windows/Invoke-FileReaderGuiQualification.ps1")
+    auditor = read("tools/windows/Audit-FileReaderQualification.py")
+    requirements = read("tools/windows/qualification-requirements.txt")
     checks = read("tools/windows/Invoke-AgentChecks.ps1")
     packager = read("tools/windows/New-AgentRuntimePackage.ps1")
 
@@ -21,7 +23,12 @@ def main() -> None:
         "TargetSeconds = 10.0",
         "MinimumSeconds = 10.0",
         "MaximumSeconds = 12.0",
+        "SourceDurationSeconds = 120",
         "C:\\OE-Agent-Simulation",
+        "[IO.File]::Open",
+        "selected_file",
+        "00:01:59.999",
+        "derived_source_continuous_sha256",
         "FILE_READER_EIGHT_BLOCK_QUALIFICATION",
         "EIGHT_SHANK_CLAIM",
     ):
@@ -47,12 +54,28 @@ def main() -> None:
         "EIGHT_PRESET_SIM_ACCEPTANCE",
         "EIGHT_SHANK_CLAIM",
         "SCIENTIFIC_SIGNAL_QC",
+        "derived_source_continuous_sha256",
     ):
         assert token in runner, token
+
+    for token in (
+        "open-ephys-python-tools",
+        "Session",
+        "sample_numbers.npy",
+        "timestamps.npy",
+        "np.diff",
+        "official_loader",
+        "EIGHT_SHANK_CLAIM",
+    ):
+        assert token in auditor, token
+    assert "open-ephys-python-tools==1.0.1" in requirements
+    assert "numpy==2.5.1" in requirements
 
     assert "test_file_reader_qualification_source.py" in checks
     assert "New-FileReaderSimulationRun.ps1" in packager
     assert "Invoke-FileReaderGuiQualification.ps1" in packager
+    assert "Audit-FileReaderQualification.py" in packager
+    assert "qualification-requirements.txt" in packager
     print("PASS complete File Reader qualification source contract")
 
 
