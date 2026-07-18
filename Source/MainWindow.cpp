@@ -527,6 +527,16 @@ void MainWindow::loadProcessorGraph (const File& file)
     }
 
     processorGraph->loadFromXml (xml.get());
+    if (! runtimeOptions.stateDirectory.empty())
+        publishRuntimeRecoveryGraph ("CONFIG_LOAD");
+}
+
+void MainWindow::publishRuntimeRecoveryGraph (const String& reason)
+{
+    const auto recoveryConfig =
+        configsDir.getChildFile ("recoveryConfig.xml");
+    saveProcessorGraph (recoveryConfig);
+    LOGC ("Published runtime recovery graph: " + reason);
 }
 
 void MainWindow::saveWindowBounds()

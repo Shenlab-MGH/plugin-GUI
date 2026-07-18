@@ -123,6 +123,21 @@ def main() -> None:
         "agentPortExplicit",
         "Explicit Agent endpoint failures must fail closed",
     )
+    require(
+        main_window_cpp,
+        'publishRuntimeRecoveryGraph ("CONFIG_LOAD")',
+        "A successfully loaded graph must publish live runtime evidence",
+    )
+    require(
+        main_window_cpp,
+        "if (! runtimeOptions.stateDirectory.empty())",
+        "Official state behavior must remain unchanged without isolation",
+    )
+    require(
+        main_window_cpp,
+        'getChildFile ("recoveryConfig.xml")',
+        "Runtime graph evidence must use the isolated recovery path",
+    )
 
     print("PASS runtime isolation wiring source contract")
 

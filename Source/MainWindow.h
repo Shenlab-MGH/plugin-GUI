@@ -154,6 +154,9 @@ private:
     /** Loads  the processor graph from a file*/
     void loadProcessorGraph (const File& file);
 
+    /** Publishes the live graph into the isolated crash-recovery state. */
+    void publishRuntimeRecoveryGraph (const String& reason);
+
     /** Saves the MainWindow's boundaries into the file "windowState.xml", located in the directory
         from which the GUI is run. */
     void saveWindowBounds();
