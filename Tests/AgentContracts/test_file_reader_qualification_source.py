@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,8 +56,14 @@ def main() -> None:
         "EIGHT_SHANK_CLAIM",
         "SCIENTIFIC_SIGNAL_QC",
         "derived_source_continuous_sha256",
+        "Get-AgentProcessWindow",
     ):
         assert token in runner, token
+    assert not re.search(
+        r"RootElement\.FindAll\(\s*"
+        r"\[System\.Windows\.Automation\.TreeScope\]::Descendants",
+        runner,
+    ), "qualification runner must not traverse every desktop UIA provider"
 
     for token in (
         "open-ephys-python-tools",

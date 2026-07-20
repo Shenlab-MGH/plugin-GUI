@@ -12,6 +12,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $StabilityObservationCount = 3
 $StabilityObservationSpanSeconds = 10
+$script:UiaProviderReadEvidence = @()
+
+. (Join-Path $PSScriptRoot 'UiAutomationProviderRetry.ps1')
 
 function Get-FullPath([string] $Path) {
     [System.IO.Path]::GetFullPath($Path)
@@ -185,14 +188,39 @@ function Wait-NativeMode([string] $Mode, [int] $Seconds = 10) {
     throw "RECOVERY_REQUIRED: timed out waiting for mode $Mode."
 }
 
-function Get-AgentElement([int] $OwnerProcessId, [string] $AutomationId) {
+function Get-AgentProcessWindow([int] $OwnerProcessId) {
     $processCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
         $OwnerProcessId)
-    $all = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $processCondition)
-    $matches = @($all | Where-Object {
+    $read = Invoke-UiaProviderRead `
+        -OperationName "Find process $OwnerProcessId top-level window" `
+        -Operation {
+            [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Children,
+                $processCondition)
+        }
+    $script:UiaProviderReadEvidence += $read | Select-Object `
+        attempts, transient_failures, elapsed_milliseconds
+    $matches = @($read.value | ForEach-Object { $_ })
+    if ($matches.Count -ne 1) {
+        throw "Expected one top-level process window; observed $($matches.Count)."
+    }
+    $matches[0]
+}
+
+function Get-AgentElement(
+    [System.Windows.Automation.AutomationElement] $ProcessWindow,
+    [string] $AutomationId) {
+    $read = Invoke-UiaProviderRead `
+        -OperationName "Find target element $AutomationId" `
+        -Operation {
+            $ProcessWindow.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition)
+        }
+    $script:UiaProviderReadEvidence += $read | Select-Object `
+        attempts, transient_failures, elapsed_milliseconds
+    $matches = @($read.value | Where-Object {
         $_.GetCurrentPropertyValue(
             [System.Windows.Automation.AutomationElement]::AutomationIdProperty
         ) -eq $AutomationId
@@ -210,7 +238,7 @@ function Get-RequestId([string] $Value) {
 }
 
 function Invoke-AgentTransport([string] $AutomationId, [string] $ExpectedMode) {
-    $element = Get-AgentElement -OwnerProcessId $script:ProcessId `
+    $element = Get-AgentElement -ProcessWindow $script:AgentProcessWindow `
         -AutomationId $AutomationId
     $valueObject = $null
     if (-not $element.TryGetCurrentPattern(
@@ -563,6 +591,8 @@ try {
             + ', simulation_verified=' + $accessibility.simulation_verified `
             + ', post_mode=' + $accessibility.post_mode)
     }
+    $script:AgentProcessWindow = Get-AgentProcessWindow `
+        -OwnerProcessId $script:ProcessId
     $result['launch'] = $launch
     $negativeControls = [ordered]@{}
     $negativeControls['unauthorized_requests'] = Test-UnauthorizedRequest
@@ -595,6 +625,7 @@ try {
     }
     $result['negative_controls'] = $negativeControls
     $result['segments'] = $segments
+    $result['uia_provider_reads'] = $script:UiaProviderReadEvidence
     $result['final_status'] = $final
     $result['FILE_READER_EIGHT_BLOCK_QUALIFICATION'] = 'PASS'
     $result['NEUROPIXELS_SIM_CAPABILITY'] = 'UNVERIFIED'
