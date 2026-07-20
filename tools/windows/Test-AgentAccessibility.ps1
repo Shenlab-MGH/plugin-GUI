@@ -125,13 +125,10 @@ function Wait-TransportTerminal {
     throw 'RECOVERY_REQUIRED: UIA request did not reach terminal state.'
 }
 
-function Get-ExactElements {
+function Get-ProcessWindow {
     param(
         [Parameter(Mandatory)]
-        [int] $OwnerProcessId,
-
-        [Parameter(Mandatory)]
-        [string] $AutomationId
+        [int] $OwnerProcessId
     )
 
     $processCondition = New-Object `
@@ -139,18 +136,32 @@ function Get-ExactElements {
             [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
             $OwnerProcessId)
     $read = Invoke-UiaProviderRead `
-        -OperationName "Find process $OwnerProcessId descendants" `
+        -OperationName "Find process $OwnerProcessId top-level window" `
         -Operation {
             [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-                [System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.TreeScope]::Children,
                 $processCondition)
         }
     $script:UiaProviderReadEvidence += $read | Select-Object `
         attempts, transient_failures, elapsed_milliseconds
-    $elements = $read.value
+    $matches = @($read.value | ForEach-Object { $_ })
+    if ($matches.Count -ne 1) {
+        throw "Expected one top-level process window; observed $($matches.Count)."
+    }
+    $matches[0]
+}
+
+function Get-ExactElements {
+    param(
+        [Parameter(Mandatory)]
+        [object[]] $Elements,
+
+        [Parameter(Mandatory)]
+        [string] $AutomationId
+    )
 
     @(
-        $elements | Where-Object {
+        $Elements | Where-Object {
             $_.GetCurrentPropertyValue(
                 [System.Windows.Automation.AutomationElement]::AutomationIdProperty
             ) -eq $AutomationId
@@ -159,23 +170,21 @@ function Get-ExactElements {
 }
 
 function Get-ProcessElements {
-    param([Parameter(Mandatory)] [int] $OwnerProcessId)
+    param(
+        [Parameter(Mandatory)]
+        [System.Windows.Automation.AutomationElement] $ProcessWindow
+    )
 
-    $processCondition = New-Object `
-        System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
-            $OwnerProcessId)
     $read = Invoke-UiaProviderRead `
-        -OperationName "Audit process $OwnerProcessId descendants" `
+        -OperationName 'Audit target process-window descendants' `
         -Operation {
-            [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            $ProcessWindow.FindAll(
                 [System.Windows.Automation.TreeScope]::Descendants,
-                $processCondition)
+                [System.Windows.Automation.Condition]::TrueCondition)
         }
     $script:UiaProviderReadEvidence += $read | Select-Object `
         attempts, transient_failures, elapsed_milliseconds
-    $elements = $read.value
-    @($elements | ForEach-Object { $_ })
+    @($ProcessWindow) + @($read.value | ForEach-Object { $_ })
 }
 
 function Get-Pattern {
@@ -341,16 +350,19 @@ try {
     $headers = @{ Authorization = "Bearer $token" }
     $preStatus = Get-NativeStatus -Port $AgentPort -Headers $headers
 
+    $processWindow = Get-ProcessWindow -OwnerProcessId $ProcessId
     $deadline = (Get-Date).AddSeconds(10)
     do {
+        $processElements = Get-ProcessElements `
+            -ProcessWindow $processWindow
         $rootMatches = Get-ExactElements `
-            -OwnerProcessId $ProcessId `
+            -Elements $processElements `
             -AutomationId "oe.agent.root"
         $acquisitionMatches = Get-ExactElements `
-            -OwnerProcessId $ProcessId `
+            -Elements $processElements `
             -AutomationId "oe.transport.acquisition"
         $recordingMatches = Get-ExactElements `
-            -OwnerProcessId $ProcessId `
+            -Elements $processElements `
             -AutomationId "oe.transport.recording"
         if ($rootMatches.Count -eq 1 `
             -and $acquisitionMatches.Count -eq 1 `
@@ -403,7 +415,7 @@ try {
         -Pattern ([System.Windows.Automation.TogglePattern]::Pattern)
 
     $actionableElements = @(
-        foreach ($element in (Get-ProcessElements -OwnerProcessId $ProcessId)) {
+        foreach ($element in $processElements) {
             try {
                 $invoke = Get-Pattern -Element $element `
                     -Pattern ([System.Windows.Automation.InvokePattern]::Pattern)

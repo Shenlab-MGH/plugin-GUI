@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -112,6 +113,18 @@ def main() -> None:
     if "AgentToken" in VERIFIER:
         raise AssertionError(
             "Verifier must not accept the bearer token as a command argument"
+        )
+    if "Get-ProcessWindow" not in VERIFIER:
+        raise AssertionError(
+            "Verifier must resolve one PID-scoped top-level window first"
+        )
+    if re.search(
+        r"RootElement\.FindAll\(\s*"
+        r"\[System\.Windows\.Automation\.TreeScope\]::Descendants",
+        VERIFIER,
+    ):
+        raise AssertionError(
+            "Verifier must not traverse every desktop provider from RootElement"
         )
 
     print("PASS Windows UIA verifier source contract")
