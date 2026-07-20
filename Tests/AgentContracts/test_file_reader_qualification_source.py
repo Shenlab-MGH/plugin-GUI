@@ -74,6 +74,7 @@ def main() -> None:
     assert "test_file_reader_qualification_source.py" in checks
     assert "New-FileReaderSimulationRun.ps1" in packager
     assert "Invoke-FileReaderGuiQualification.ps1" in packager
+    assert "UiAutomationProviderRetry.ps1" in packager
     assert "Audit-FileReaderQualification.py" in packager
     assert "qualification-requirements.txt" in packager
     print("PASS complete File Reader qualification source contract")

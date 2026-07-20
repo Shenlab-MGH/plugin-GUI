@@ -22,6 +22,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ReadIterations = 10000
+$script:UiaProviderReadEvidence = @()
+
+. (Join-Path $PSScriptRoot 'UiAutomationProviderRetry.ps1')
 
 Add-Type -TypeDefinition @'
 using System;
@@ -135,9 +138,16 @@ function Get-ExactElements {
         System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
             $OwnerProcessId)
-    $elements = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $processCondition)
+    $read = Invoke-UiaProviderRead `
+        -OperationName "Find process $OwnerProcessId descendants" `
+        -Operation {
+            [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $processCondition)
+        }
+    $script:UiaProviderReadEvidence += $read | Select-Object `
+        attempts, transient_failures, elapsed_milliseconds
+    $elements = $read.value
 
     @(
         $elements | Where-Object {
@@ -155,10 +165,16 @@ function Get-ProcessElements {
         System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
             $OwnerProcessId)
-    $elements =
-        [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            $processCondition)
+    $read = Invoke-UiaProviderRead `
+        -OperationName "Audit process $OwnerProcessId descendants" `
+        -Operation {
+            [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $processCondition)
+        }
+    $script:UiaProviderReadEvidence += $read | Select-Object `
+        attempts, transient_failures, elapsed_milliseconds
+    $elements = $read.value
     @($elements | ForEach-Object { $_ })
 }
 
@@ -578,6 +594,7 @@ try {
             toggle_available = $recordingToggle.available
         }
         read_iterations = $ReadIterations
+        uia_provider_reads = $script:UiaProviderReadEvidence
         expected_mode = if ($ExpectInteractive) { 'interactive' } else { 'read-only' }
         exercise_transport = [bool]$ExerciseTransport
         approved_simulation_profile = $ApprovedSimulationProfile

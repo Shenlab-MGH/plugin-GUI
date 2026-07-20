@@ -72,6 +72,9 @@ Copy-Item -LiteralPath (
     Join-Path $PSScriptRoot 'Test-AgentAccessibility.ps1'
 ) -Destination $destinationPath -Force
 Copy-Item -LiteralPath (
+    Join-Path $PSScriptRoot 'UiAutomationProviderRetry.ps1'
+) -Destination $destinationPath -Force
+Copy-Item -LiteralPath (
     Join-Path $PSScriptRoot 'New-FileReaderSimulationRun.ps1'
 ) -Destination $destinationPath -Force
 Copy-Item -LiteralPath (

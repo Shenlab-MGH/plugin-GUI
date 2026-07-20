@@ -58,4 +58,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "git diff --check failed with exit code $LASTEXITCODE"
 }
 
+& pwsh -NoProfile -File (
+    Join-Path $repoRoot 'Tests\AgentContracts\Test-UiAutomationProviderRetry.ps1'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "UI Automation provider retry tests failed with exit code $LASTEXITCODE"
+}
+
 Write-Host 'PASS agent fork local checks'
