@@ -36,6 +36,7 @@
 #include "../Settings/InfoObject.h"
 
 #include "../../UI/LookAndFeel/CustomLookAndFeel.h"
+#include "../../UI/SemanticComponent.h"
 
 #include <math.h>
 
@@ -61,7 +62,11 @@ GenericEditor::GenericEditor (GenericProcessor* owner) : AudioProcessorEditor (o
 
     titleFont = FontOptions ("CP Mono", "Plain", 16);
 
-    drawerButton = std::make_unique<DrawerButton> (getNameAndId() + " Drawer Button");
+    drawerButton = std::make_unique<DrawerButton> (
+        getNameAndId() + " Drawer Button",
+        "oe.processor." + String (nodeId) + ".drawer",
+        name + " controls",
+        "Show or hide controls for " + name + " processor " + String (nodeId) + ".");
     drawerButton->addListener (&drawerButtonListener);
 
     if (! owner->isSplitter() && ! owner->isMerger())
@@ -806,9 +811,14 @@ bool GenericEditor::isUtility()
 
 /////////////////////// BUTTONS ///////////////////////////////
 
-DrawerButton::DrawerButton (const String& name) : Button (name)
+DrawerButton::DrawerButton (const String& name,
+                            const String& semanticId,
+                            const String& semanticTitle,
+                            const String& semanticDescription)
+    : Button (name)
 {
     setClickingTogglesState (true);
+    applySemanticMetadata (*this, semanticId, semanticTitle, semanticDescription);
 }
 
 DrawerButton::~DrawerButton()
@@ -827,7 +837,9 @@ void DrawerButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown
     g.drawVerticalLine (7, 0.0f, getHeight());
 }
 
-UtilityButton::UtilityButton (String label_) : Button (label_), label (label_), isUsingCustomFont (false)
+UtilityButton::UtilityButton (String label_) : Button (label_),
+                                               label (label_),
+                                               isUsingCustomFont (false)
 {
     font = FontOptions ("Fira Code", "Regular", 14.0f);
 
@@ -1201,7 +1213,9 @@ void GenericEditor::streamEnabledStateChanged (uint16 streamId, bool isEnabled, 
 }
 
 /***************************/
-ColourButton::ColourButton (String label_, FontOptions font_) : Button (label_), label (label_), font (font_)
+ColourButton::ColourButton (String label_, FontOptions font_) : Button (label_),
+                                                                label (label_),
+                                                                font (font_)
 {
     userDefinedData = -1;
     fontColour = juce::Colours::white;
@@ -1306,7 +1320,8 @@ void ColourButton::setLabel (String label_)
     repaint();
 }
 
-ThresholdSlider::ThresholdSlider (FontOptions f) : Slider ("name"), font (f)
+ThresholdSlider::ThresholdSlider (FontOptions f) : Slider ("name"),
+                                                   font (f)
 {
     setSliderStyle (Slider::Rotary);
     setRange (-400, 400.0f, 10.0f);
