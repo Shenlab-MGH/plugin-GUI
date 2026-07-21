@@ -156,6 +156,14 @@ void ForceNewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool i
     forceNewDirectoryIcon->replaceColour (buttonColour, Colours::black);
 }
 
+RecordingOptionsButton::RecordingOptionsButton()
+{
+    applySemanticMetadata (*this,
+                           "oe.control.recording.options",
+                           "Recording options",
+                           "Show or hide recording options.");
+}
+
 FilenameEditorButton::FilenameEditorButton()
     : TextButton ("Filename Editor")
 {
@@ -609,7 +617,7 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
     clock = std::make_unique<Clock>();
     cpuMeter = std::make_unique<CPUMeter>();
     diskMeter = std::make_unique<DiskSpaceMeter>();
-    showHideRecordingOptionsButton = std::make_unique<CustomArrowButton>();
+    showHideRecordingOptionsButton = std::make_unique<RecordingOptionsButton>();
     showHideRecordingOptionsButton->addListener (this);
     showHideRecordingOptionsButton->setTooltip ("Show/hide recording options");
     filenameConfigWindow = std::make_unique<FilenameConfigWindow> (filenameFields);
