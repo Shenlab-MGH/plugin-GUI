@@ -2,6 +2,7 @@
 include(../ComponentRules.cmake)
 add_sources(${COMPONENT_NAME}_tests
 		DataViewportTests.cpp
+		ControlPanelAccessibilityTests.cpp
 		MainDocumentWindowAccessibilityTests.cpp
 		SemanticComponentTests.cpp
 )
