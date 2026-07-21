@@ -35,6 +35,26 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 const int SIZE_AUDIO_EDITOR_MAX_WIDTH = 500;
 
+namespace
+{
+class ReadOnlyRangedValue final : public AccessibilityRangedNumericValueInterface
+{
+public:
+    explicit ReadOnlyRangedValue (std::function<double()> getValueIn)
+        : getValue (std::move (getValueIn))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValue (double) override { jassertfalse; }
+    double getCurrentValue() const override { return jlimit (0.0, 1.0, getValue()); }
+    AccessibleValueRange getRange() const override { return { { 0.0, 1.0 }, 0.001 }; }
+
+private:
+    std::function<double()> getValue;
+};
+} // namespace
+
 NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
 {
     XmlDocument xmlDoc (R"(
@@ -220,6 +240,10 @@ CPUMeter::CPUMeter() : Component ("CPU Meter"),
     font = FontOptions ("Silkscreen", "Regular", 14);
 
     setTooltip ("CPU usage");
+    applySemanticMetadata (*this,
+                           "oe.status.cpu_usage",
+                           "CPU usage",
+                           "Fraction of available processing time used by the signal chain.");
 }
 
 void CPUMeter::updateCPU (float usage)
@@ -227,6 +251,19 @@ void CPUMeter::updateCPU (float usage)
     cpu = usage;
 
     repaint();
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
+}
+
+std::unique_ptr<AccessibilityHandler> CPUMeter::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::progressBar,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces { std::make_unique<ReadOnlyRangedValue> ([this]
+                                                                                  { return cpu; }) });
 }
 
 void CPUMeter::paint (Graphics& g)
@@ -261,6 +298,10 @@ DiskSpaceMeter::DiskSpaceMeter() : Component ("Disk Space Meter"),
     font = FontOptions ("Silkscreen", "Regular", 14);
 
     setTooltip ("Disk space available");
+    applySemanticMetadata (*this,
+                           "oe.status.disk_free",
+                           "Disk space available",
+                           "Fraction of free space in the recording directory.");
 }
 
 void DiskSpaceMeter::updateDiskSpace (float percent)
@@ -268,6 +309,19 @@ void DiskSpaceMeter::updateDiskSpace (float percent)
     diskFree = percent;
 
     repaint();
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
+}
+
+std::unique_ptr<AccessibilityHandler> DiskSpaceMeter::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::progressBar,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces { std::make_unique<ReadOnlyRangedValue> ([this]
+                                                                                  { return diskFree; }) });
 }
 
 void DiskSpaceMeter::paint (Graphics& g)
