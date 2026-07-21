@@ -262,7 +262,7 @@ private:
 
 */
 
-class SignalChainTabButton : public Button
+class TESTABLE SignalChainTabButton : public Button
 {
 public:
     /** Constructor */
@@ -292,7 +292,7 @@ private:
 
 */
 
-class SignalChainScrollButton : public TextButton
+class TESTABLE SignalChainScrollButton : public TextButton
 {
 public:
     /** Constructor*/

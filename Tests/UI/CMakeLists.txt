@@ -4,6 +4,7 @@ add_sources(${COMPONENT_NAME}_tests
 		DataViewportTests.cpp
 		ControlPanelAccessibilityTests.cpp
 		GenericEditorAccessibilityTests.cpp
+		EditorViewportAccessibilityTests.cpp
 		MainDocumentWindowAccessibilityTests.cpp
 		ParameterEditorAccessibilityTests.cpp
 		SemanticComponentTests.cpp

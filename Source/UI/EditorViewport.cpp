@@ -30,6 +30,7 @@
 #include "../Processors/ProcessorGraph/ProcessorGraphActions.h"
 #include "GraphViewer.h"
 #include "ProcessorList.h"
+#include "SemanticComponent.h"
 
 const int BORDER_SIZE = 6;
 const int TAB_SIZE = 30;
@@ -1158,6 +1159,14 @@ SignalChainTabButton::SignalChainTabButton (int index) : Button ("Signal Chain T
     setRadioGroupId (99);
     setClickingTogglesState (true);
 
+    const auto chainLabel = index >= 0 && index < 9
+                                ? String::charToString (static_cast<juce_wchar> ('A' + index))
+                                : String (index + 1);
+    applySemanticMetadata (*this,
+                           "oe.signal_chain." + String (index) + ".select",
+                           "Signal chain " + chainLabel,
+                           "Select signal chain " + chainLabel + ".");
+
     buttonFont = FontOptions ("Silkscreen", 10, Font::plain).withHeight (14);
 
     offset = 0;
@@ -1224,6 +1233,12 @@ void SignalChainTabButton::paintButton (Graphics& g, bool isMouseOver, bool isBu
 SignalChainScrollButton::SignalChainScrollButton (int direction)
     : TextButton ("Signal Chain Scroll Button " + String (direction))
 {
+    const bool scrollsDown = direction == DOWN;
+    applySemanticMetadata (*this,
+                           scrollsDown ? "oe.signal_chain.scroll.down" : "oe.signal_chain.scroll.up",
+                           scrollsDown ? "Scroll signal chains down" : "Scroll signal chains up",
+                           scrollsDown ? "Show later signal chains." : "Show earlier signal chains.");
+
     if (direction == DOWN)
     {
         path.addTriangle (0.0f, 0.0f, 9.0f, 20.0f, 18.0f, 0.0f);
