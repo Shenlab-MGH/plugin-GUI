@@ -313,11 +313,11 @@ DiskSpaceMeter::DiskSpaceMeter() : Component ("Disk Space Meter"),
 {
     font = FontOptions ("Silkscreen", "Regular", 14);
 
-    setTooltip ("Disk space available");
+    setTooltip ("Disk usage");
     applySemanticMetadata (*this,
-                           "oe.status.disk_free",
-                           "Disk space available",
-                           "Fraction of free space in the recording directory.");
+                           "oe.status.disk_usage",
+                           "Disk usage",
+                           "Fraction of recording-volume space currently used.");
 }
 
 void DiskSpaceMeter::updateDiskSpace (float percent)

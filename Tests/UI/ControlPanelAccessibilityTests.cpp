@@ -75,8 +75,9 @@ TEST (ControlPanelAccessibilityTests, ExposesHealthMetersAsReadOnlyRanges)
     DiskSpaceMeter disk;
     disk.updateDiskSpace (0.65f);
 
-    EXPECT_EQ (disk.getComponentID(), "oe.status.disk_free");
-    EXPECT_EQ (disk.getTitle(), "Disk space available");
+    EXPECT_EQ (disk.getComponentID(), "oe.status.disk_usage");
+    EXPECT_EQ (disk.getTitle(), "Disk usage");
+    EXPECT_EQ (disk.getDescription(), "Fraction of recording-volume space currently used.");
     auto diskHandler = disk.createAccessibilityHandler();
     ASSERT_NE (diskHandler, nullptr);
     EXPECT_EQ (diskHandler->getRole(), AccessibilityRole::progressBar);
