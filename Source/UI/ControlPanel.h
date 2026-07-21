@@ -43,7 +43,7 @@
     Triggers a new directory to be created at the start of each recording
 
 */
-class NewDirectoryButton : public Button
+class TESTABLE NewDirectoryButton : public Button
 {
 public:
     /** Constructor */
@@ -63,7 +63,7 @@ private:
     Locks the new directory button to force new directories for each recording.
 
 */
-class ForceNewDirectoryButton : public Button
+class TESTABLE ForceNewDirectoryButton : public Button
 {
 public:
     /** Constructor */
@@ -84,7 +84,7 @@ private:
     instead of always using the auto-generated date string
 
 */
-class FilenameEditorButton : public TextButton
+class TESTABLE FilenameEditorButton : public TextButton
 {
 public:
     /** Constructor */
@@ -108,7 +108,7 @@ public:
   @see ControlPanel, ProcessorGraph
 
 */
-class PlayButton : public DrawableButton
+class TESTABLE PlayButton : public DrawableButton
 {
 public:
     /** Constructor*/
@@ -136,7 +136,7 @@ public:
 
 */
 
-class RecordButton : public DrawableButton
+class TESTABLE RecordButton : public DrawableButton
 {
 public:
     /** Constructor*/

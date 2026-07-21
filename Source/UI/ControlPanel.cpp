@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "../Processors/PluginManager/PluginManager.h"
 #include "../Processors/RecordNode/RecordEngine.h"
 #include "FilenameConfigWindow.h"
+#include "SemanticComponent.h"
 #include "UIComponent.h"
 #include <math.h>
 #include <stdio.h>
@@ -44,6 +45,10 @@ NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
     newDirectoryIcon->replaceColour (Colours::black, Colours::black);
 
     setClickingTogglesState (true);
+    applySemanticMetadata (*this,
+                           "oe.control.recording.new_directory",
+                           "New recording directory",
+                           "Start a new data directory for the next recording.");
 }
 
 void NewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -90,6 +95,10 @@ ForceNewDirectoryButton::ForceNewDirectoryButton() : Button ("ForceNewDirectory"
     forceNewDirectoryIcon = Drawable::createFromSVG (*xmlDoc.getDocumentElement().get());
 
     setClickingTogglesState (true);
+    applySemanticMetadata (*this,
+                           "oe.control.recording.force_new_directory",
+                           "Force new recording directories",
+                           "Force a new data directory for each recording.");
 }
 
 void ForceNewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -115,6 +124,10 @@ FilenameEditorButton::FilenameEditorButton()
     : TextButton ("Filename Editor")
 {
     setTooltip ("Edit the recording filename");
+    applySemanticMetadata (*this,
+                           "oe.control.recording.filename",
+                           "Recording filename",
+                           "Edit the recording filename.");
 }
 
 PlayButton::PlayButton()
@@ -124,6 +137,10 @@ PlayButton::PlayButton()
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
     setTooltip ("Start/stop acquisition");
+    applySemanticMetadata (*this,
+                           "oe.control.acquisition",
+                           "Acquisition",
+                           "Start or stop data acquisition.");
 
     updateImages (false);
 }
@@ -162,6 +179,10 @@ RecordButton::RecordButton()
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
     setTooltip ("Start/stop writing to disk");
+    applySemanticMetadata (*this,
+                           "oe.control.recording",
+                           "Recording",
+                           "Start or stop writing data to disk.");
 
     updateImages (false);
 }
