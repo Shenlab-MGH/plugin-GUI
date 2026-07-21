@@ -55,3 +55,25 @@ TEST_F (DataViewportTests, TestAddTabsAndSwitchTabs)
     //viewport->setCurrentTabIndex(1);
     //ASSERT_EQ(viewport->getCurrentTabIndex(), 1);
 }
+
+TEST_F (DataViewportTests, ExposesViewTabsAndLayoutActions)
+{
+    DraggableTabComponent tabs (viewport.get());
+    CustomTabButton infoTab ("Info", &tabs, 0);
+    EXPECT_EQ (infoTab.getComponentID(), "oe.view.tab.0.select");
+    EXPECT_EQ (infoTab.getTitle(), "Info tab");
+    EXPECT_EQ (infoTab.getDescription(), "Select the Info view tab.");
+    EXPECT_TRUE (infoTab.isAccessible());
+
+    CloseTabButton closeInfo (0, "Info");
+    EXPECT_EQ (closeInfo.getComponentID(), "oe.view.tab.0.close");
+    EXPECT_EQ (closeInfo.getTitle(), "Close Info tab");
+    EXPECT_EQ (closeInfo.getDescription(), "Close the Info view tab.");
+    EXPECT_TRUE (closeInfo.isAccessible());
+
+    AddTabbedComponentButton addColumn;
+    EXPECT_EQ (addColumn.getComponentID(), "oe.view.column.add");
+    EXPECT_EQ (addColumn.getTitle(), "Add view column");
+    EXPECT_EQ (addColumn.getDescription(), "Add another tabbed view column.");
+    EXPECT_TRUE (addColumn.isAccessible());
+}

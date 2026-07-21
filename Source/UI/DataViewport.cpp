@@ -25,6 +25,16 @@
 #include "../Processors/Editors/VisualizerEditor.h"
 #include "../Processors/Visualization/Visualizer.h"
 #include "EditorViewport.h"
+#include "SemanticComponent.h"
+
+CloseTabButton::CloseTabButton (int nodeId, const String& tabName)
+    : Button ("Close Tab")
+{
+    applySemanticMetadata (*this,
+                           "oe.view.tab." + String (nodeId) + ".close",
+                           "Close " + tabName + " tab",
+                           "Close the " + tabName + " view tab.");
+}
 
 void CloseTabButton::mouseEnter (const MouseEvent& event)
 {
@@ -62,7 +72,12 @@ void CloseTabButton::paintButton (Graphics& g, bool isMouseOverButton, bool isBu
 CustomTabButton::CustomTabButton (const String& name, DraggableTabComponent* parent_, int nodeId_)
     : juce::TabBarButton (name, parent_->getTabbedButtonBar()), nodeId (nodeId_), parent (parent_)
 {
-    CloseTabButton* closeButton = new CloseTabButton();
+    applySemanticMetadata (*this,
+                           "oe.view.tab." + String (nodeId) + ".select",
+                           name + " tab",
+                           "Select the " + name + " view tab.");
+
+    CloseTabButton* closeButton = new CloseTabButton (nodeId, name);
     closeButton->setBounds (0, 0, 20, 20);
     closeButton->addListener (this);
 
@@ -529,6 +544,11 @@ void DraggableTabComponent::takeComponentSnapshot (int tabIndex, const String& t
 AddTabbedComponentButton::AddTabbedComponentButton (SplitType splitType)
     : Button ("Add Tabbed Component"), type (splitType)
 {
+    applySemanticMetadata (*this,
+                           "oe.view.column.add",
+                           "Add view column",
+                           "Add another tabbed view column.");
+
     path.addRoundedRectangle (1, 1, 18, 18, 3.0f);
 }
 
