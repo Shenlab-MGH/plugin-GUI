@@ -254,7 +254,7 @@ private:
 
 */
 
-class Clock : public Component
+class TESTABLE Clock : public Component
 {
 public:
     enum Mode
@@ -299,6 +299,8 @@ public:
     /** Renders the clock.*/
     void paint (Graphics& g);
 
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
     /** Sets the clock mode*/
     void setMode (Mode m);
 
@@ -320,6 +322,8 @@ public:
 private:
     /** Draws the current time.*/
     void drawTime (Graphics& g);
+
+    String getDisplayText() const;
 
     int64 lastTime;
 

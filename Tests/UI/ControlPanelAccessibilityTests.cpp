@@ -3,6 +3,12 @@
 
 namespace
 {
+class TestClock : public Clock
+{
+public:
+    using Clock::createAccessibilityHandler;
+};
+
 void expectSemanticButton (Button& button,
                            const String& expectedId,
                            const String& expectedTitle,
@@ -109,7 +115,6 @@ TEST (ControlPanelAccessibilityTests, ExposesClockAsReadOnlyFormattedText)
     clock.setMode (Clock::HHMMSS);
     EXPECT_EQ (value->getCurrentValueAsString(), "00:00:00");
 }
-
 TEST (ControlPanelAccessibilityTests, UsesClockStatusForItsAccessibleValue)
 {
     TestClock clock;

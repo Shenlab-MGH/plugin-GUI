@@ -53,6 +53,22 @@ public:
 private:
     std::function<double()> getValue;
 };
+
+class ReadOnlyTextValue final : public AccessibilityTextValueInterface
+{
+public:
+    explicit ReadOnlyTextValue (std::function<String()> getValueIn)
+        : getValue (std::move (getValueIn))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (const String&) override { jassertfalse; }
+    String getCurrentValueAsString() const override { return getValue(); }
+
+private:
+    std::function<String()> getValue;
+};
 } // namespace
 
 NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
@@ -417,28 +433,6 @@ void Clock::drawTime (Graphics& g)
         lastTime = Time::currentTimeMillis();
     }
 
-    int m;
-    int s;
-    int h;
-
-    int64 timeToDraw;
-
-    if (referenceTime == ACQUISITION_START)
-    {
-        timeToDraw = latestAcquisitionTime;
-    }
-    else
-    {
-        if (isRecording)
-            timeToDraw = totalRecordingTime;
-        else
-            timeToDraw = totalTime;
-    }
-
-    h = floor (timeToDraw / 3600000.0f);
-    m = floor (timeToDraw / 60000.0);
-    s = floor ((timeToDraw - m * 60000.0) / 1000.0);
-
     if (isRecording)
     {
         g.setColour (Colours::black);
@@ -451,36 +445,26 @@ void Clock::drawTime (Graphics& g)
             g.setColour (findColour (ThemeColours::controlPanelText).withAlpha (0.8f));
     }
 
-    String timeString = "";
+    g.setFont (clockFont);
+    g.drawText (getDisplayText(), 0, 0, getWidth(), getHeight(), Justification::centred, false);
+}
+
+String Clock::getDisplayText() const
+{
+    const auto timeToDisplay = referenceTime == ACQUISITION_START
+                                   ? latestAcquisitionTime
+                                   : (isRecording ? totalRecordingTime : totalTime);
+    const int hours = floor (timeToDisplay / 3600000.0f);
+    const int totalMinutes = floor (timeToDisplay / 60000.0);
+    const int seconds = floor ((timeToDisplay - totalMinutes * 60000.0) / 1000.0);
 
     if (mode == DEFAULT)
-    {
-        timeString += m;
-        timeString += " min ";
-        timeString += s;
-        timeString += " s";
-    }
-    else
-    {
-        if (h < 10)
-            timeString += "0";
-        timeString += h;
-        timeString += ":";
+        return String (totalMinutes) + " min " + String (seconds) + " s";
 
-        int minutes = m - h * 60;
-
-        if (minutes < 10)
-            timeString += "0";
-        timeString += minutes;
-        timeString += ":";
-
-        if (s < 10)
-            timeString += "0";
-        timeString += s;
-    }
-
-    g.setFont (clockFont);
-    g.drawText (timeString, 0, 0, getWidth(), getHeight(), Justification::centred, false);
+    const int minutes = totalMinutes - hours * 60;
+    return String (hours).paddedLeft ('0', 2)
+           + ":" + String (minutes).paddedLeft ('0', 2)
+           + ":" + String (seconds).paddedLeft ('0', 2);
 }
 
 void Clock::start()
