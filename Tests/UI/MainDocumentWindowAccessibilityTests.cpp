@@ -50,6 +50,7 @@ TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheWindowAndItsContentToAcc
     window.setContentNonOwned (&contentButton, false);
     window.addToDesktop();
 
+    EXPECT_EQ (window.getComponentID(), "oe.window.main");
     EXPECT_TRUE (window.isAccessible());
     EXPECT_TRUE (contentButton.isAccessible());
     EXPECT_NE (window.getAccessibilityHandler(), nullptr);

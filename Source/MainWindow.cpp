@@ -42,6 +42,7 @@ MainDocumentWindow::MainDocumentWindow()
 #endif
     Image titleBarIcon = ImageCache::getFromFile (iconDir.getChildFile ("icon-small.png"));
     setIcon (titleBarIcon);
+    setComponentID ("oe.window.main");
 }
 
 MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleApp (isConsoleApp_)
