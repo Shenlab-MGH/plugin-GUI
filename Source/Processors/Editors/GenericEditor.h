@@ -382,7 +382,10 @@ class PLUGIN_API DrawerButton : public Button
 {
 public:
     /** Constructor */
-    DrawerButton (const String& name);
+    DrawerButton (const String& name,
+                  const String& semanticId = {},
+                  const String& semanticTitle = {},
+                  const String& semanticDescription = {});
 
     /** Destructor */
     ~DrawerButton();
