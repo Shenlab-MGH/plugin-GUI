@@ -79,6 +79,13 @@ private:
     std::unique_ptr<Drawable> forceNewDirectoryIcon;
 };
 
+/** Shows or hides the recording options row. */
+class TESTABLE RecordingOptionsButton : public CustomArrowButton
+{
+public:
+    RecordingOptionsButton();
+};
+
 /** 
 
     Allows the user to specify custom file names,
@@ -556,7 +563,7 @@ private:
     std::unique_ptr<FilenameComponent> filenameComponent;
     std::unique_ptr<NewDirectoryButton> newDirectoryButton;
     std::unique_ptr<ForceNewDirectoryButton> forceNewDirectoryButton;
-    std::unique_ptr<CustomArrowButton> showHideRecordingOptionsButton;
+    std::unique_ptr<RecordingOptionsButton> showHideRecordingOptionsButton;
     std::unique_ptr<RecordButton> recordButton;
     std::unique_ptr<ComboBox> recordSelector;
     Array<std::shared_ptr<FilenameFieldComponent>> filenameFields;
