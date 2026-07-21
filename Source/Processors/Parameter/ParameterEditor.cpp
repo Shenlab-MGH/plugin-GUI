@@ -26,6 +26,43 @@
 #include "../Editors/GenericEditor.h"
 #include "../GenericProcessor/GenericProcessor.h"
 #include "../RecordNode/RecordNode.h"
+#include "../../UI/SemanticComponent.h"
+
+namespace
+{
+void applyParameterSemanticMetadata (Component& component, Parameter& parameter)
+{
+    const auto title = parameter.getDisplayName().isNotEmpty()
+                           ? parameter.getDisplayName()
+                           : parameter.getName().replace ("_", " ");
+
+    applySemanticMetadata (component,
+                           "oe.parameter." + sanitiseSemanticSegment (String (parameter.getKey())),
+                           title,
+                           parameter.getDescription());
+}
+} // namespace
+
+void ParameterEditor::setParameter (Parameter* newParam)
+{
+    if (param != nullptr)
+        param->removeListener (this);
+
+    if (newParam != nullptr)
+    {
+        newParam->addListener (this);
+        setEnabled (newParam->isEnabled());
+    }
+
+    param = newParam;
+
+    const MessageManagerLock mml;
+
+    if (editor != nullptr && param != nullptr)
+        applyParameterSemanticMetadata (*editor, *param);
+
+    updateView();
+}
 
 void ParameterEditor::setLayout (Layout newLayout)
 {
@@ -169,6 +206,7 @@ TextBoxParameterEditor::TextBoxParameterEditor (Parameter* param, int rowHeightP
     valueTextBox->setBounds (0, 0, width / 2, rowHeightPixels);
 
     editor = (Component*) valueTextBox.get();
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 void TextBoxParameterEditor::labelTextChanged (Label* label)
@@ -264,6 +302,7 @@ ToggleParameterEditor::ToggleParameterEditor (Parameter* param, int rowHeightPix
     toggleButton->setBounds (0, 0, width / 2, rowHeightPixels);
 
     editor = (Component*) toggleButton.get();
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 void ToggleParameterEditor::buttonClicked (Button* button)
@@ -338,6 +377,7 @@ ComboBoxParameterEditor::ComboBoxParameterEditor (Parameter* param, int rowHeigh
     valueComboBox->setBounds (0, 0, width / 2, rowHeightPixels);
 
     editor = (Component*) valueComboBox.get();
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 void ComboBoxParameterEditor::comboBoxChanged (ComboBox* comboBox)
@@ -517,6 +557,7 @@ BoundedValueParameterEditor::BoundedValueParameterEditor (Parameter* param, int 
     setBounds (0, 0, rowWidthPixels, rowHeightPixels);
 
     editor = (Component*) valueEditor.get();
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 void BoundedValueParameterEditor::labelTextChanged (Label* label)
@@ -601,6 +642,7 @@ SelectedChannelsParameterEditor::SelectedChannelsParameterEditor (Parameter* par
     button->setBounds (0, 0, rowWidthPixels / 2, rowHeightPixels);
 
     editor = (Component*) button.get();
+    applyParameterSemanticMetadata (*editor, *param);
 
     updateView();
 }
@@ -717,7 +759,6 @@ MaskChannelsParameterEditor::MaskChannelsParameterEditor (Parameter* param, int 
             selected++;
 
     button = std::make_unique<TextButton> (String (selected) + "/" + String (numChannels));
-    button->setComponentID (param->getKey());
     button->addListener (this);
     button->setClickingTogglesState (false);
     button->setTooltip ("Mask channels to filter within this stream");
@@ -736,6 +777,7 @@ MaskChannelsParameterEditor::MaskChannelsParameterEditor (Parameter* param, int 
     button->setBounds (0, 0, width / 2, rowHeightPixels);
 
     editor = (Component*) button.get();
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 Array<int> MaskChannelsParameterEditor::getSelectedChannels()
@@ -974,6 +1016,8 @@ TtlLineParameterEditor::TtlLineParameterEditor (Parameter* param,
 
         editor = (Component*) textButton.get();
     }
+
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 void TtlLineParameterEditor::selectedLineChanged (int newLine)
@@ -1128,6 +1172,7 @@ PathParameterEditor::PathParameterEditor (Parameter* param, int rowHeightPixels,
     button->setBounds (0, 0, width / 2, rowHeightPixels);
 
     editor = (Component*) button.get();
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 void PathParameterEditor::buttonClicked (Button* button_)
@@ -1251,6 +1296,7 @@ SelectedStreamParameterEditor::SelectedStreamParameterEditor (Parameter* param, 
     valueComboBox->setBounds (0, 0, width / 2, rowHeightPixels);
 
     editor = (Component*) valueComboBox.get();
+    applyParameterSemanticMetadata (*editor, *param);
 }
 
 void SelectedStreamParameterEditor::comboBoxChanged (ComboBox* comboBox)
@@ -1312,6 +1358,7 @@ TimeParameterEditor::TimeParameterEditor (Parameter* param, int rowHeightPixels,
     button->setBounds (0, 0, width / 2, rowHeightPixels);
 
     editor = (Component*) button.get();
+    applyParameterSemanticMetadata (*editor, *param);
 
     startTimer (200);
 }

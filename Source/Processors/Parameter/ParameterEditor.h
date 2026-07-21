@@ -100,22 +100,7 @@ public:
     virtual void updateView() = 0;
 
     /** Sets the parameter corresponding to this editor*/
-    void setParameter (Parameter* newParam)
-    {
-        if (param != nullptr)
-            param->removeListener (this);
-
-        if (newParam != nullptr)
-        {
-            newParam->addListener (this);
-            setEnabled (newParam->isEnabled());
-        }
-
-        param = newParam;
-
-        const MessageManagerLock mml;
-        updateView();
-    }
+    void setParameter (Parameter* newParam);
 
     void parameterEnabled (bool isParamEnabled) override
     {
