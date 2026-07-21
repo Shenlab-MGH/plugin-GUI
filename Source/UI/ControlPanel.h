@@ -165,8 +165,8 @@ public:
 
 */
 
-class CPUMeter : public Component,
-                 public SettableTooltipClient
+class TESTABLE CPUMeter : public Component,
+                          public SettableTooltipClient
 {
 public:
     /** Constructor*/
@@ -181,6 +181,8 @@ public:
 
     /** Draws the CPUMeter. */
     void paint (Graphics& g);
+
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
 private:
     FontOptions font;
@@ -202,8 +204,8 @@ private:
 
 */
 
-class DiskSpaceMeter : public Component,
-                       public SettableTooltipClient
+class TESTABLE DiskSpaceMeter : public Component,
+                                public SettableTooltipClient
 {
 public:
     /** Constructor*/
@@ -218,6 +220,8 @@ public:
 
     /** Draws the DiskSpaceMeter. */
     void paint (Graphics& g);
+
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
 private:
     FontOptions font;

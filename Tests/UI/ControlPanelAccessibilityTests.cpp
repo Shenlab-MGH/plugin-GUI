@@ -47,3 +47,38 @@ TEST (ControlPanelAccessibilityTests, ExposesGlobalActionButtons)
                           "Force new recording directories",
                           "Force a new data directory for each recording.");
 }
+
+TEST (ControlPanelAccessibilityTests, ExposesHealthMetersAsReadOnlyRanges)
+{
+    CPUMeter cpu;
+    cpu.updateCPU (0.42f);
+
+    EXPECT_EQ (cpu.getComponentID(), "oe.status.cpu_usage");
+    EXPECT_EQ (cpu.getTitle(), "CPU usage");
+    auto cpuHandler = cpu.createAccessibilityHandler();
+    ASSERT_NE (cpuHandler, nullptr);
+    EXPECT_EQ (cpuHandler->getRole(), AccessibilityRole::progressBar);
+    auto* cpuValue = cpuHandler->getValueInterface();
+    ASSERT_NE (cpuValue, nullptr);
+    EXPECT_TRUE (cpuValue->isReadOnly());
+    EXPECT_NEAR (cpuValue->getCurrentValue(), 0.42, 0.001);
+    EXPECT_TRUE (cpuValue->getRange().isValid());
+    EXPECT_DOUBLE_EQ (cpuValue->getRange().getMinimumValue(), 0.0);
+    EXPECT_DOUBLE_EQ (cpuValue->getRange().getMaximumValue(), 1.0);
+
+    DiskSpaceMeter disk;
+    disk.updateDiskSpace (0.65f);
+
+    EXPECT_EQ (disk.getComponentID(), "oe.status.disk_free");
+    EXPECT_EQ (disk.getTitle(), "Disk space available");
+    auto diskHandler = disk.createAccessibilityHandler();
+    ASSERT_NE (diskHandler, nullptr);
+    EXPECT_EQ (diskHandler->getRole(), AccessibilityRole::progressBar);
+    auto* diskValue = diskHandler->getValueInterface();
+    ASSERT_NE (diskValue, nullptr);
+    EXPECT_TRUE (diskValue->isReadOnly());
+    EXPECT_NEAR (diskValue->getCurrentValue(), 0.65, 0.001);
+    EXPECT_TRUE (diskValue->getRange().isValid());
+    EXPECT_DOUBLE_EQ (diskValue->getRange().getMinimumValue(), 0.0);
+    EXPECT_DOUBLE_EQ (diskValue->getRange().getMaximumValue(), 1.0);
+}
