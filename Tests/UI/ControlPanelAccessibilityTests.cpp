@@ -3,6 +3,12 @@
 
 namespace
 {
+class TestClock : public Clock
+{
+public:
+    using Clock::createAccessibilityHandler;
+};
+
 void expectSemanticButton (Button& button,
                            const String& expectedId,
                            const String& expectedTitle,
@@ -81,4 +87,24 @@ TEST (ControlPanelAccessibilityTests, ExposesHealthMetersAsReadOnlyRanges)
     EXPECT_TRUE (diskValue->getRange().isValid());
     EXPECT_DOUBLE_EQ (diskValue->getRange().getMinimumValue(), 0.0);
     EXPECT_DOUBLE_EQ (diskValue->getRange().getMaximumValue(), 1.0);
+}
+
+TEST (ControlPanelAccessibilityTests, ExposesClockAsReadOnlyFormattedText)
+{
+    TestClock clock;
+
+    EXPECT_EQ (clock.getComponentID(), "oe.status.elapsed_time");
+    EXPECT_EQ (clock.getTitle(), "Elapsed time");
+
+    auto handler = clock.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::staticText);
+
+    auto* value = handler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+    EXPECT_TRUE (value->isReadOnly());
+    EXPECT_EQ (value->getCurrentValueAsString(), "0 min 0 s");
+
+    clock.setMode (Clock::HHMMSS);
+    EXPECT_EQ (value->getCurrentValueAsString(), "00:00:00");
 }
