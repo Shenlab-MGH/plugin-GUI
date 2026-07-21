@@ -37,11 +37,11 @@ class DataViewport;
  Custom button to remove a tab
 
 */
-class CloseTabButton : public juce::Button
+class TESTABLE CloseTabButton : public juce::Button
 {
 public:
     /** Constructor */
-    CloseTabButton() : Button ("Close Tab") {}
+    CloseTabButton (int nodeId, const String& tabName);
 
     /** Renders the button */
     void paintButton (Graphics& g, bool isMouseOverButton, bool isButtonDown) override;
@@ -58,9 +58,9 @@ public:
     Custom tab  button that's draggable, and has a close button
  
  */
-class CustomTabButton : public TabBarButton,
-                        public DragAndDropTarget,
-                        public Button::Listener
+class TESTABLE CustomTabButton : public TabBarButton,
+                                 public DragAndDropTarget,
+                                 public Button::Listener
 {
 public:
     /** Constructor */
@@ -111,7 +111,7 @@ private:
 
 */
 
-class DraggableTabComponent : public TabbedComponent,
+class TESTABLE DraggableTabComponent : public TabbedComponent,
                               public DragAndDropTarget,
                               public Button::Listener
 {
@@ -203,7 +203,7 @@ private:
  Custom button to add a tabbed component
 
 */
-class AddTabbedComponentButton : public juce::Button
+class TESTABLE AddTabbedComponentButton : public juce::Button
 {
 public:
     /** Constructor */
