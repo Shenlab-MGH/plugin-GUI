@@ -25,6 +25,7 @@
 #include "../../AccessClass.h"
 #include "../../Audio/AudioComponent.h"
 #include "../../UI/EditorViewport.h"
+#include "../../UI/SemanticComponent.h"
 #include "../../Utils/Utils.h"
 
 static const Colour COLOUR_SLIDER_TRACK (Colour::fromRGB (92, 92, 92));
@@ -41,6 +42,10 @@ MuteButton::MuteButton()
     setClickingTogglesState (true);
 
     setTooltip ("Mute audio");
+    applySemanticMetadata (*this,
+                           "oe.audio.mute",
+                           "Mute audio output",
+                           "Mute or restore monitored audio output.");
 }
 
 void MuteButton::updateImages()
@@ -55,10 +60,37 @@ AudioWindowButton::AudioWindowButton()
 
     textString = ":AUDIO";
     setTooltip ("Change the buffer size");
+    applySemanticMetadata (*this,
+                           "oe.audio.settings",
+                           "Audio settings",
+                           "Show or hide audio device settings and buffer size.");
 
     String svgPathString = "M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0 M12 7v5l3 3";
 
     latencySvgPath = Drawable::parseSVGPath (svgPathString);
+}
+
+AudioLevelSlider::AudioLevelSlider (Kind kind)
+    : Slider (kind == Kind::volume ? "Volume Slider" : "Noise Gate Slider")
+{
+    setSliderStyle (Slider::LinearHorizontal);
+    setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    setRange (0, 100, 1);
+
+    if (kind == Kind::volume)
+    {
+        applySemanticMetadata (*this,
+                               "oe.audio.volume",
+                               "Audio volume",
+                               "Set monitored audio output volume.");
+    }
+    else
+    {
+        applySemanticMetadata (*this,
+                               "oe.audio.noise_gate",
+                               "Audio noise gate",
+                               "Set the monitored audio noise gate threshold.");
+    }
 }
 
 void AudioWindowButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -95,24 +127,12 @@ AudioEditor::AudioEditor (AudioNode* owner)
     audioWindowButton->setToggleState (false, dontSendNotification);
     addAndMakeVisible (audioWindowButton);
 
-    volumeSlider = new Slider ("Volume Slider");
-    volumeSlider->setSliderStyle (Slider::LinearHorizontal);
-    volumeSlider->setTextBoxStyle (Slider::NoTextBox,
-                                   false,
-                                   0,
-                                   0);
-    volumeSlider->setRange (0, 100, 1);
+    volumeSlider = new AudioLevelSlider (AudioLevelSlider::Kind::volume);
     volumeSlider->addListener (this);
     volumeSlider->setValue (50);
     addAndMakeVisible (volumeSlider);
 
-    noiseGateSlider = new Slider ("Noise Gate Slider");
-    volumeSlider->setSliderStyle (Slider::LinearHorizontal);
-    noiseGateSlider->setTextBoxStyle (Slider::NoTextBox,
-                                      false,
-                                      0,
-                                      0);
-    noiseGateSlider->setRange (0, 100, 1);
+    noiseGateSlider = new AudioLevelSlider (AudioLevelSlider::Kind::noiseGate);
     noiseGateSlider->addListener (this);
     addAndMakeVisible (noiseGateSlider);
 }
