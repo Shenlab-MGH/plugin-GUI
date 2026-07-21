@@ -25,6 +25,7 @@
 #define __AUDIOEDITOR_H_9D6F1FC3__
 
 #include "../../../JuceLibraryCode/JuceHeader.h"
+#include "../../TestableExport.h"
 #include "../../Utils/Utils.h"
 #include "AudioNode.h"
 #include <stdio.h>
@@ -38,7 +39,7 @@ class AudioComponent;
   @see AudioNode, AudioEditor
 
 */
-class MuteButton : public ImageButton
+class TESTABLE MuteButton : public ImageButton
 {
 public:
     /** Constructor */
@@ -60,7 +61,7 @@ private:
   @see AudioNode, AudioEditor
 
 */
-class AudioWindowButton : public Button
+class TESTABLE AudioWindowButton : public Button
 {
 public:
     /** Constructor */
@@ -78,6 +79,19 @@ public:
 private:
     String textString;
     Path latencySvgPath;
+};
+
+/** Volume or noise-gate control with stable UI Automation semantics. */
+class TESTABLE AudioLevelSlider : public Slider
+{
+public:
+    enum class Kind
+    {
+        volume,
+        noiseGate
+    };
+
+    explicit AudioLevelSlider (Kind kind);
 };
 
 /**
@@ -166,8 +180,8 @@ private:
 
     ScopedPointer<AudioConfigurationWindow> audioConfigurationWindow;
 
-    ScopedPointer<Slider> volumeSlider;
-    ScopedPointer<Slider> noiseGateSlider;
+    ScopedPointer<AudioLevelSlider> volumeSlider;
+    ScopedPointer<AudioLevelSlider> noiseGateSlider;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEditor);
 };
