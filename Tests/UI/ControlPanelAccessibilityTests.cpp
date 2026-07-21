@@ -52,6 +52,13 @@ TEST (ControlPanelAccessibilityTests, ExposesGlobalActionButtons)
                           "oe.control.recording.force_new_directory",
                           "Force new recording directories",
                           "Force a new data directory for each recording.");
+
+    RecordingOptionsButton recordingOptions;
+    expectSemanticButton (recordingOptions,
+                          "oe.control.recording.options",
+                          "Recording options",
+                          "Show or hide recording options.");
+    EXPECT_TRUE (recordingOptions.getClickingTogglesState());
 }
 
 TEST (ControlPanelAccessibilityTests, ExposesHealthMetersAsReadOnlyRanges)
