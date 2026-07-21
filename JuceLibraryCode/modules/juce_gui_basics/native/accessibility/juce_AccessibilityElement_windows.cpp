@@ -86,8 +86,13 @@ private:
 //==============================================================================
 static String getAutomationId (const AccessibilityHandler& handler)
 {
+    const auto& component = handler.getComponent();
+
+    if (component.getComponentID().isNotEmpty())
+        return component.getComponentID();
+
     auto result = handler.getTitle();
-    auto* parentComponent = handler.getComponent().getParentComponent();
+    auto* parentComponent = component.getParentComponent();
 
     while (parentComponent != nullptr)
     {
