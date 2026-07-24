@@ -38,12 +38,36 @@
 #include "../UI/ProcessorList.h"
 
 #include "ControlCapabilityJson.h"
+#include "ControlRead.h"
 #include "RecordingOptionsControl.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
 
 #define PORT 37497
+
+namespace OpenEphysHttpDetail
+{
+inline bool dispatchToMessageThread (std::function<void()> operation)
+{
+    return MessageManager::callAsync (std::move (operation));
+}
+
+inline void setControlErrorResponse (httplib::Response& response,
+                                     const char* capability,
+                                     int httpStatus,
+                                     const String& errorCode,
+                                     const String& errorMessage)
+{
+    json document;
+    document["ok"] = false;
+    document["capability"] = capability;
+    document["error"]["code"] = errorCode.toStdString();
+    document["error"]["message"] = errorMessage.toStdString();
+    response.status = httpStatus;
+    response.set_content (document.dump(), "application/json");
+}
+} // namespace OpenEphysHttpDetail
 
 /**
  * HTTP server thread for controlling Processor Parameters via an HTTP API. This starts an HTTP server on port 37497
@@ -243,9 +267,25 @@ public:
 
         svr_->Get ("/api/disk", [] (const httplib::Request&, httplib::Response& res)
                    {
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getRecordingDiskUsage(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.status.disk_usage",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
             json ret;
             ret["capability"] = "oe.status.disk_usage";
-            ret["usage"] = CoreServices::getRecordingDiskUsage();
+            ret["usage"] = *readResult.value;
             ret["minimum"] = 0.0;
             ret["maximum"] = 1.0;
             ret["read_only"] = true;
@@ -253,7 +293,23 @@ public:
 
         svr_->Get ("/api/time", [] (const httplib::Request&, httplib::Response& res)
                    {
-            const auto status = CoreServices::getClockStatus();
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getClockStatus(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.status.elapsed_time",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
+            const auto& status = *readResult.value;
             json ret;
             ret["capability"] = "oe.status.elapsed_time";
             ret["display"] = status.display.toStdString();
@@ -267,7 +323,23 @@ public:
 
         svr_->Get ("/api/recording/options", [] (const httplib::Request&, httplib::Response& res)
                    {
-            const auto status = CoreServices::getRecordingOptionsStatus();
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getRecordingOptionsStatus(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.control.recording.options",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
+            const auto& status = *readResult.value;
             json ret;
             ret["capability"] = "oe.control.recording.options";
             ret["expanded"] = status.expanded;
@@ -280,10 +352,7 @@ public:
                    {
             const auto controlResult = handleRecordingOptionsPut (
                 String::fromUTF8 (req.body.data(), static_cast<int> (req.body.size())),
-                [] (std::function<void()> operation)
-                {
-                    return MessageManager::callAsync (std::move (operation));
-                },
+                OpenEphysHttpDetail::dispatchToMessageThread,
                 [] (const RecordingOptionsUpdate& update)
                 {
                     if (update.expanded.has_value())
@@ -298,13 +367,12 @@ public:
 
             if (! controlResult.status.has_value())
             {
-                json ret;
-                ret["ok"] = false;
-                ret["capability"] = "oe.control.recording.options";
-                ret["error"]["code"] = controlResult.errorCode.toStdString();
-                ret["error"]["message"] = controlResult.errorMessage.toStdString();
-                res.status = controlResult.httpStatus;
-                res.set_content (ret.dump(), "application/json");
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.control.recording.options",
+                    controlResult.httpStatus,
+                    controlResult.errorCode,
+                    controlResult.errorMessage);
                 return;
             }
 
