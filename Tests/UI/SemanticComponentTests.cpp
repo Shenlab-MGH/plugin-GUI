@@ -52,3 +52,21 @@ TEST (SemanticComponentTests, IgnoresInvalidSemanticIds)
     EXPECT_EQ (button.getTitle(), "Existing title");
     EXPECT_TRUE (button.getDescription().isEmpty());
 }
+
+TEST (SemanticComponentTests, ExposesEditableTextThroughAValueInterface)
+{
+    TextEditor editor;
+    editor.setText ("before");
+
+    auto handler = editor.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::editableText);
+
+    auto* value = handler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+    EXPECT_FALSE (value->isReadOnly());
+    EXPECT_EQ (value->getCurrentValueAsString(), "before");
+
+    value->setValueAsString ("after");
+    EXPECT_EQ (editor.getText(), "after");
+}
