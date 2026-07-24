@@ -257,7 +257,14 @@ class FifoDrawerButton : public DrawerButton
 {
 public:
     /** Constructor */
-    FifoDrawerButton (const String& name) : DrawerButton (name) {};
+    FifoDrawerButton (const String& name,
+                      const String& semanticId,
+                      const String& semanticTitle,
+                      const String& semanticDescription)
+        : DrawerButton (name,
+                        semanticId,
+                        semanticTitle,
+                        semanticDescription) {};
 
     /** Destructor */
     ~FifoDrawerButton() {};

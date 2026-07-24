@@ -21,6 +21,8 @@ TEST (SemanticComponentTests, SanitisesDynamicIdSegments)
     EXPECT_EQ (sanitiseSemanticSegment (" CH1 vs CH2 "), "ch1_vs_ch2");
     EXPECT_EQ (sanitiseSemanticSegment ("already_valid"), "already_valid");
     EXPECT_EQ (sanitiseSemanticSegment ("---"), "unnamed");
+    EXPECT_EQ (createProcessorControlSemanticId (101, "FIFO drawer"),
+               "oe.processor.101.fifo_drawer");
 }
 
 TEST (SemanticComponentTests, AppliesStableAccessibleMeaning)

@@ -29,6 +29,8 @@
 
 TESTABLE bool isValidSemanticId (StringRef id);
 TESTABLE String sanitiseSemanticSegment (StringRef segment);
+TESTABLE String createProcessorControlSemanticId (int nodeId,
+                                                  StringRef controlName);
 
 TESTABLE void applySemanticMetadata (Component& component,
                                      StringRef id,

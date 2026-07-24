@@ -86,6 +86,12 @@ String sanitiseSemanticSegment (StringRef segment)
     return result.isNotEmpty() ? result : "unnamed";
 }
 
+String createProcessorControlSemanticId (int nodeId, StringRef controlName)
+{
+    return "oe.processor." + String (nodeId) + "."
+           + sanitiseSemanticSegment (controlName);
+}
+
 void applySemanticMetadata (Component& component,
                             StringRef id,
                             StringRef title,

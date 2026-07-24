@@ -22,6 +22,7 @@
 */
 
 #include "RecordNodeEditor.h"
+#include "../../UI/SemanticComponent.h"
 #include "../../CoreServices.h"
 #include "RecordNode.h"
 #include <stdio.h>
@@ -556,7 +557,11 @@ RecordNodeEditor::RecordNodeEditor (RecordNode* parentNode)
 
     recordNode = parentNode;
 
-    fifoDrawerButton = std::make_unique<FifoDrawerButton> (getNameAndId() + " Fifo Drawer Button");
+    fifoDrawerButton = std::make_unique<FifoDrawerButton> (
+        getNameAndId() + " Fifo Drawer Button",
+        createProcessorControlSemanticId (parentNode->getNodeId(), "fifo_drawer"),
+        "Record node FIFO monitors",
+        "Show or hide recording FIFO usage monitors.");
     fifoDrawerButton->setBounds (4, 40, 10, 78);
     fifoDrawerButton->addListener (this);
     addAndMakeVisible (fifoDrawerButton.get());

@@ -24,6 +24,7 @@
 #include "FileReaderEditor.h"
 #include "FileReader.h"
 #include "ScrubberInterface.h"
+#include "../../UI/SemanticComponent.h"
 
 #include <stdio.h>
 
@@ -36,7 +37,11 @@ FileReaderEditor::FileReaderEditor (GenericProcessor* parentNode)
     scrubberInterface->setBounds (0, 0, 420, 140);
     addChildComponent (scrubberInterface.get());
 
-    scrubDrawerButton = std::make_unique<DrawerButton> (getNameAndId() + " Scrub Drawer Button");
+    scrubDrawerButton = std::make_unique<DrawerButton> (
+        getNameAndId() + " Scrub Drawer Button",
+        createProcessorControlSemanticId (parentNode->getNodeId(), "scrubber"),
+        "File reader scrubber",
+        "Show or hide the file playback scrubber controls.");
     scrubDrawerButton->setBounds (4, 40, 10, 78);
     scrubDrawerButton->setToggleState (false, dontSendNotification);
     scrubDrawerButton->addListener (this);
