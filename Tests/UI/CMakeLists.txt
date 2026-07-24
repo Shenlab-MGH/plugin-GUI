@@ -8,6 +8,7 @@ add_sources(${COMPONENT_NAME}_tests
 		AudioEditorAccessibilityTests.cpp
 		MainDocumentWindowAccessibilityTests.cpp
 		ParameterEditorAccessibilityTests.cpp
+		ProcessorListAccessibilityTests.cpp
 		SemanticComponentTests.cpp
 )
 target_include_directories(

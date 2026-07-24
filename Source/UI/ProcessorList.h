@@ -28,6 +28,7 @@
 #include "../AccessClass.h"
 #include "../Processors/PluginManager/OpenEphysPlugin.h"
 #include "CustomArrowButton.h"
+#include "../TestableExport.h"
 
 class ProcessorListItem;
 class UIComponent;
@@ -47,7 +48,7 @@ class UIComponent;
 
 */
 
-class ProcessorList : public Component,
+class TESTABLE ProcessorList : public Component,
                       public DragAndDropContainer,
                       public ChangeListener,
                       public Timer
