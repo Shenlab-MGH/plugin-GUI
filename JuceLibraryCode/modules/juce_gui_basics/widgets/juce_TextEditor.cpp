@@ -2356,7 +2356,10 @@ public:
         : AccessibilityHandler (textEditorToWrap,
                                 textEditorToWrap.isReadOnly() ? AccessibilityRole::staticText : AccessibilityRole::editableText,
                                 {},
-                                { std::make_unique<TextEditorTextInterface> (textEditorToWrap) }),
+                                { std::make_unique<TextEditorValueInterface> (textEditorToWrap),
+                                  std::make_unique<TextEditorTextInterface> (textEditorToWrap),
+                                  nullptr,
+                                  nullptr }),
           textEditor (textEditorToWrap)
     {
     }
@@ -2364,6 +2367,35 @@ public:
     String getHelp() const override  { return textEditor.getTooltip(); }
 
 private:
+    class TextEditorValueInterface final : public AccessibilityTextValueInterface
+    {
+    public:
+        explicit TextEditorValueInterface (TextEditor& editor)
+            : textEditor (editor)
+        {
+        }
+
+        bool isReadOnly() const override { return textEditor.isReadOnly(); }
+
+        String getCurrentValueAsString() const override
+        {
+            if (textEditor.getPasswordCharacter() != 0)
+                return String::repeatedString (String::charToString (textEditor.getPasswordCharacter()),
+                                               textEditor.getText().length());
+
+            return textEditor.getText();
+        }
+
+        void setValueAsString (const String& newText) override
+        {
+            if (! textEditor.isReadOnly())
+                textEditor.setText (newText);
+        }
+
+    private:
+        TextEditor& textEditor;
+    };
+
     class TextEditorTextInterface final : public AccessibilityTextInterface
     {
     public:
