@@ -56,3 +56,21 @@ TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheWindowAndItsContentToAcc
     EXPECT_NE (window.getAccessibilityHandler(), nullptr);
     EXPECT_NE (contentButton.getAccessibilityHandler(), nullptr);
 }
+
+TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheApplicationMenuBar)
+{
+    ApplicationMenuBarComponent menuBar (nullptr);
+    menuBar.addToDesktop (0);
+
+    EXPECT_EQ (menuBar.getComponentID(), "oe.menu.main");
+    EXPECT_EQ (menuBar.getTitle(), "Application menu");
+    EXPECT_EQ (menuBar.getDescription(),
+               "Open application commands and settings.");
+    EXPECT_TRUE (menuBar.isAccessible());
+    EXPECT_TRUE (menuBar.isFocusContainer());
+
+    auto* handler = menuBar.getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::menuBar);
+    EXPECT_FALSE (handler->isIgnored());
+}

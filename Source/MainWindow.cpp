@@ -25,9 +25,29 @@
 #include "AutoUpdater.h"
 #include "UI/ConsoleViewer.h"
 #include "UI/EditorViewport.h"
+#include "UI/SemanticComponent.h"
 #include "UI/UIComponent.h"
 #include "Utils/OpenEphysHttpServer.h"
 #include <stdio.h>
+
+ApplicationMenuBarComponent::ApplicationMenuBarComponent (MenuBarModel* model)
+    : MenuBarComponent (model)
+{
+    setFocusContainerType (FocusContainerType::focusContainer);
+    applySemanticMetadata (
+        *this,
+        "oe.menu.main",
+        "Application menu",
+        "Open application commands and settings.");
+}
+
+std::unique_ptr<AccessibilityHandler>
+ApplicationMenuBarComponent::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::menuBar);
+}
 
 MainDocumentWindow::MainDocumentWindow()
     : DocumentWindow (JUCEApplication::getInstance()->getApplicationName(),
@@ -127,7 +147,8 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
         documentWindow->setMenuBar (0);
 #else
         documentWindow->setMenuBar (ui);
-        documentWindow->getMenuBarComponent()->setName ("MainMenu");
+        documentWindow->setMenuBarComponent (
+            new ApplicationMenuBarComponent (ui));
 #endif
 
         commandManager.registerAllCommandsForTarget (ui);

@@ -36,6 +36,15 @@
 
 class OpenEphysHttpServer;
 
+class TESTABLE ApplicationMenuBarComponent final : public MenuBarComponent
+{
+public:
+    explicit ApplicationMenuBarComponent (MenuBarModel* model);
+
+private:
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+};
+
 /**
     Custom DocumentWindow class
  */
