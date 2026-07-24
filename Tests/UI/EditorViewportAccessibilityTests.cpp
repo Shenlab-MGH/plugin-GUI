@@ -1,4 +1,5 @@
 #include "../../Source/UI/EditorViewport.h"
+#include "../../Source/UI/UIComponent.h"
 #include "gtest/gtest.h"
 
 namespace
@@ -37,4 +38,17 @@ TEST (EditorViewportAccessibilityTests, ExposesSignalChainNavigation)
                           "Scroll signal chains down",
                           "Show later signal chains.");
     EXPECT_FALSE (down.getClickingTogglesState());
+}
+
+TEST (EditorViewportAccessibilityTests, ExposesOneSignalChainPanelToggle)
+{
+    ShowHideEditorViewportButton toggle;
+    expectSemanticButton (
+        toggle,
+        "oe.signal_chain.panel.toggle",
+        "Signal chain panel",
+        "Show or hide the signal chain editor.");
+
+    ASSERT_EQ (toggle.getNumChildComponents(), 1);
+    EXPECT_FALSE (toggle.getChildComponent (0)->isAccessible());
 }

@@ -324,8 +324,8 @@ private:
 
 */
 
-class ShowHideEditorViewportButton : public ToggleButton,
-                                     public Button::Listener
+class TESTABLE ShowHideEditorViewportButton : public ToggleButton,
+                                              public Button::Listener
 {
 public:
     /** Constructor */

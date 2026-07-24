@@ -38,6 +38,7 @@
 #include "InfoLabel.h"
 #include "MessageCenterButton.h"
 #include "ProcessorList.h"
+#include "SemanticComponent.h"
 
 UIComponent::UIComponent (MainWindow* mainWindow_,
                           ProcessorGraph* processorGraph_,
@@ -1302,8 +1303,14 @@ ShowHideEditorViewportButton::ShowHideEditorViewportButton() : ToggleButton()
 {
     buttonFont = FontOptions ("CP Mono", "Light", 25);
     setTooltip ("Show/hide signal chain");
+    applySemanticMetadata (
+        *this,
+        "oe.signal_chain.panel.toggle",
+        "Signal chain panel",
+        "Show or hide the signal chain editor.");
 
     arrow = std::make_unique<CustomArrowButton> (MathConstants<float>::pi / 2);
+    arrow->setAccessible (false);
 
     arrow->setBounds (195, 7, 22, 22);
     arrow->addListener (this);
