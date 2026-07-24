@@ -17,6 +17,22 @@ JUCEApplicationBase* createAccessibilityTestApplication()
     return new AccessibilityTestApplication();
 }
 
+class TestMenuModel final : public MenuBarModel
+{
+public:
+    StringArray getMenuBarNames() override
+    {
+        return { "File", "Edit", "View", "Help" };
+    }
+
+    PopupMenu getMenuForIndex (int, const String&) override
+    {
+        return {};
+    }
+
+    void menuItemSelected (int, int) override {}
+};
+
 class MainDocumentWindowAccessibilityTests : public ::testing::Test
 {
 protected:
@@ -59,7 +75,8 @@ TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheWindowAndItsContentToAcc
 
 TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheApplicationMenuBar)
 {
-    ApplicationMenuBarComponent menuBar (nullptr);
+    TestMenuModel model;
+    ApplicationMenuBarComponent menuBar (&model);
     menuBar.addToDesktop (0);
 
     EXPECT_EQ (menuBar.getComponentID(), "oe.menu.main");
@@ -73,4 +90,16 @@ TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheApplicationMenuBar)
     ASSERT_NE (handler, nullptr);
     EXPECT_EQ (handler->getRole(), AccessibilityRole::menuBar);
     EXPECT_FALSE (handler->isIgnored());
+
+    const StringArray expectedIds {
+        "oe.menu.file",
+        "oe.menu.edit",
+        "oe.menu.view",
+        "oe.menu.help"
+    };
+
+    ASSERT_EQ (menuBar.getNumChildComponents(), expectedIds.size());
+    for (int index = 0; index < expectedIds.size(); ++index)
+        EXPECT_EQ (menuBar.getChildComponent (index)->getComponentID(),
+                   expectedIds[index]);
 }

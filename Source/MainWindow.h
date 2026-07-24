@@ -42,6 +42,8 @@ public:
     explicit ApplicationMenuBarComponent (MenuBarModel* model);
 
 private:
+    void menuBarItemsChanged (MenuBarModel* model) override;
+    void configureMenuItemAccessibility();
     std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 };
 

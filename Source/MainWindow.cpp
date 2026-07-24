@@ -39,6 +39,32 @@ ApplicationMenuBarComponent::ApplicationMenuBarComponent (MenuBarModel* model)
         "oe.menu.main",
         "Application menu",
         "Open application commands and settings.");
+    configureMenuItemAccessibility();
+}
+
+void ApplicationMenuBarComponent::menuBarItemsChanged (MenuBarModel* model)
+{
+    MenuBarComponent::menuBarItemsChanged (model);
+    configureMenuItemAccessibility();
+}
+
+void ApplicationMenuBarComponent::configureMenuItemAccessibility()
+{
+    if (auto* model = getModel())
+    {
+        const auto names = model->getMenuBarNames();
+        const auto itemCount = jmin (names.size(), getNumChildComponents());
+
+        for (int index = 0; index < itemCount; ++index)
+        {
+            const auto& name = names[index];
+            applySemanticMetadata (
+                *getChildComponent (index),
+                "oe.menu." + sanitiseSemanticSegment (name),
+                name + " menu",
+                "Open the " + name + " application menu.");
+        }
+    }
 }
 
 std::unique_ptr<AccessibilityHandler>
