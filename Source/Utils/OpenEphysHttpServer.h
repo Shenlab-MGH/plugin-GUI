@@ -38,11 +38,36 @@
 #include "../UI/ProcessorList.h"
 
 #include "ControlCapabilityJson.h"
+#include "ControlRead.h"
+#include "RecordingOptionsControl.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
 
 #define PORT 37497
+
+namespace OpenEphysHttpDetail
+{
+inline bool dispatchToMessageThread (std::function<void()> operation)
+{
+    return MessageManager::callAsync (std::move (operation));
+}
+
+inline void setControlErrorResponse (httplib::Response& response,
+                                     const char* capability,
+                                     int httpStatus,
+                                     const String& errorCode,
+                                     const String& errorMessage)
+{
+    json document;
+    document["ok"] = false;
+    document["capability"] = capability;
+    document["error"]["code"] = errorCode.toStdString();
+    document["error"]["message"] = errorMessage.toStdString();
+    response.status = httpStatus;
+    response.set_content (document.dump(), "application/json");
+}
+} // namespace OpenEphysHttpDetail
 
 /**
  * HTTP server thread for controlling Processor Parameters via an HTTP API. This starts an HTTP server on port 37497
@@ -242,9 +267,25 @@ public:
 
         svr_->Get ("/api/disk", [] (const httplib::Request&, httplib::Response& res)
                    {
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getRecordingDiskUsage(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.status.disk_usage",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
             json ret;
             ret["capability"] = "oe.status.disk_usage";
-            ret["usage"] = CoreServices::getRecordingDiskUsage();
+            ret["usage"] = *readResult.value;
             ret["minimum"] = 0.0;
             ret["maximum"] = 1.0;
             ret["read_only"] = true;
@@ -252,7 +293,23 @@ public:
 
         svr_->Get ("/api/time", [] (const httplib::Request&, httplib::Response& res)
                    {
-            const auto status = CoreServices::getClockStatus();
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getClockStatus(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.status.elapsed_time",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
+            const auto& status = *readResult.value;
             json ret;
             ret["capability"] = "oe.status.elapsed_time";
             ret["display"] = status.display.toStdString();
@@ -266,7 +323,23 @@ public:
 
         svr_->Get ("/api/recording/options", [] (const httplib::Request&, httplib::Response& res)
                    {
-            const auto status = CoreServices::getRecordingOptionsStatus();
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getRecordingOptionsStatus(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.control.recording.options",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
+            const auto& status = *readResult.value;
             json ret;
             ret["capability"] = "oe.control.recording.options";
             ret["expanded"] = status.expanded;
@@ -277,33 +350,35 @@ public:
 
         svr_->Put ("/api/recording/options", [] (const httplib::Request& req, httplib::Response& res)
                    {
-            json request_json;
-            try
+            const auto controlResult = handleRecordingOptionsPut (
+                String::fromUTF8 (req.body.data(), static_cast<int> (req.body.size())),
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] (const RecordingOptionsUpdate& update)
+                {
+                    if (update.expanded.has_value())
+                        CoreServices::setRecordingOptionsExpanded (*update.expanded);
+                    if (update.forceNewDirectory.has_value())
+                        CoreServices::setForceNewDirectory (*update.forceNewDirectory);
+                    if (update.newDirectoryRequested.has_value())
+                        CoreServices::setNewDirectoryRequested (*update.newDirectoryRequested);
+                    return CoreServices::getRecordingOptionsStatus();
+                },
+                std::chrono::seconds (2));
+
+            if (! controlResult.status.has_value())
             {
-                request_json = json::parse (req.body);
-            }
-            catch (json::exception& e)
-            {
-                res.set_content (e.what(), "text/plain");
-                res.status = 400;
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.control.recording.options",
+                    controlResult.httpStatus,
+                    controlResult.errorCode,
+                    controlResult.errorMessage);
                 return;
             }
 
-            std::promise<void> done;
-            auto future = done.get_future();
-            MessageManager::callAsync ([&request_json, &done]
-                                       {
-                if (request_json.contains ("expanded"))
-                    CoreServices::setRecordingOptionsExpanded (request_json["expanded"].get<bool>());
-                if (request_json.contains ("force_new_directory"))
-                    CoreServices::setForceNewDirectory (request_json["force_new_directory"].get<bool>());
-                if (request_json.contains ("new_directory_requested"))
-                    CoreServices::setNewDirectoryRequested (request_json["new_directory_requested"].get<bool>());
-                done.set_value(); });
-            future.wait();
-
-            const auto status = CoreServices::getRecordingOptionsStatus();
+            const auto& status = *controlResult.status;
             json ret;
+            ret["ok"] = true;
             ret["capability"] = "oe.control.recording.options";
             ret["expanded"] = status.expanded;
             ret["force_new_directory"] = status.forceNewDirectory;
@@ -1192,7 +1267,6 @@ public:
                        }
                        catch (json::exception& e)
                        {
-                           LOGE ("HTTPServer - Failed to parse request body. Exception: ", e.what());
                            res.set_content (e.what(), "text/plain");
                            res.status = 400;
                            return;
@@ -1202,7 +1276,6 @@ public:
 
                        if (val.isUndefined())
                        {
-                           LOGE ("HTTPServer - Value is undefined after conversion.");
                            res.set_content ("Request value could not be converted.", "text/plain");
                            res.status = 400;
                            return;
@@ -1301,7 +1374,6 @@ public:
                        }
                        catch (json::exception& e)
                        {
-                           LOGE ("HTTPServer - Failed to parse request body. Exception: ", e.what());
                            res.set_content (e.what(), "text/plain");
                            res.status = 400;
                            return;
@@ -1311,22 +1383,9 @@ public:
 
                        if (val.isUndefined())
                        {
-                           LOGE ("HTTPServer - Value is undefined after conversion.");
                            res.set_content ("Request value could not be converted.", "text/plain");
                            res.status = 400;
                            return;
-                       }
-
-                       if (parameter->getType() == Parameter::MASK_CHANNELS_PARAM
-                           || parameter->getType() == Parameter::SELECTED_CHANNELS_PARAM)
-                       {
-                           if (! val.isArray())
-                           {
-                               LOGE ("HTTPServer - Value for masked and selected channels parameter should be an array.");
-                               res.set_content ("Value for masked and selected channels parameter should be an array.", "text/plain");
-                               res.status = 400;
-                               return;
-                           }
                        }
 
                        std::promise<void> parameterChanged;
@@ -1533,7 +1592,7 @@ private:
     {
         (*parameter_json)["name"] = parameter->getName().toStdString();
         (*parameter_json)["type"] = parameter->getParameterTypeString().toStdString();
-        (*parameter_json)["value"] = parameter->getValueAsString().toStdString();
+        (*parameter_json)["value"] = parameter->getValue().toString().toStdString();
     }
 
     inline static void parameters_to_json (GenericProcessor* processor, std::vector<json>* parameters_json)
