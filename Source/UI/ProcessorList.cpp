@@ -63,8 +63,17 @@ ProcessorList::ProcessorList (Viewport* v) : viewport (v),
 
     for (int n = 0; n < baseItem->getNumSubItems(); n++)
     {
-        const String category = baseItem->getSubItem (n)->getName();
-        baseItem->getSubItem (n)->setParentName (category);
+        auto* categoryItem = baseItem->getSubItem (n);
+        const String category = categoryItem->getName();
+        categoryItem->setParentName (category);
+        categoryItem->setOwner (this);
+        categoryItem->setInterceptsMouseClicks (false, false);
+        applySemanticMetadata (*categoryItem,
+                               "oe.processor_list.category." + sanitiseSemanticSegment (category),
+                               category,
+                               "Show or hide processors in the " + category + " category.");
+        addAndMakeVisible (categoryItem);
+
         for (int m = 0; m < baseItem->getSubItem (n)->getNumSubItems(); m++)
         {
             baseItem->getSubItem (n)->getSubItem (m)->setParentName (category);
@@ -126,6 +135,7 @@ ProcessorList::ProcessorList (Viewport* v) : viewport (v),
         searchField->setVisible (false);
     };
     addChildComponent (searchField.get());
+    updateAccessibleItemLayout();
 }
 
 void ProcessorList::resized()
@@ -134,6 +144,7 @@ void ProcessorList::resized()
     searchField->setBounds (0, 0, getWidth(), itemHeight);
     searchButton->setBounds (getWidth() - 45, (itemHeight / 2) - 8, 16, 16);
     arrowButton->setBounds (getWidth() - 25, (itemHeight / 2) - 10, 20, 20);
+    updateAccessibleItemLayout();
 }
 
 void ProcessorList::timerCallback()
@@ -369,7 +380,60 @@ void ProcessorList::toggleState()
     arrowButton->setToggleState (fli->isOpen(), dontSendNotification);
     searchButton->setVisible (fli->isOpen());
     AccessClass::getUIComponent()->childComponentChanged();
+    updateAccessibleItemLayout();
     repaint();
+}
+
+void ProcessorList::updateAccessibleItemLayout()
+{
+    int y = yBuffer + itemHeight;
+    const bool listIsOpen = baseItem->isOpen();
+
+    for (int categoryIndex = 0; categoryIndex < baseItem->getNumSubItems(); ++categoryIndex)
+    {
+        auto* categoryItem = baseItem->getSubItem (categoryIndex);
+        categoryItem->setBounds (0, y, getWidth(), yBuffer + itemHeight);
+        categoryItem->setVisible (listIsOpen);
+        y += yBuffer + itemHeight;
+
+        if (listIsOpen && categoryItem->isOpen())
+        {
+            for (int itemIndex = 0; itemIndex < categoryItem->getNumSubItems(); ++itemIndex)
+            {
+                auto* item = categoryItem->getSubItem (itemIndex);
+                if (item->getName().containsIgnoreCase (searchText) || searchText.isEmpty())
+                    y += yBuffer + subItemHeight;
+            }
+        }
+    }
+}
+
+void ProcessorList::toggleItemFromAccessibility (ProcessorListItem& item)
+{
+    const bool isCategoryHeader = item.getName().equalsIgnoreCase (item.getParentName());
+
+    if (! item.hasSubItems() && ! isCategoryHeader)
+        return;
+
+    item.reverseOpenState();
+    updateAccessibleItemLayout();
+    repaint();
+
+    if (auto* handler = item.getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::structureChanged);
+}
+
+void ProcessorList::selectItemFromAccessibility (ProcessorListItem& item)
+{
+    if (item.hasSubItems())
+        return;
+
+    clearSelectionState();
+    item.setSelected (true);
+    repaint();
+
+    if (auto* handler = item.getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::rowSelectionChanged);
 }
 
 void ProcessorList::mouseDown (const MouseEvent& e)
@@ -788,6 +852,82 @@ ProcessorListItem::ProcessorListItem (const String& name_,
                                                                                 open (true),
                                                                                 name (name_)
 {
+}
+
+namespace
+{
+class ProcessorListItemAccessibilityHandler final : public AccessibilityHandler
+{
+public:
+    explicit ProcessorListItemAccessibilityHandler (ProcessorListItem& itemToWrap)
+        : AccessibilityHandler (
+              itemToWrap,
+              AccessibilityRole::treeItem,
+              createActions (itemToWrap)),
+          item (itemToWrap)
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto state = AccessibilityHandler::getCurrentState();
+
+        // Category headers set parentName equal to their own name and remain
+        // expandable even before processors are loaded into the catalog.
+        const bool isCategoryHeader = item.getName().equalsIgnoreCase (item.getParentName());
+
+        if (item.hasSubItems() || isCategoryHeader)
+        {
+            state = state.withExpandable();
+            state = item.isOpen() ? state.withExpanded() : state.withCollapsed();
+        }
+        else
+        {
+            state = state.withSelectable();
+            if (item.isSelected())
+                state = state.withSelected();
+        }
+
+        return state;
+    }
+
+private:
+    static AccessibilityActions createActions (ProcessorListItem& item)
+    {
+        auto actions = AccessibilityActions().addAction (
+            AccessibilityActionType::press,
+            [&item] { item.performAccessibilityPress(); });
+
+        return actions.addAction (
+            AccessibilityActionType::toggle,
+            [&item] { item.performAccessibilityToggle(); });
+    }
+
+    ProcessorListItem& item;
+};
+} // namespace
+
+std::unique_ptr<AccessibilityHandler> ProcessorListItem::createAccessibilityHandler()
+{
+    return std::make_unique<ProcessorListItemAccessibilityHandler> (*this);
+}
+
+void ProcessorListItem::performAccessibilityToggle()
+{
+    if (owner == nullptr)
+        return;
+
+    const bool isCategoryHeader = getName().equalsIgnoreCase (getParentName());
+
+    if (hasSubItems() || isCategoryHeader)
+        owner->toggleItemFromAccessibility (*this);
+    else
+        owner->selectItemFromAccessibility (*this);
+}
+
+void ProcessorListItem::performAccessibilityPress()
+{
+    performAccessibilityToggle();
 }
 
 bool ProcessorListItem::hasSubItems()

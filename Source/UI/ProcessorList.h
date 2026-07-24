@@ -107,6 +107,8 @@ public:
     void lookAndFeelChanged() override;
 
 private:
+    friend class ProcessorListItem;
+
     /** The main method for drawing the ProcessorList.*/
     void drawItems (Graphics& g);
 
@@ -126,6 +128,13 @@ private:
 
     /** Deselects all items within the ProcessorList.*/
     void clearSelectionState();
+
+    /** Updates bounds and visibility for accessible catalog items. */
+    void updateAccessibleItemLayout();
+
+    /** Applies an accessibility action to a catalog item. */
+    void toggleItemFromAccessibility (ProcessorListItem&);
+    void selectItemFromAccessibility (ProcessorListItem&);
 
     bool isDragging;
     int totalHeight, itemHeight, subItemHeight;
@@ -243,6 +252,16 @@ public:
     /** Sets the name of the parent of a ProcessorListItem. */
     void setParentName (const String& name);
 
+    /** Associates this item with its owning list. */
+    void setOwner (ProcessorList* ownerList) { owner = ownerList; }
+
+    /** Performs the existing item actions through accessibility. */
+    void performAccessibilityToggle();
+    void performAccessibilityPress();
+
+    /** Creates the tree-item accessibility representation. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
     /** Determines the colour of the ProcessorListItem (based on enumerator defined in setParentName() method). */
     int colourId;
 
@@ -257,6 +276,7 @@ private:
     bool open;
     const String name;
     String parentName;
+    ProcessorList* owner = nullptr;
 
     /** An array of all the sub-items (if any) that belong to this ProcessorListItem. */
     OwnedArray<ProcessorListItem> subItems;
