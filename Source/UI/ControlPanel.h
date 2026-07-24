@@ -33,6 +33,7 @@
 #include "../Processors/RecordNode/RecordEngine.h"
 #include "../Processors/RecordNode/RecordNode.h"
 #include "../TestableExport.h"
+#include "../Utils/ControlStatus.h"
 #include "CustomArrowButton.h"
 #include "FilenameConfigWindow.h"
 #include "LookAndFeel/CustomLookAndFeel.h"
@@ -312,6 +313,9 @@ public:
     /** Gets the clock reference time */
     ReferenceTime getReferenceTime() { return referenceTime; }
 
+    /** Returns transport-neutral clock state for UIA and API clients. */
+    ClockStatus getStatus() const;
+
     /** Responds to right clicks*/
     void mouseDown (const MouseEvent& e);
 
@@ -498,6 +502,21 @@ public:
 
     /** Returns the record button component */
     Component* getRecordButton() { return recordButton.get(); }
+
+    /** Returns transport-neutral clock state. */
+    ClockStatus getClockStatus() const;
+
+    /** Returns transport-neutral recording-option state. */
+    RecordingOptionsStatus getRecordingOptionsStatus();
+
+    /** Show or hide the recording-options drawer. */
+    void setRecordingOptionsExpanded (bool shouldBeExpanded);
+
+    /** Request a new data directory for the next recording. */
+    void setNewDirectoryRequested (bool shouldRequestNewDirectory);
+
+    /** Force a new data directory for each recording. */
+    void setForceNewDirectory (bool shouldForceNewDirectory);
 
     /** Pointers to owned components */
     std::unique_ptr<FilenameEditorButton> filenameText;
