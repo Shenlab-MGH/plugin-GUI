@@ -1,4 +1,5 @@
 #include "../../Source/Processors/AudioNode/AudioEditor.h"
+#include "../../Source/Processors/AudioMonitor/AudioMonitorEditor.h"
 #include "gtest/gtest.h"
 
 namespace
@@ -12,6 +13,18 @@ void expectSemanticComponent (Component& component,
     EXPECT_EQ (component.getTitle(), expectedTitle);
     EXPECT_EQ (component.getDescription(), expectedDescription);
     EXPECT_TRUE (component.isAccessible());
+}
+
+Component* findDescendantWithId (Component& parent, StringRef id)
+{
+    if (parent.getComponentID() == id)
+        return &parent;
+
+    for (auto* child : parent.getChildren())
+        if (auto* match = findDescendantWithId (*child, id))
+            return match;
+
+    return nullptr;
 }
 } // namespace
 
@@ -46,4 +59,39 @@ TEST (AudioEditorAccessibilityTests, ExposesAudioControls)
                              "Set the monitored audio noise gate threshold.");
     EXPECT_DOUBLE_EQ (noiseGate.getMinimum(), 0.0);
     EXPECT_DOUBLE_EQ (noiseGate.getMaximum(), 100.0);
+}
+
+TEST (AudioEditorAccessibilityTests, ExposesAudioMonitorParameterControls)
+{
+    CategoricalParameter outputParameter (
+        nullptr,
+        Parameter::PROCESSOR_SCOPE,
+        "audio_output",
+        "Audio output",
+        "Choose the monitored audio output channel.",
+        { "Left", "Both", "Right" },
+        1);
+    outputParameter.setKey ("106|audio_output");
+
+    AudioOutputSelector outputSelector (&outputParameter);
+    auto* outputGroup = outputSelector.findChildWithID ("oe.parameter.106_audio_output");
+    ASSERT_NE (outputGroup, nullptr);
+    EXPECT_NE (findDescendantWithId (*outputGroup, "oe.parameter.106_audio_output.left"), nullptr);
+    EXPECT_NE (findDescendantWithId (*outputGroup, "oe.parameter.106_audio_output.both"), nullptr);
+    EXPECT_NE (findDescendantWithId (*outputGroup, "oe.parameter.106_audio_output.right"), nullptr);
+
+    BooleanParameter muteParameter (
+        nullptr,
+        Parameter::PROCESSOR_SCOPE,
+        "mute_audio",
+        "Mute audio",
+        "Mute monitored audio output.",
+        false);
+    muteParameter.setKey ("106|mute_audio");
+
+    MonitorMuteButton mute (&muteParameter);
+    auto* muteControl = mute.findChildWithID ("oe.parameter.106_mute_audio");
+    ASSERT_NE (muteControl, nullptr);
+    EXPECT_EQ (muteControl->getTitle(), "Mute audio");
+    EXPECT_EQ (muteControl->getDescription(), "Mute monitored audio output.");
 }

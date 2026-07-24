@@ -39,8 +39,8 @@ class AudioMonitor;
   @see AudioMonitor, AudioMonitorEditor
 
 */
-class MonitorMuteButton : public ParameterEditor,
-                          public Button::Listener
+class TESTABLE MonitorMuteButton : public ParameterEditor,
+                                   public Button::Listener
 {
 public:
     /** Constructor */
@@ -72,8 +72,8 @@ private:
   @see AudioMonitor, AudioMonitorEditor
 
 */
-class AudioOutputSelector : public ParameterEditor,
-                            public Button::Listener
+class TESTABLE AudioOutputSelector : public ParameterEditor,
+                                     public Button::Listener
 {
 public:
     /** Constructor */

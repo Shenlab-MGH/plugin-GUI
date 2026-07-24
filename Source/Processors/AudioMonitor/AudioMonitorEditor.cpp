@@ -22,6 +22,7 @@
 */
 
 #include "AudioMonitorEditor.h"
+#include "../../UI/SemanticComponent.h"
 
 static const Colour COLOUR_PRIMARY (Colours::black.withAlpha (0.87f));
 static const Colour COLOUR_ACCENT (Colour::fromRGB (3, 169, 244));
@@ -41,6 +42,12 @@ MonitorMuteButton::MonitorMuteButton (Parameter* param) : ParameterEditor (param
 
     muteButton->addListener (this);
     muteButton->setToggleState (false, dontSendNotification);
+    editor = muteButton.get();
+    applySemanticMetadata (
+        *muteButton,
+        "oe.parameter." + sanitiseSemanticSegment (String (param->getKey())),
+        param->getDisplayName(),
+        param->getDescription());
 
     addAndMakeVisible (muteButton.get());
 
@@ -90,6 +97,31 @@ AudioOutputSelector::AudioOutputSelector (Parameter* param) : ParameterEditor (p
     outputChannelButtonManager->setButtonListener (this);
     outputChannelButtonManager->setSelectedButtonIndex (1);
     bothButton->setToggleState (true, dontSendNotification);
+    editor = outputChannelButtonManager.get();
+
+    const auto semanticId = "oe.parameter."
+                            + sanitiseSemanticSegment (String (param->getKey()));
+    applySemanticMetadata (
+        *outputChannelButtonManager,
+        semanticId,
+        param->getDisplayName(),
+        param->getDescription());
+    applySemanticMetadata (
+        *leftButton,
+        semanticId + ".left",
+        "Left audio output",
+        "Send monitored audio to the left output channel.");
+    applySemanticMetadata (
+        *bothButton,
+        semanticId + ".both",
+        "Both audio outputs",
+        "Send monitored audio to both output channels.");
+    applySemanticMetadata (
+        *rightButton,
+        semanticId + ".right",
+        "Right audio output",
+        "Send monitored audio to the right output channel.");
+
     addAndMakeVisible (outputChannelButtonManager.get());
 
     setBounds (0, 0, 120, 20);
