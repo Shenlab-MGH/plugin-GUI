@@ -8,6 +8,7 @@ add_sources(open-ephys
 	ControlPanel.h
 	CustomArrowButton.cpp
 	CustomArrowButton.h
+	MessageCenterButton.cpp
 	MessageCenterButton.h
 	DataViewport.cpp
 	DataViewport.h

@@ -25,6 +25,41 @@
 #include "MessageCenter.h"
 
 #include "../Editors/GenericEditor.h" // for UtilityButton class
+#include "../../UI/SemanticComponent.h"
+
+void configureMessageCenterEditorAccessibility (
+    Component& incomingMessage,
+    Component& outgoingMessage,
+    Component& incomingHistory,
+    Component& outgoingHistory,
+    Button& sendMessage)
+{
+    applySemanticMetadata (
+        incomingMessage,
+        "oe.message_center.incoming.current",
+        "Latest incoming message",
+        "Most recently received message.");
+    applySemanticMetadata (
+        outgoingMessage,
+        "oe.message_center.outgoing.input",
+        "Outgoing message",
+        "Message text to send during acquisition.");
+    applySemanticMetadata (
+        incomingHistory,
+        "oe.message_center.incoming.history",
+        "Incoming message history",
+        "Scrollable history of received messages.");
+    applySemanticMetadata (
+        outgoingHistory,
+        "oe.message_center.outgoing.history",
+        "Outgoing message history",
+        "Scrollable history of sent messages.");
+    applySemanticMetadata (
+        sendMessage,
+        "oe.message_center.outgoing.send",
+        "Send message",
+        "Send the outgoing message during acquisition.");
+}
 
 MessageCenterEditor::MessageCenterEditor (MessageCenter* owner) : AudioProcessorEditor (owner),
                                                                   messageCenter (owner),
@@ -59,6 +94,13 @@ MessageCenterEditor::MessageCenterEditor (MessageCenter* owner) : AudioProcessor
     sendMessageButton->addListener (this);
     sendMessageButton->setEnabled (false);
     addAndMakeVisible (sendMessageButton.get());
+
+    configureMessageCenterEditorAccessibility (
+        *incomingMessageDisplayArea,
+        *editableMessageDisplayArea,
+        *incomingMessageViewport,
+        *outgoingMessageViewport,
+        *sendMessageButton);
 }
 
 MessageCenterEditor::~MessageCenterEditor() {}
@@ -84,6 +126,11 @@ void MessageCenterEditor::buttonClicked (Button* button)
 void MessageCenterEditor::editorShown (Label* label, TextEditor& textEditor)
 {
     textEditor.setInputRestrictions (490);
+    applySemanticMetadata (
+        textEditor,
+        "oe.message_center.outgoing.input.editor",
+        "Outgoing message editor",
+        "Edit the message text to send during acquisition.");
 }
 
 void MessageCenterEditor::timerCallback()

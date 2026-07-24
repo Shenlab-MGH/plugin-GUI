@@ -25,10 +25,18 @@
 #define MESSAGECENTEREDITOR_H_INCLUDED
 
 #include "../../../JuceLibraryCode/JuceHeader.h"
+#include "../../TestableExport.h"
 
 #include <stdio.h>
 
 class MessageCenter;
+
+TESTABLE void configureMessageCenterEditorAccessibility (
+    Component& incomingMessage,
+    Component& outgoingMessage,
+    Component& incomingHistory,
+    Component& outgoingHistory,
+    Button& sendMessage);
 
 /**
     Displays information about a particular message

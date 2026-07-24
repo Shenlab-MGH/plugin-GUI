@@ -26,6 +26,7 @@
 
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "../UI/LookAndFeel/CustomLookAndFeel.h"
+#include "SemanticComponent.h"
 
 /**
 
@@ -35,7 +36,7 @@
 
 */
 
-class MessageCenterButton : public DrawableButton
+class TESTABLE MessageCenterButton : public DrawableButton
 {
 public:
     MessageCenterButton() : DrawableButton("Message Center Button", DrawableButton::ImageFitted), isExpanded(false)
@@ -75,9 +76,18 @@ public:
         setImages(&collapsed, &collapsedOver, &collapsedOver);
 
         setClickingTogglesState(false);
+        applySemanticMetadata (
+            *this,
+            "oe.message_center.toggle",
+            "Message center",
+            "Expand or collapse the message center.");
     }
     
     ~MessageCenterButton() { }
+
+    bool isExpandedState() const noexcept { return isExpanded; }
+
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
     
     void switchState() {
         
@@ -88,7 +98,9 @@ public:
         } else {
             setImages(&collapsed, &collapsedOver, &collapsedOver);
         }
-        
+
+        if (auto* handler = getAccessibilityHandler())
+            handler->notifyAccessibilityEvent (AccessibilityEvent::structureChanged);
     }
 
     void colourChanged() override

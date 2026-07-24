@@ -39,7 +39,12 @@
 
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "../Processors/Visualization/Visualizer.h"
+#include "../TestableExport.h"
 #include <thread>
+
+TESTABLE void configureConsoleAccessibility (Component& output,
+                                             Button& copyAll,
+                                             Button& clear);
 
 class ConsoleEditor : public CodeEditorComponent
 {

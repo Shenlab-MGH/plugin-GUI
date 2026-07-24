@@ -36,6 +36,7 @@
 */
 
 #include "ConsoleViewer.h"
+#include "SemanticComponent.h"
 
 #if JUCE_WINDOWS
 #include <fcntl.h>
@@ -49,6 +50,27 @@
 #elif JUCE_MAC || JUCE_LINUX
 #include <unistd.h>
 #endif
+
+void configureConsoleAccessibility (Component& output,
+                                    Button& copyAll,
+                                    Button& clear)
+{
+    applySemanticMetadata (
+        output,
+        "oe.console.output",
+        "Console output",
+        "Read-only application log output.");
+    applySemanticMetadata (
+        copyAll,
+        "oe.console.copy_all",
+        "Copy console output",
+        "Copy all console output to the clipboard.");
+    applySemanticMetadata (
+        clear,
+        "oe.console.clear",
+        "Clear console output",
+        "Clear all text from the console output.");
+}
 
 ConsoleViewer::ConsoleViewer()
     : Visualizer (nullptr)
@@ -69,6 +91,8 @@ ConsoleViewer::ConsoleViewer()
     clearButton->onClick = [this]
     { logComponent->clear(); };
     addAndMakeVisible (clearButton.get());
+
+    configureConsoleAccessibility (*logComponent, *copyButton, *clearButton);
 }
 
 ConsoleViewer::~ConsoleViewer()
@@ -97,6 +121,11 @@ LogComponent::LogComponent (bool captureStdErrImmediately, bool captureStdOutImm
     consoleEditor->setFont (FontOptions (14.0f));
     consoleEditor->setScrollbarThickness (12);
     consoleEditor->setTabSize (4, true);
+    applySemanticMetadata (
+        *consoleEditor,
+        "oe.console.output.text",
+        "Console output text",
+        "Read-only application log text.");
     addAndMakeVisible (consoleEditor.get());
 
     // save the original stdout and stderr to restore it later
