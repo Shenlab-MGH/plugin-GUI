@@ -30,3 +30,44 @@ TEST (ProcessorListAccessibilityTests, ExposesListAndSearchControls)
     EXPECT_EQ (query->getDescription(), "Filter available processors by name.");
     EXPECT_TRUE (query->isAccessible());
 }
+
+TEST (ProcessorListAccessibilityTests, ExposesProcessorCategoriesAsExpandableTreeItems)
+{
+    MessageManager::getInstance();
+    MessageManagerLock lock;
+    Viewport viewport;
+    ProcessorList processorList (&viewport);
+    processorList.fillItemList();
+    processorList.resized();
+
+    const StringArray categories {
+        "sources",
+        "filters",
+        "sinks",
+        "utilities",
+        "recording"
+    };
+
+    for (const auto& category : categories)
+    {
+        auto* component = processorList.findChildWithID (
+            "oe.processor_list.category." + category);
+        ASSERT_NE (component, nullptr) << category;
+        EXPECT_TRUE (component->isAccessible());
+        EXPECT_TRUE (component->isVisible());
+        EXPECT_TRUE (component->getTitle().isNotEmpty());
+        EXPECT_TRUE (component->getDescription().isNotEmpty());
+
+        auto handler = component->createAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (handler->getRole(), AccessibilityRole::treeItem);
+        EXPECT_TRUE (handler->getCurrentState().isExpandable());
+        EXPECT_TRUE (handler->getCurrentState().isExpanded());
+        EXPECT_TRUE (handler->getActions().contains (AccessibilityActionType::toggle));
+
+        handler->getActions().invoke (AccessibilityActionType::toggle);
+        EXPECT_TRUE (handler->getCurrentState().isCollapsed());
+        handler->getActions().invoke (AccessibilityActionType::toggle);
+        EXPECT_TRUE (handler->getCurrentState().isExpanded());
+    }
+}
