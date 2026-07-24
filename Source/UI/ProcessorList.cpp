@@ -31,6 +31,7 @@
 
 #include "../Utils/Utils.h"
 #include "LookAndFeel/CustomLookAndFeel.h"
+#include "SemanticComponent.h"
 
 ProcessorList::ProcessorList (Viewport* v) : viewport (v),
                                              isDragging (false),
@@ -75,8 +76,13 @@ ProcessorList::ProcessorList (Viewport* v) : viewport (v),
 
     arrowButton = std::make_unique<CustomArrowButton> (0.0f, 20.0f);
     arrowButton->setToggleState (true, dontSendNotification);
-    arrowButton->setClickingTogglesState (false);
-    arrowButton->setInterceptsMouseClicks (false, false);
+    arrowButton->setClickingTogglesState (true);
+    arrowButton->setInterceptsMouseClicks (true, false);
+    arrowButton->onClick = [this] { toggleState(); };
+    applySemanticMetadata (*arrowButton,
+                           "oe.processor_list.expand",
+                           "Available processors",
+                           "Show or hide the available processor list.");
     addAndMakeVisible (arrowButton.get());
 
     searchButton = std::make_unique<ShapeButton> ("Search", Colours::transparentBlack, Colours::transparentBlack, Colours::transparentBlack);
@@ -84,6 +90,10 @@ ProcessorList::ProcessorList (Viewport* v) : viewport (v),
     String searchIconPath = "M15 15m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0 M18.5 18.5l2.5 2.5 M4 6h16 M4 12h4 M4 18h4";
     searchButton->setShape (Drawable::parseSVGPath (searchIconPath), true, true, false);
     searchButton->setClickingTogglesState (false);
+    applySemanticMetadata (*searchButton,
+                           "oe.processor_list.search.open",
+                           "Search processors",
+                           "Open the processor search field.");
     searchButton->onClick = [this]
     {
         searchField->setVisible (true);
@@ -96,6 +106,10 @@ ProcessorList::ProcessorList (Viewport* v) : viewport (v),
     searchField->setFont (FontOptions ("Fira Code", "Regular", 16.0f));
     searchField->setJustification (Justification::centredLeft);
     searchField->setPopupMenuEnabled (false);
+    applySemanticMetadata (*searchField,
+                           "oe.processor_list.search.query",
+                           "Processor search",
+                           "Filter available processors by name.");
     searchField->onTextChange = [this]
     {
         searchText = searchField->getText();
