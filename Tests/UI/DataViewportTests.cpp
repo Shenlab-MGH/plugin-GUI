@@ -71,7 +71,7 @@ TEST_F (DataViewportTests, ExposesViewTabsAndLayoutActions)
     EXPECT_EQ (closeInfo.getDescription(), "Close the Info view tab.");
     EXPECT_TRUE (closeInfo.isAccessible());
 
-    AddTabbedComponentButton addColumn;
+    AddTabbedComponentButton addColumn (AddTabbedComponentButton::SplitType::Horizontal);
     EXPECT_EQ (addColumn.getComponentID(), "oe.view.column.add");
     EXPECT_EQ (addColumn.getTitle(), "Add view column");
     EXPECT_EQ (addColumn.getDescription(), "Add another tabbed view column.");
