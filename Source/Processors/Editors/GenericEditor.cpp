@@ -1439,4 +1439,7 @@ void LevelMonitor::setFillPercentage (float fill_)
 {
     fillPercentage = fill_;
     repaint();
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
 }

@@ -23,6 +23,32 @@
 
 #include "SemanticComponent.h"
 
+namespace
+{
+class ReadOnlyProgressValue final : public AccessibilityRangedNumericValueInterface
+{
+public:
+    explicit ReadOnlyProgressValue (std::function<double()> getValueIn)
+        : getValue (std::move (getValueIn))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValue (double) override { jassertfalse; }
+    double getCurrentValue() const override
+    {
+        return jlimit (0.0, 1.0, getValue());
+    }
+    AccessibleValueRange getRange() const override
+    {
+        return { { 0.0, 1.0 }, 0.001 };
+    }
+
+private:
+    std::function<double()> getValue;
+};
+} // namespace
+
 bool isValidSemanticId (StringRef id)
 {
     const String value (id);
@@ -90,6 +116,19 @@ String createProcessorControlSemanticId (int nodeId, StringRef controlName)
 {
     return "oe.processor." + String (nodeId) + "."
            + sanitiseSemanticSegment (controlName);
+}
+
+std::unique_ptr<AccessibilityHandler>
+createReadOnlyProgressAccessibilityHandler (
+    Component& component,
+    std::function<double()> getValue)
+{
+    return std::make_unique<AccessibilityHandler> (
+        component,
+        AccessibilityRole::progressBar,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces {
+            std::make_unique<ReadOnlyProgressValue> (std::move (getValue)) });
 }
 
 void applySemanticMetadata (Component& component,

@@ -31,6 +31,10 @@ TESTABLE bool isValidSemanticId (StringRef id);
 TESTABLE String sanitiseSemanticSegment (StringRef segment);
 TESTABLE String createProcessorControlSemanticId (int nodeId,
                                                   StringRef controlName);
+TESTABLE std::unique_ptr<AccessibilityHandler>
+createReadOnlyProgressAccessibilityHandler (
+    Component& component,
+    std::function<double()> getValue);
 
 TESTABLE void applySemanticMetadata (Component& component,
                                      StringRef id,

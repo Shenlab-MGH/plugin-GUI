@@ -166,6 +166,8 @@ public:
     /** Responds to low disk space */
     void lowDiskSpace() override;
 
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
 private:
     int64 lastFreeSpace;
     float recordingTimeLeftInSeconds;

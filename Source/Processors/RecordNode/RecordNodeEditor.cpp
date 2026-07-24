@@ -175,6 +175,13 @@ DiskMonitor::DiskMonitor (RecordNode* rn)
     startTimerHz (1);
 }
 
+std::unique_ptr<AccessibilityHandler> DiskMonitor::createAccessibilityHandler()
+{
+    return createReadOnlyProgressAccessibilityHandler (
+        *this,
+        [this] { return static_cast<double> (fillPercentage); });
+}
+
 DiskMonitor::~DiskMonitor()
 {
     if (((RecordNode*) processor)->getDiskSpaceChecker() != nullptr)
@@ -241,7 +248,11 @@ RecordChannelsParameterEditor::RecordChannelsParameterEditor (RecordNode* rn, Pa
 
     monitor = std::make_unique<StreamMonitor> (recordNode, streamId);
     monitor->setTooltip (sourceNodeId + " | " + streamName);
-    monitor->setComponentID (sourceNodeId + " | " + streamName);
+    applySemanticMetadata (
+        *monitor,
+        "oe.parameter." + sanitiseSemanticSegment (String (param->getKey())),
+        "Recording channels for " + streamName,
+        param->getDescription());
     monitor->addListener (this);
     monitor->setBounds (0, 0, 15, 73);
     addAndMakeVisible (monitor.get());
@@ -567,6 +578,11 @@ RecordNodeEditor::RecordNodeEditor (RecordNode* parentNode)
     addAndMakeVisible (fifoDrawerButton.get());
 
     diskMonitor = std::make_unique<DiskMonitor> (recordNode);
+    applySemanticMetadata (
+        *diskMonitor,
+        createProcessorControlSemanticId (parentNode->getNodeId(), "disk_usage"),
+        "Record node disk usage",
+        "Fraction of recording-volume space currently used by this record node.");
     diskMonitor->setBounds (18, 33, 15, 92);
     addAndMakeVisible (diskMonitor.get());
 

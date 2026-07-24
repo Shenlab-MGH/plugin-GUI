@@ -42,6 +42,28 @@ TEST (SemanticComponentTests, AppliesStableAccessibleMeaning)
     EXPECT_TRUE (button.isAccessible());
 }
 
+TEST (SemanticComponentTests, CreatesReadOnlyProgressSemantics)
+{
+    Component meter;
+    double value = 0.25;
+    auto handler = createReadOnlyProgressAccessibilityHandler (
+        meter,
+        [&] { return value; });
+
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::progressBar);
+
+    auto* range = handler->getValueInterface();
+    ASSERT_NE (range, nullptr);
+    EXPECT_TRUE (range->isReadOnly());
+    EXPECT_DOUBLE_EQ (range->getCurrentValue(), 0.25);
+    EXPECT_DOUBLE_EQ (range->getRange().getMinimumValue(), 0.0);
+    EXPECT_DOUBLE_EQ (range->getRange().getMaximumValue(), 1.0);
+
+    value = 2.0;
+    EXPECT_DOUBLE_EQ (range->getCurrentValue(), 1.0);
+}
+
 TEST (SemanticComponentTests, IgnoresInvalidSemanticIds)
 {
     TextButton button ("R");
