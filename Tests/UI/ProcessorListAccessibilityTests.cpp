@@ -37,7 +37,6 @@ TEST (ProcessorListAccessibilityTests, ExposesProcessorCategoriesAsExpandableTre
     MessageManagerLock lock;
     Viewport viewport;
     ProcessorList processorList (&viewport);
-    processorList.fillItemList();
     processorList.resized();
 
     const StringArray categories {
