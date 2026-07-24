@@ -56,5 +56,11 @@ TEST (ProcessorListAccessibilityTests, ExposesProcessorCategoryIds)
         EXPECT_TRUE (component->getTitle().isNotEmpty());
         EXPECT_TRUE (component->getDescription().isNotEmpty());
         EXPECT_EQ (component->getComponentID(), "oe.processor_list.category." + category);
+
+        auto handler = component->createAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_TRUE (handler->getCurrentState().isExpandable());
+        EXPECT_TRUE (handler->getCurrentState().isExpanded());
+        EXPECT_TRUE (handler->getActions().contains (AccessibilityActionType::showMenu));
     }
 }

@@ -898,8 +898,12 @@ private:
             AccessibilityActionType::press,
             [&item] { item.performAccessibilityPress(); });
 
-        return actions.addAction (
+        actions = actions.addAction (
             AccessibilityActionType::toggle,
+            [&item] { item.performAccessibilityToggle(); });
+
+        return actions.addAction (
+            AccessibilityActionType::showMenu,
             [&item] { item.performAccessibilityToggle(); });
     }
 
