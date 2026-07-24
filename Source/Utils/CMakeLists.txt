@@ -4,6 +4,11 @@
 add_sources(
   open-ephys
   OpenEphysHttpServer.h
+  ControlCapability.h
+  ControlCapability.cpp
+  ControlCapabilityJson.h
+  ControlCapabilityJson.cpp
+  ControlStatus.h
   ListSliceParser.h
   ListSliceParser.cpp
   BroadcastParser.h

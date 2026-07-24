@@ -37,6 +37,7 @@
 #include "../MainWindow.h"
 #include "../UI/ProcessorList.h"
 
+#include "ControlCapabilityJson.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
@@ -150,6 +151,11 @@ public:
 
     void run() override
     {
+        svr_->Get ("/api/capabilities", [] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+            res.set_content (document.dump(), "application/json"); });
+
         svr_->Get ("/api/config", [this] (const httplib::Request&, httplib::Response& res)
                    {
             std::unique_ptr<XmlElement> xmlElement = std::make_unique<XmlElement> ("SETTINGS");
@@ -233,6 +239,77 @@ public:
             json ret;
             ret["usage"] = AccessClass::getAudioComponent()->deviceManager.getCpuUsage();
             res.set_content(ret.dump(), "application/json"); });
+
+        svr_->Get ("/api/disk", [] (const httplib::Request&, httplib::Response& res)
+                   {
+            json ret;
+            ret["capability"] = "oe.status.disk_usage";
+            ret["usage"] = CoreServices::getRecordingDiskUsage();
+            ret["minimum"] = 0.0;
+            ret["maximum"] = 1.0;
+            ret["read_only"] = true;
+            res.set_content (ret.dump(), "application/json"); });
+
+        svr_->Get ("/api/time", [] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto status = CoreServices::getClockStatus();
+            json ret;
+            ret["capability"] = "oe.status.elapsed_time";
+            ret["display"] = status.display.toStdString();
+            ret["elapsed_milliseconds"] = status.elapsedMilliseconds;
+            ret["mode"] = status.mode.toStdString();
+            ret["reference"] = status.reference.toStdString();
+            ret["running"] = status.running;
+            ret["recording"] = status.recording;
+            ret["read_only"] = true;
+            res.set_content (ret.dump(), "application/json"); });
+
+        svr_->Get ("/api/recording/options", [] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto status = CoreServices::getRecordingOptionsStatus();
+            json ret;
+            ret["capability"] = "oe.control.recording.options";
+            ret["expanded"] = status.expanded;
+            ret["force_new_directory"] = status.forceNewDirectory;
+            ret["new_directory_requested"] = status.newDirectoryRequested;
+            ret["recording"] = status.recording;
+            res.set_content (ret.dump(), "application/json"); });
+
+        svr_->Put ("/api/recording/options", [] (const httplib::Request& req, httplib::Response& res)
+                   {
+            json request_json;
+            try
+            {
+                request_json = json::parse (req.body);
+            }
+            catch (json::exception& e)
+            {
+                res.set_content (e.what(), "text/plain");
+                res.status = 400;
+                return;
+            }
+
+            std::promise<void> done;
+            auto future = done.get_future();
+            MessageManager::callAsync ([&request_json, &done]
+                                       {
+                if (request_json.contains ("expanded"))
+                    CoreServices::setRecordingOptionsExpanded (request_json["expanded"].get<bool>());
+                if (request_json.contains ("force_new_directory"))
+                    CoreServices::setForceNewDirectory (request_json["force_new_directory"].get<bool>());
+                if (request_json.contains ("new_directory_requested"))
+                    CoreServices::setNewDirectoryRequested (request_json["new_directory_requested"].get<bool>());
+                done.set_value(); });
+            future.wait();
+
+            const auto status = CoreServices::getRecordingOptionsStatus();
+            json ret;
+            ret["capability"] = "oe.control.recording.options";
+            ret["expanded"] = status.expanded;
+            ret["force_new_directory"] = status.forceNewDirectory;
+            ret["new_directory_requested"] = status.newDirectoryRequested;
+            ret["recording"] = status.recording;
+            res.set_content (ret.dump(), "application/json"); });
 
         svr_->Get ("/api/latency", [this] (const httplib::Request&, httplib::Response& res)
                    {

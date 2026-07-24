@@ -27,6 +27,7 @@
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "Processors/PluginManager/OpenEphysPlugin.h"
 
+#include "Utils/ControlStatus.h"
 #include "Utils/Utils.h"
 
 class GenericEditor;
@@ -86,6 +87,27 @@ PLUGIN_API void highlightEditor (GenericEditor* ed);
 
 /** Returns the number of milliseconds shown in the recording clock */
 PLUGIN_API juce::int64 getRecordingTime();
+
+/** Returns transport-neutral clock state for API and UIA clients */
+PLUGIN_API ClockStatus getClockStatus();
+
+/** Returns transport-neutral recording-option state */
+PLUGIN_API RecordingOptionsStatus getRecordingOptionsStatus();
+
+/** Show or hide the recording-options drawer */
+PLUGIN_API void setRecordingOptionsExpanded (bool shouldBeExpanded);
+
+/** Request a new data directory for the next recording */
+PLUGIN_API void setNewDirectoryRequested (bool shouldRequestNewDirectory);
+
+/** Force a new data directory for each recording */
+PLUGIN_API void setForceNewDirectory (bool shouldForceNewDirectory);
+
+/** Convert free/total bytes into a bounded disk-usage fraction (0–1 used). */
+PLUGIN_API float calculateDiskUsage (int64 bytesFree, int64 totalBytes);
+
+/** Fraction of recording-volume space currently used */
+PLUGIN_API float getRecordingDiskUsage();
 
 /** Returns the number of milliseconds since midnight Jan 1st 1970 UTC */
 PLUGIN_API juce::int64 getSystemTime();
