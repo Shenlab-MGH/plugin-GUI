@@ -82,3 +82,51 @@ TEST (ControlPanelAccessibilityTests, ExposesHealthMetersAsReadOnlyRanges)
     EXPECT_DOUBLE_EQ (diskValue->getRange().getMinimumValue(), 0.0);
     EXPECT_DOUBLE_EQ (diskValue->getRange().getMaximumValue(), 1.0);
 }
+TEST (ControlPanelAccessibilityTests, ExposesClockAsReadOnlyFormattedText)
+{
+    TestClock clock;
+
+    EXPECT_EQ (clock.getComponentID(), "oe.status.elapsed_time");
+    EXPECT_EQ (clock.getTitle(), "Elapsed time");
+
+    auto handler = clock.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::staticText);
+
+    auto* value = handler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+    EXPECT_TRUE (value->isReadOnly());
+    EXPECT_EQ (value->getCurrentValueAsString(), "0 min 0 s");
+
+    clock.setMode (Clock::HHMMSS);
+    EXPECT_EQ (value->getCurrentValueAsString(), "00:00:00");
+}
+
+TEST (ControlPanelAccessibilityTests, UsesClockStatusForItsAccessibleValue)
+{
+    TestClock clock;
+    const auto state = clock.getStatus();
+    auto handler = clock.createAccessibilityHandler();
+    ASSERT_NE (handler->getValueInterface(), nullptr);
+    EXPECT_EQ (state.display, handler->getValueInterface()->getCurrentValueAsString());
+    EXPECT_EQ (state.elapsedMilliseconds, 0);
+    EXPECT_FALSE (state.running);
+    EXPECT_FALSE (state.recording);
+}
+
+TEST (ControlPanelAccessibilityTests, SharesForceNewDirectoryStateWithTheButton)
+{
+    ControlPanel panel (nullptr, nullptr, true);
+    panel.setForceNewDirectory (true);
+    EXPECT_TRUE (panel.getRecordingOptionsStatus().forceNewDirectory);
+    EXPECT_TRUE (panel.getRecordingOptionsStatus().newDirectoryRequested);
+
+    panel.setForceNewDirectory (false);
+    EXPECT_FALSE (panel.getRecordingOptionsStatus().forceNewDirectory);
+
+    panel.setNewDirectoryRequested (false);
+    EXPECT_FALSE (panel.getRecordingOptionsStatus().newDirectoryRequested);
+
+    panel.setRecordingOptionsExpanded (true);
+    EXPECT_TRUE (panel.getRecordingOptionsStatus().expanded);
+}

@@ -357,6 +357,34 @@ void DiskSpaceMeter::mouseUp (const MouseEvent& e)
 Clock::Clock()
 {
     clockFont = FontOptions ("CP Mono", "Light", 30.0f);
+    applySemanticMetadata (*this,
+                           "oe.status.elapsed_time",
+                           "Elapsed time",
+                           "Elapsed acquisition or recording time.");
+}
+
+std::unique_ptr<AccessibilityHandler> Clock::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::staticText,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces { std::make_unique<ReadOnlyTextValue> ([this]
+                                                                                { return getStatus().display; }) });
+}
+
+ClockStatus Clock::getStatus() const
+{
+    ClockStatus status;
+    status.display = getDisplayText();
+    status.elapsedMilliseconds = referenceTime == ACQUISITION_START
+                                     ? latestAcquisitionTime
+                                     : (isRecording ? totalRecordingTime : totalTime);
+    status.mode = mode == HHMMSS ? "HHMMSS" : "DEFAULT";
+    status.reference = referenceTime == ACQUISITION_START ? "ACQUISITION_START" : "CUMULATIVE";
+    status.running = isRunning;
+    status.recording = isRecording;
+    return status;
 }
 
 void Clock::paint (Graphics& g)
@@ -1187,12 +1215,63 @@ void ControlPanel::colourChanged()
     recordButton->updateImages (getRecordingState());
 }
 
+ClockStatus ControlPanel::getClockStatus() const
+{
+    return clock != nullptr ? clock->getStatus() : ClockStatus {};
+}
+
+RecordingOptionsStatus ControlPanel::getRecordingOptionsStatus()
+{
+    RecordingOptionsStatus status;
+    status.expanded = open;
+    status.forceNewDirectory = forceNewDirectoryButton != nullptr && forceNewDirectoryButton->getToggleState();
+    status.newDirectoryRequested = newDirectoryNeeded;
+    status.recording = getRecordingState();
+    return status;
+}
+
+void ControlPanel::setRecordingOptionsExpanded (bool shouldBeExpanded)
+{
+    if (showHideRecordingOptionsButton != nullptr)
+        showHideRecordingOptionsButton->setToggleState (shouldBeExpanded, dontSendNotification);
+
+    openState (shouldBeExpanded);
+
+    if (! isConsoleApp && AccessClass::getUIComponent() != nullptr)
+        AccessClass::getUIComponent()->resized();
+}
+
+void ControlPanel::setNewDirectoryRequested (bool shouldRequestNewDirectory)
+{
+    newDirectoryNeeded = shouldRequestNewDirectory;
+
+    if (newDirectoryButton != nullptr)
+        newDirectoryButton->setToggleState (newDirectoryNeeded, dontSendNotification);
+}
+
+void ControlPanel::setForceNewDirectory (bool shouldForceNewDirectory)
+{
+    if (forceNewDirectoryButton != nullptr)
+        forceNewDirectoryButton->setToggleState (shouldForceNewDirectory, dontSendNotification);
+
+    if (shouldForceNewDirectory)
+    {
+        setNewDirectoryRequested (true);
+
+        if (newDirectoryButton != nullptr)
+            newDirectoryButton->setEnabled (false);
+    }
+    else if (hasRecorded && newDirectoryButton != nullptr)
+    {
+        newDirectoryButton->setEnabled (true);
+    }
+}
+
 void ControlPanel::buttonClicked (Button* button)
 {
     if (button == showHideRecordingOptionsButton.get())
     {
-        openState (button->getToggleState());
-        AccessClass::getUIComponent()->resized();
+        setRecordingOptionsExpanded (button->getToggleState());
         return;
     }
 
@@ -1213,24 +1292,13 @@ void ControlPanel::buttonClicked (Button* button)
 
     if (button == newDirectoryButton.get())
     {
-        //Setting the button state only takes effect on the next recording
-
+        setNewDirectoryRequested (button->getToggleState());
         return;
     }
 
     if (button == forceNewDirectoryButton.get())
     {
-        if (button->getToggleState())
-        {
-            newDirectoryNeeded = true;
-            newDirectoryButton->setToggleState (newDirectoryNeeded, dontSendNotification);
-            newDirectoryButton->setEnabled (false);
-        }
-        else
-        {
-            if (hasRecorded)
-                newDirectoryButton->setEnabled (true);
-        }
+        setForceNewDirectory (button->getToggleState());
         return;
     }
 
@@ -1427,7 +1495,7 @@ void ControlPanel::refreshMeters()
 
     File currentDirectory = filenameComponent->getCurrentFile();
 
-    diskMeter->updateDiskSpace (1.0f - float (currentDirectory.getBytesFreeOnVolume()) / float (currentDirectory.getVolumeTotalSize()));
+    diskMeter->updateDiskSpace (CoreServices::getRecordingDiskUsage());
 
     if (initialize)
     {
