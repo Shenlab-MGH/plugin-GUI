@@ -38,6 +38,7 @@
 #include "../UI/ProcessorList.h"
 
 #include "ControlCapabilityJson.h"
+#include "RecordingOptionsControl.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
@@ -277,33 +278,39 @@ public:
 
         svr_->Put ("/api/recording/options", [] (const httplib::Request& req, httplib::Response& res)
                    {
-            json request_json;
-            try
+            const auto controlResult = handleRecordingOptionsPut (
+                String::fromUTF8 (req.body.data(), static_cast<int> (req.body.size())),
+                [] (std::function<void()> operation)
+                {
+                    return MessageManager::callAsync (std::move (operation));
+                },
+                [] (const RecordingOptionsUpdate& update)
+                {
+                    if (update.expanded.has_value())
+                        CoreServices::setRecordingOptionsExpanded (*update.expanded);
+                    if (update.forceNewDirectory.has_value())
+                        CoreServices::setForceNewDirectory (*update.forceNewDirectory);
+                    if (update.newDirectoryRequested.has_value())
+                        CoreServices::setNewDirectoryRequested (*update.newDirectoryRequested);
+                    return CoreServices::getRecordingOptionsStatus();
+                },
+                std::chrono::seconds (2));
+
+            if (! controlResult.status.has_value())
             {
-                request_json = json::parse (req.body);
-            }
-            catch (json::exception& e)
-            {
-                res.set_content (e.what(), "text/plain");
-                res.status = 400;
+                json ret;
+                ret["ok"] = false;
+                ret["capability"] = "oe.control.recording.options";
+                ret["error"]["code"] = controlResult.errorCode.toStdString();
+                ret["error"]["message"] = controlResult.errorMessage.toStdString();
+                res.status = controlResult.httpStatus;
+                res.set_content (ret.dump(), "application/json");
                 return;
             }
 
-            std::promise<void> done;
-            auto future = done.get_future();
-            MessageManager::callAsync ([&request_json, &done]
-                                       {
-                if (request_json.contains ("expanded"))
-                    CoreServices::setRecordingOptionsExpanded (request_json["expanded"].get<bool>());
-                if (request_json.contains ("force_new_directory"))
-                    CoreServices::setForceNewDirectory (request_json["force_new_directory"].get<bool>());
-                if (request_json.contains ("new_directory_requested"))
-                    CoreServices::setNewDirectoryRequested (request_json["new_directory_requested"].get<bool>());
-                done.set_value(); });
-            future.wait();
-
-            const auto status = CoreServices::getRecordingOptionsStatus();
+            const auto& status = *controlResult.status;
             json ret;
+            ret["ok"] = true;
             ret["capability"] = "oe.control.recording.options";
             ret["expanded"] = status.expanded;
             ret["force_new_directory"] = status.forceNewDirectory;
