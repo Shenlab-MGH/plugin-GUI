@@ -121,6 +121,9 @@ TEST (ControlPanelAccessibilityTests, SharesForceNewDirectoryStateWithTheButton)
     EXPECT_TRUE (panel.getRecordingOptionsStatus().forceNewDirectory);
     EXPECT_TRUE (panel.getRecordingOptionsStatus().newDirectoryRequested);
 
+    panel.setNewDirectoryRequested (false);
+    EXPECT_TRUE (panel.getRecordingOptionsStatus().newDirectoryRequested);
+
     panel.setForceNewDirectory (false);
     EXPECT_FALSE (panel.getRecordingOptionsStatus().forceNewDirectory);
 
