@@ -122,6 +122,7 @@ ProcessorList::ProcessorList (Viewport* v) : viewport (v),
     searchField->onTextChange = [this]
     {
         searchText = searchField->getText();
+        updateAccessibleItemLayout();
         repaint();
     };
     searchField->onEscapeKey = [this]
@@ -401,9 +402,19 @@ void ProcessorList::updateAccessibleItemLayout()
             for (int itemIndex = 0; itemIndex < categoryItem->getNumSubItems(); ++itemIndex)
             {
                 auto* item = categoryItem->getSubItem (itemIndex);
-                if (item->getName().containsIgnoreCase (searchText) || searchText.isEmpty())
+                const bool matchesSearch = item->getName().containsIgnoreCase (searchText)
+                                           || searchText.isEmpty();
+                item->setBounds (0, y, getWidth(), yBuffer + subItemHeight);
+                item->setVisible (matchesSearch);
+
+                if (matchesSearch)
                     y += yBuffer + subItemHeight;
             }
+        }
+        else
+        {
+            for (int itemIndex = 0; itemIndex < categoryItem->getNumSubItems(); ++itemIndex)
+                categoryItem->getSubItem (itemIndex)->setVisible (false);
         }
     }
 }
@@ -780,6 +791,8 @@ void ProcessorList::fillItemList()
         }
     }
 
+    StringArray assignedAutomationIds;
+
     for (int n = 0; n < baseItem->getNumSubItems(); n++)
     {
         const String category = baseItem->getSubItem (n)->getName();
@@ -788,9 +801,21 @@ void ProcessorList::fillItemList()
 
         for (int m = 0; m < baseItem->getSubItem (n)->getNumSubItems(); m++)
         {
-            baseItem->getSubItem (n)->getSubItem (m)->setParentName (category);
+            auto* item = baseItem->getSubItem (n)->getSubItem (m);
+            item->setParentName (category);
+
+            int occurrence = 1;
+            auto automationId = createProcessorCatalogAutomationId (item->getName(), occurrence);
+            while (assignedAutomationIds.contains (automationId))
+                automationId = createProcessorCatalogAutomationId (item->getName(), ++occurrence);
+
+            assignedAutomationIds.add (automationId);
+            configureProcessorCatalogItemAccessibility (*item, *this, automationId);
+            addAndMakeVisible (item);
         }
     }
+
+    updateAccessibleItemLayout();
 }
 
 Array<String> ProcessorList::getItemList()
@@ -852,6 +877,28 @@ ProcessorListItem::ProcessorListItem (const String& name_,
                                                                                 open (true),
                                                                                 name (name_)
 {
+}
+
+String createProcessorCatalogAutomationId (StringRef processorName, int occurrence)
+{
+    auto id = "oe.processor_catalog." + sanitiseSemanticSegment (processorName);
+    if (occurrence > 1)
+        id += "." + String (occurrence);
+    return id;
+}
+
+void configureProcessorCatalogItemAccessibility (
+    ProcessorListItem& item,
+    ProcessorList& owner,
+    StringRef automationId)
+{
+    item.setOwner (&owner);
+    item.setInterceptsMouseClicks (false, false);
+    applySemanticMetadata (
+        item,
+        automationId,
+        item.getName(),
+        "Select the " + item.getName() + " processor in the available processor catalog.");
 }
 
 namespace

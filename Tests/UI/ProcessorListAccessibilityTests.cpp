@@ -64,3 +64,36 @@ TEST (ProcessorListAccessibilityTests, ExposesProcessorCategoryIds)
         EXPECT_TRUE (handler->getActions().contains (AccessibilityActionType::showMenu));
     }
 }
+
+TEST (ProcessorListAccessibilityTests, GivesProcessorCatalogItemsStableSelectableSemantics)
+{
+    MessageManager::getInstance();
+    MessageManagerLock lock;
+    Viewport viewport;
+    ProcessorList processorList (&viewport);
+    ProcessorListItem item ("File Reader", 0, Plugin::BUILT_IN, Plugin::Processor::SOURCE);
+    item.setParentName ("Sources");
+
+    EXPECT_EQ (createProcessorCatalogAutomationId ("File Reader", 1),
+               "oe.processor_catalog.file_reader");
+    EXPECT_EQ (createProcessorCatalogAutomationId ("File Reader", 2),
+               "oe.processor_catalog.file_reader.2");
+
+    configureProcessorCatalogItemAccessibility (
+        item,
+        processorList,
+        createProcessorCatalogAutomationId ("File Reader", 1));
+
+    EXPECT_EQ (item.getComponentID(), "oe.processor_catalog.file_reader");
+    EXPECT_EQ (item.getTitle(), "File Reader");
+    EXPECT_TRUE (item.getDescription().containsIgnoreCase ("processor"));
+
+    auto handler = item.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::treeItem);
+    EXPECT_TRUE (handler->getCurrentState().isSelectable());
+    EXPECT_TRUE (handler->getActions().contains (AccessibilityActionType::press));
+
+    EXPECT_TRUE (handler->getActions().invoke (AccessibilityActionType::press));
+    EXPECT_TRUE (item.isSelected());
+}

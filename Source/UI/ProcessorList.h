@@ -189,7 +189,7 @@ private:
 
 */
 
-class ProcessorListItem : public Component
+class TESTABLE ProcessorListItem : public Component
 {
 public:
     /** Constructor*/
@@ -281,5 +281,15 @@ private:
     /** An array of all the sub-items (if any) that belong to this ProcessorListItem. */
     OwnedArray<ProcessorListItem> subItems;
 };
+
+/** Creates a stable UI Automation identifier for a processor catalog entry. */
+TESTABLE String createProcessorCatalogAutomationId (StringRef processorName,
+                                                     int occurrence);
+
+/** Applies the shared accessible meaning and actions for a processor catalog entry. */
+TESTABLE void configureProcessorCatalogItemAccessibility (
+    ProcessorListItem& item,
+    ProcessorList& owner,
+    StringRef automationId);
 
 #endif // __PROCESSORLIST_H_C3A661E9__
