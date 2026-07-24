@@ -1235,7 +1235,9 @@ void ControlPanel::setRecordingOptionsExpanded (bool shouldBeExpanded)
 
 void ControlPanel::setNewDirectoryRequested (bool shouldRequestNewDirectory)
 {
-    newDirectoryNeeded = shouldRequestNewDirectory;
+    const bool forceNewDirectory = forceNewDirectoryButton != nullptr
+                                   && forceNewDirectoryButton->getToggleState();
+    newDirectoryNeeded = shouldRequestNewDirectory || forceNewDirectory;
 
     if (newDirectoryButton != nullptr)
         newDirectoryButton->setToggleState (newDirectoryNeeded, dontSendNotification);
