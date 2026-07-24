@@ -40,6 +40,43 @@ struct RecordingOptionsControlResult
     String errorMessage;
 };
 
+struct RecordingOptionsApplyResult
+{
+    std::optional<RecordingOptionsStatus> status;
+    String errorCode;
+    String errorMessage;
+};
+
+template <typename ReadStatus,
+          typename SetExpanded,
+          typename SetForceNewDirectory,
+          typename SetNewDirectoryRequested>
+RecordingOptionsApplyResult applyRecordingOptionsUpdate (
+    const RecordingOptionsUpdate& update,
+    ReadStatus&& readStatus,
+    SetExpanded&& setExpanded,
+    SetForceNewDirectory&& setForceNewDirectory,
+    SetNewDirectoryRequested&& setNewDirectoryRequested)
+{
+    const auto statusBeforeUpdate = readStatus();
+    if (update.newDirectoryRequested.has_value()
+        && ! statusBeforeUpdate.newDirectoryRequestAvailable)
+    {
+        return { std::nullopt,
+                 "operation_not_available",
+                 "new_directory_requested is disabled in the GUI's current state." };
+    }
+
+    if (update.expanded.has_value())
+        setExpanded (*update.expanded);
+    if (update.forceNewDirectory.has_value())
+        setForceNewDirectory (*update.forceNewDirectory);
+    if (update.newDirectoryRequested.has_value())
+        setNewDirectoryRequested (*update.newDirectoryRequested);
+
+    return { readStatus(), {}, {} };
+}
+
 template <typename Dispatcher, typename ApplyUpdate>
 RecordingOptionsControlResult handleRecordingOptionsPut (
     StringRef requestBody,
@@ -69,10 +106,16 @@ RecordingOptionsControlResult handleRecordingOptionsPut (
     switch (operationResult.status)
     {
         case MessageThreadCallStatus::completed:
-            return { 200,
-                     std::move (operationResult.value),
-                     {},
-                     {} };
+        {
+            auto applyResult = std::move (*operationResult.value);
+            if (! applyResult.status.has_value())
+                return { 409,
+                         std::nullopt,
+                         applyResult.errorCode,
+                         applyResult.errorMessage };
+
+            return { 200, std::move (applyResult.status), {}, {} };
+        }
 
         case MessageThreadCallStatus::dispatchFailed:
             return { 503,

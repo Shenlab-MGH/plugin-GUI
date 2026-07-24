@@ -86,4 +86,52 @@ auto handleControlRead (Dispatcher&& dispatcher,
                                       "Unknown control read result." };
 }
 
+template <typename Dispatcher, typename ReadDirectory, typename MeasureUsage>
+auto handleRecordingDiskUsageRead (Dispatcher&& dispatcher,
+                                   ReadDirectory&& readDirectory,
+                                   MeasureUsage&& measureUsage,
+                                   std::chrono::milliseconds timeout)
+    -> ControlReadResult<std::invoke_result_t<
+        std::decay_t<MeasureUsage>,
+        std::invoke_result_t<std::decay_t<ReadDirectory>>>>
+{
+    using Usage = std::invoke_result_t<
+        std::decay_t<MeasureUsage>,
+        std::invoke_result_t<std::decay_t<ReadDirectory>>>;
+
+    auto directoryResult = handleControlRead (
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<ReadDirectory> (readDirectory),
+        timeout);
+
+    if (! directoryResult.value.has_value())
+        return { directoryResult.httpStatus,
+                 std::nullopt,
+                 directoryResult.errorCode,
+                 directoryResult.errorMessage };
+
+    try
+    {
+        return { 200,
+                 std::optional<Usage> (
+                     std::forward<MeasureUsage> (measureUsage) (*directoryResult.value)),
+                 {},
+                 {} };
+    }
+    catch (const std::exception& exception)
+    {
+        return { 500,
+                 std::nullopt,
+                 "operation_failed",
+                 String::fromUTF8 (exception.what()) };
+    }
+    catch (...)
+    {
+        return { 500,
+                 std::nullopt,
+                 "operation_failed",
+                 "Unknown disk usage operation failure." };
+    }
+}
+
 #endif

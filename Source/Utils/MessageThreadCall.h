@@ -73,6 +73,7 @@ auto runDispatchedCall (Operation&& operation,
         std::promise<void> completion;
         std::optional<Value> value;
         String error;
+        std::atomic<bool> started { false };
         std::atomic<bool> cancelled { false };
     };
 
@@ -81,6 +82,8 @@ auto runDispatchedCall (Operation&& operation,
 
     std::function<void()> dispatchedOperation = [state]
     {
+        state->started.store (true);
+
         if (! state->cancelled.load())
         {
             try
@@ -125,10 +128,15 @@ auto runDispatchedCall (Operation&& operation,
 
     if (completion.wait_for (timeout) != std::future_status::ready)
     {
-        state->cancelled.store (true);
-        return { MessageThreadCallStatus::timedOut,
-                 std::nullopt,
-                 "Timed out waiting for the message-thread operation." };
+        if (! state->started.load())
+        {
+            state->cancelled.store (true);
+            return { MessageThreadCallStatus::timedOut,
+                     std::nullopt,
+                     "Timed out waiting for the message-thread operation." };
+        }
+
+        completion.wait();
     }
 
     if (state->error.isNotEmpty())

@@ -1218,6 +1218,7 @@ RecordingOptionsStatus ControlPanel::getRecordingOptionsStatus()
     status.expanded = open;
     status.forceNewDirectory = forceNewDirectoryButton != nullptr && forceNewDirectoryButton->getToggleState();
     status.newDirectoryRequested = newDirectoryNeeded;
+    status.newDirectoryRequestAvailable = newDirectoryButton != nullptr && newDirectoryButton->isEnabled();
     status.recording = getRecordingState();
     return status;
 }

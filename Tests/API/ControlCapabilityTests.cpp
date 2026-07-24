@@ -46,6 +46,15 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
     EXPECT_EQ ((*acquisition)["uia"]["automation_id"], "oe.control.acquisition");
     EXPECT_EQ ((*acquisition)["api"][0]["path"], "/api/status");
     EXPECT_EQ ((*acquisition)["api"][0]["method"], "GET");
+
+    const auto newDirectory = std::find_if (
+        document["capabilities"].begin(),
+        document["capabilities"].end(),
+        [] (const auto& item)
+        { return item["id"] == "oe.control.recording.new_directory"; });
+    ASSERT_NE (newDirectory, document["capabilities"].end());
+    EXPECT_EQ ((*newDirectory)["api"][0]["response_fields"][1],
+               "new_directory_request_available");
 }
 
 TEST (ControlCapabilityTests, CalculatesBoundedDiskUsage)

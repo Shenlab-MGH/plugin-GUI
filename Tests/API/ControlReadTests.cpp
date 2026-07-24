@@ -58,3 +58,36 @@ TEST (ControlReadTests, ReportsDispatchFailureTimeoutAndReadFailure)
     EXPECT_EQ (result.errorCode, "operation_failed");
     EXPECT_TRUE (result.errorMessage.contains ("read failed"));
 }
+
+TEST (ControlReadTests, ReadsTheDirectoryOnTheMessageThreadButMeasuresDiskUsageOnTheCaller)
+{
+    bool insideDispatchedOperation = false;
+    bool directoryReadOnMessageThread = false;
+    bool measurementRanOnMessageThread = true;
+
+    const auto result = handleRecordingDiskUsageRead (
+        [&] (std::function<void()> operation)
+        {
+            insideDispatchedOperation = true;
+            operation();
+            insideDispatchedOperation = false;
+            return true;
+        },
+        [&]
+        {
+            directoryReadOnMessageThread = insideDispatchedOperation;
+            return 7;
+        },
+        [&] (int directory)
+        {
+            measurementRanOnMessageThread = insideDispatchedOperation;
+            return static_cast<float> (directory) / 10.0f;
+        },
+        50ms);
+
+    EXPECT_EQ (result.httpStatus, 200);
+    ASSERT_TRUE (result.value.has_value());
+    EXPECT_FLOAT_EQ (*result.value, 0.7f);
+    EXPECT_TRUE (directoryReadOnMessageThread);
+    EXPECT_FALSE (measurementRanOnMessageThread);
+}

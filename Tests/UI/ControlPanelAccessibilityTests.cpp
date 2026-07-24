@@ -132,9 +132,12 @@ TEST (ControlPanelAccessibilityTests, UsesClockStatusForItsAccessibleValue)
 TEST (ControlPanelAccessibilityTests, SharesForceNewDirectoryStateWithTheButton)
 {
     ControlPanel panel (nullptr, nullptr, true);
+    EXPECT_FALSE (panel.getRecordingOptionsStatus().newDirectoryRequestAvailable);
+
     panel.setForceNewDirectory (true);
     EXPECT_TRUE (panel.getRecordingOptionsStatus().forceNewDirectory);
     EXPECT_TRUE (panel.getRecordingOptionsStatus().newDirectoryRequested);
+    EXPECT_FALSE (panel.getRecordingOptionsStatus().newDirectoryRequestAvailable);
 
     panel.setNewDirectoryRequested (false);
     EXPECT_TRUE (panel.getRecordingOptionsStatus().newDirectoryRequested);

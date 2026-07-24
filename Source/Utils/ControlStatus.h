@@ -41,6 +41,7 @@ struct RecordingOptionsStatus
     bool expanded = false;
     bool forceNewDirectory = false;
     bool newDirectoryRequested = false;
+    bool newDirectoryRequestAvailable = false;
     bool recording = false;
 };
 

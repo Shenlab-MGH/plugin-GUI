@@ -22,7 +22,7 @@ TEST (RecordingOptionsControlTests, AppliesValidatedUpdatesThroughTheDispatcher)
             RecordingOptionsStatus status;
             status.expanded = *update.expanded;
             status.forceNewDirectory = *update.forceNewDirectory;
-            return status;
+            return RecordingOptionsApplyResult { status, {}, {} };
         },
         50ms);
 
@@ -48,7 +48,7 @@ TEST (RecordingOptionsControlTests, RejectsInvalidRequestsBeforeDispatch)
         [&] (const RecordingOptionsUpdate&)
         {
             applied = true;
-            return RecordingOptionsStatus {};
+            return RecordingOptionsApplyResult { RecordingOptionsStatus {}, {}, {} };
         },
         50ms);
 
@@ -64,7 +64,8 @@ TEST (RecordingOptionsControlTests, ReportsUnavailableAndTimedOutDispatch)
     auto result = handleRecordingOptionsPut (
         R"({"expanded":true})",
         [] (std::function<void()>) { return false; },
-        [] (const RecordingOptionsUpdate&) { return RecordingOptionsStatus {}; },
+        [] (const RecordingOptionsUpdate&)
+        { return RecordingOptionsApplyResult { RecordingOptionsStatus {}, {}, {} }; },
         50ms);
 
     EXPECT_EQ (result.httpStatus, 503);
@@ -78,11 +79,43 @@ TEST (RecordingOptionsControlTests, ReportsUnavailableAndTimedOutDispatch)
             pendingOperation = std::move (operation);
             return true;
         },
-        [] (const RecordingOptionsUpdate&) { return RecordingOptionsStatus {}; },
+        [] (const RecordingOptionsUpdate&)
+        { return RecordingOptionsApplyResult { RecordingOptionsStatus {}, {}, {} }; },
         1ms);
 
     EXPECT_EQ (result.httpStatus, 504);
     EXPECT_EQ (result.errorCode, "operation_timeout");
     ASSERT_TRUE (pendingOperation);
     pendingOperation();
+}
+
+TEST (RecordingOptionsControlTests, RejectsNewDirectoryChangesWhenTheGuiControlIsDisabled)
+{
+    bool newDirectorySetterCalled = false;
+    RecordingOptionsStatus currentStatus;
+    currentStatus.newDirectoryRequested = true;
+    currentStatus.newDirectoryRequestAvailable = false;
+
+    const auto result = handleRecordingOptionsPut (
+        R"({"new_directory_requested":false})",
+        [] (std::function<void()> operation)
+        {
+            operation();
+            return true;
+        },
+        [&] (const RecordingOptionsUpdate& update)
+        {
+            return applyRecordingOptionsUpdate (
+                update,
+                [&] { return currentStatus; },
+                [] (bool) {},
+                [] (bool) {},
+                [&] (bool) { newDirectorySetterCalled = true; });
+        },
+        50ms);
+
+    EXPECT_EQ (result.httpStatus, 409);
+    EXPECT_EQ (result.errorCode, "operation_not_available");
+    EXPECT_FALSE (result.status.has_value());
+    EXPECT_FALSE (newDirectorySetterCalled);
 }

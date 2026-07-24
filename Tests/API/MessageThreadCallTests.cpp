@@ -4,6 +4,7 @@
 #include <chrono>
 #include <functional>
 #include <stdexcept>
+#include <thread>
 
 using namespace std::chrono_literals;
 
@@ -64,6 +65,28 @@ TEST (MessageThreadCallTests, TimesOutWithoutLeavingDanglingStackReferences)
 
     pendingOperation();
     EXPECT_FALSE (operationRan);
+}
+
+TEST (MessageThreadCallTests, WaitsForAnOperationThatAlreadyStartedInsteadOfReportingALateTimeout)
+{
+    const auto result = runDispatchedCall (
+        []
+        {
+            std::this_thread::sleep_for (10ms);
+            return 42;
+        },
+        [] (std::function<void()> operation)
+        {
+            std::thread ([operation = std::move (operation)]() mutable
+                         { operation(); })
+                .detach();
+            return true;
+        },
+        5ms);
+
+    EXPECT_EQ (result.status, MessageThreadCallStatus::completed);
+    ASSERT_TRUE (result.value.has_value());
+    EXPECT_EQ (*result.value, 42);
 }
 
 TEST (MessageThreadCallTests, ConvertsOperationExceptionsIntoFailureResults)

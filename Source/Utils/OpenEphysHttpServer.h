@@ -267,9 +267,15 @@ public:
 
         svr_->Get ("/api/disk", [] (const httplib::Request&, httplib::Response& res)
                    {
-            const auto readResult = handleControlRead (
+            const auto readResult = handleRecordingDiskUsageRead (
                 OpenEphysHttpDetail::dispatchToMessageThread,
-                [] { return CoreServices::getRecordingDiskUsage(); },
+                [] { return CoreServices::getRecordingParentDirectory(); },
+                [] (const File& directory)
+                {
+                    return CoreServices::calculateDiskUsage (
+                        directory.getBytesFreeOnVolume(),
+                        directory.getVolumeTotalSize());
+                },
                 std::chrono::seconds (2));
 
             if (! readResult.value.has_value())
@@ -345,6 +351,7 @@ public:
             ret["expanded"] = status.expanded;
             ret["force_new_directory"] = status.forceNewDirectory;
             ret["new_directory_requested"] = status.newDirectoryRequested;
+            ret["new_directory_request_available"] = status.newDirectoryRequestAvailable;
             ret["recording"] = status.recording;
             res.set_content (ret.dump(), "application/json"); });
 
@@ -355,13 +362,15 @@ public:
                 OpenEphysHttpDetail::dispatchToMessageThread,
                 [] (const RecordingOptionsUpdate& update)
                 {
-                    if (update.expanded.has_value())
-                        CoreServices::setRecordingOptionsExpanded (*update.expanded);
-                    if (update.forceNewDirectory.has_value())
-                        CoreServices::setForceNewDirectory (*update.forceNewDirectory);
-                    if (update.newDirectoryRequested.has_value())
-                        CoreServices::setNewDirectoryRequested (*update.newDirectoryRequested);
-                    return CoreServices::getRecordingOptionsStatus();
+                    return applyRecordingOptionsUpdate (
+                        update,
+                        [] { return CoreServices::getRecordingOptionsStatus(); },
+                        [] (bool expanded)
+                        { CoreServices::setRecordingOptionsExpanded (expanded); },
+                        [] (bool forceNewDirectory)
+                        { CoreServices::setForceNewDirectory (forceNewDirectory); },
+                        [] (bool newDirectoryRequested)
+                        { CoreServices::setNewDirectoryRequested (newDirectoryRequested); });
                 },
                 std::chrono::seconds (2));
 
@@ -383,6 +392,7 @@ public:
             ret["expanded"] = status.expanded;
             ret["force_new_directory"] = status.forceNewDirectory;
             ret["new_directory_requested"] = status.newDirectoryRequested;
+            ret["new_directory_request_available"] = status.newDirectoryRequestAvailable;
             ret["recording"] = status.recording;
             res.set_content (ret.dump(), "application/json"); });
 
