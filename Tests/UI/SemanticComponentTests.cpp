@@ -1,6 +1,37 @@
 #include "../../Source/UI/SemanticComponent.h"
 #include "gtest/gtest.h"
 
+namespace
+{
+class TestCommandTarget final : public ApplicationCommandTarget
+{
+public:
+    enum : CommandID
+    {
+        openCommand = 0x2000
+    };
+
+    ApplicationCommandTarget* getNextCommandTarget() override { return nullptr; }
+
+    void getAllCommands (Array<CommandID>& commands) override
+    {
+        commands.add (openCommand);
+    }
+
+    void getCommandInfo (CommandID commandId,
+                         ApplicationCommandInfo& result) override
+    {
+        if (commandId == openCommand)
+            result.setInfo ("Open",
+                            "Open a saved signal chain.",
+                            "Test",
+                            0);
+    }
+
+    bool perform (const InvocationInfo&) override { return true; }
+};
+} // namespace
+
 TEST (SemanticComponentTests, ValidatesStableSemanticIds)
 {
     EXPECT_TRUE (isValidSemanticId ("oe.window.main"));
@@ -62,6 +93,50 @@ TEST (SemanticComponentTests, CreatesReadOnlyProgressSemantics)
 
     value = 2.0;
     EXPECT_DOUBLE_EQ (range->getCurrentValue(), 1.0);
+}
+
+TEST (SemanticComponentTests, PreservesPopupMenuAccessibilityMetadata)
+{
+    PopupMenu menu;
+    PopupMenu::Item item ("Open");
+    item.itemID = 1;
+    item.accessibilityId = "oe.menu.file.open";
+    item.accessibilityDescription = "Open a saved signal chain.";
+    item.accessibilityHelp = "Choose an existing Open Ephys settings file.";
+    menu.addItem (std::move (item));
+
+    PopupMenu copiedMenu (menu);
+    PopupMenu::MenuItemIterator iterator (copiedMenu);
+
+    ASSERT_TRUE (iterator.next());
+    EXPECT_EQ (iterator.getItem().accessibilityId, "oe.menu.file.open");
+    EXPECT_EQ (iterator.getItem().accessibilityDescription,
+               "Open a saved signal chain.");
+    EXPECT_EQ (iterator.getItem().accessibilityHelp,
+               "Choose an existing Open Ephys settings file.");
+}
+
+TEST (SemanticComponentTests, CopiesCommandMeaningToSemanticMenuItems)
+{
+    TestCommandTarget target;
+    ApplicationCommandManager commandManager;
+    commandManager.registerAllCommandsForTarget (&target);
+    PopupMenu menu;
+
+    addSemanticCommandItem (
+        menu,
+        &commandManager,
+        TestCommandTarget::openCommand,
+        "oe.menu.file.open");
+
+    PopupMenu::MenuItemIterator iterator (menu);
+    ASSERT_TRUE (iterator.next());
+    EXPECT_EQ (iterator.getItem().accessibilityId,
+               "oe.menu.file.open");
+    EXPECT_EQ (iterator.getItem().accessibilityDescription,
+               "Open a saved signal chain.");
+    EXPECT_EQ (iterator.getItem().accessibilityHelp,
+               "Open a saved signal chain.");
 }
 
 TEST (SemanticComponentTests, IgnoresInvalidSemanticIds)

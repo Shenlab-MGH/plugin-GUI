@@ -125,6 +125,10 @@ struct ItemComponent final : public Component
     ItemComponent (const PopupMenu::Item& i, const PopupMenu::Options& o, MenuWindow& parent)
         : item (i), parentWindow (parent), options (o), customComp (i.customComponent)
     {
+        setComponentID (item.accessibilityId);
+        setDescription (item.accessibilityDescription);
+        setHelpText (item.accessibilityHelp);
+
         if (item.isSectionHeader)
             customComp = *new HeaderItemComponent (item.text, options);
 
@@ -1716,6 +1720,9 @@ PopupMenu::Item::Item (const Item& other)
     customCallback (other.customCallback),
     commandManager (other.commandManager),
     shortcutKeyDescription (other.shortcutKeyDescription),
+    accessibilityId (other.accessibilityId),
+    accessibilityDescription (other.accessibilityDescription),
+    accessibilityHelp (other.accessibilityHelp),
     colour (other.colour),
     isEnabled (other.isEnabled),
     isTicked (other.isTicked),
@@ -1735,6 +1742,9 @@ PopupMenu::Item& PopupMenu::Item::operator= (const Item& other)
     customCallback = other.customCallback;
     commandManager = other.commandManager;
     shortcutKeyDescription = other.shortcutKeyDescription;
+    accessibilityId = other.accessibilityId;
+    accessibilityDescription = other.accessibilityDescription;
+    accessibilityHelp = other.accessibilityHelp;
     colour = other.colour;
     isEnabled = other.isEnabled;
     isTicked = other.isTicked;

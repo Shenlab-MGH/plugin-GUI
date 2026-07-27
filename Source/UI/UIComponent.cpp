@@ -534,22 +534,45 @@ PopupMenu UIComponent::getMenuForIndex (int menuIndex, const String& menuName)
 
     if (menuIndex == 0)
     {
-        menu.addCommandItem (commandManager, openSignalChain);
+        addSemanticCommandItem (
+            menu, commandManager, openSignalChain, "oe.menu.file.open");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, saveSignalChain);
-        menu.addCommandItem (commandManager, saveSignalChainAs);
+        addSemanticCommandItem (
+            menu, commandManager, saveSignalChain, "oe.menu.file.save");
+        addSemanticCommandItem (
+            menu, commandManager, saveSignalChainAs, "oe.menu.file.save_as");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, reloadOnStartup);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            reloadOnStartup,
+            "oe.menu.file.reload_on_startup");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, toggleHttpServer);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            toggleHttpServer,
+            "oe.menu.file.http_server");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, openDefaultConfigWindow);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            openDefaultConfigWindow,
+            "oe.menu.file.default_config");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, openPluginInstaller);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            openPluginInstaller,
+            "oe.menu.file.plugin_installer");
 
 #if ! JUCE_MAC
         menu.addSeparator();
-        menu.addCommandItem (commandManager, StandardApplicationCommandIDs::quit);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            StandardApplicationCommandIDs::quit,
+            "oe.menu.file.quit");
 #endif
     }
     else if (menuIndex == 1)

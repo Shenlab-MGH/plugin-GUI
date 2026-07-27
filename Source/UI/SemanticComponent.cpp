@@ -131,6 +131,35 @@ createReadOnlyProgressAccessibilityHandler (
             std::make_unique<ReadOnlyProgressValue> (std::move (getValue)) });
 }
 
+void addSemanticCommandItem (
+    PopupMenu& menu,
+    ApplicationCommandManager* commandManager,
+    CommandID commandId,
+    StringRef semanticId)
+{
+    menu.addCommandItem (commandManager, commandId);
+
+    if (commandManager == nullptr || ! isValidSemanticId (semanticId))
+        return;
+
+    PopupMenu::MenuItemIterator iterator (menu);
+    PopupMenu::Item* addedItem = nullptr;
+
+    while (iterator.next())
+        addedItem = &iterator.getItem();
+
+    if (addedItem == nullptr || addedItem->itemID != static_cast<int> (commandId))
+        return;
+
+    addedItem->accessibilityId = String (semanticId);
+
+    if (auto* commandInfo = commandManager->getCommandForID (commandId))
+    {
+        addedItem->accessibilityDescription = commandInfo->description;
+        addedItem->accessibilityHelp = commandInfo->description;
+    }
+}
+
 void applySemanticMetadata (Component& component,
                             StringRef id,
                             StringRef title,

@@ -171,6 +171,15 @@ public:
         */
         String shortcutKeyDescription;
 
+        /** An optional stable identifier exposed to accessibility clients. */
+        String accessibilityId;
+
+        /** An optional functional description exposed to accessibility clients. */
+        String accessibilityDescription;
+
+        /** Optional usage guidance exposed to accessibility clients. */
+        String accessibilityHelp;
+
         /** A colour to use to draw the menu text.
             By default this is transparent black, which means that the LookAndFeel should choose the colour.
         */
