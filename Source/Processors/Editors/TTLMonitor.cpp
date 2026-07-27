@@ -97,12 +97,6 @@ void TTLBitDisplay::paint (Graphics& g)
 
 TTLMonitor::TTLMonitor (int bitSize_, int maxBits_) : maxBits (maxBits_), bitSize (bitSize_)
 {
-    applySemanticMetadata (
-        *this,
-        "oe.status.ttl_lines",
-        "TTL line states",
-        "Current digital event state for each TTL line.");
-
     colours.add (Colour (224, 185, 36));
     colours.add (Colour (243, 119, 33));
     colours.add (Colour (237, 37, 36));
@@ -119,13 +113,13 @@ TTLMonitor::TTLMonitor (int bitSize_, int maxBits_) : maxBits (maxBits_), bitSiz
         const auto lineNumber = bit + 1;
         displays.add (new TTLBitDisplay (colours[bit % colours.size()],
                                          "Bit " + String (lineNumber)));
-        applySemanticMetadata (
-            *displays.getLast(),
-            "oe.status.ttl_lines.line_" + String (lineNumber),
-            "TTL line " + String (lineNumber),
-            "Current state of TTL line " + String (lineNumber) + ".");
         addAndMakeVisible (displays.getLast());
     }
+
+    setAccessibilityContext (
+        "oe.status.ttl_lines",
+        "TTL line states",
+        "Current digital event state for each TTL line.");
 }
 
 void TTLMonitor::resized()
@@ -150,6 +144,24 @@ void TTLMonitor::setState (int line, bool state)
 {
     if (line < maxBits)
         displays[line]->setState (state);
+}
+
+void TTLMonitor::setAccessibilityContext (StringRef semanticId,
+                                          StringRef title,
+                                          StringRef description)
+{
+    const String id (semanticId);
+    applySemanticMetadata (*this, id, title, description);
+
+    for (int bit = 0; bit < displays.size(); ++bit)
+    {
+        const auto lineNumber = bit + 1;
+        applySemanticMetadata (
+            *displays[bit],
+            id + ".line_" + String (lineNumber),
+            "TTL line " + String (lineNumber),
+            "Current state of TTL line " + String (lineNumber) + ".");
+    }
 }
 
 void TTLMonitor::timerCallback()

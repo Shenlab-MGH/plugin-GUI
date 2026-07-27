@@ -44,3 +44,23 @@ TEST (TTLMonitorAccessibilityTests, PublishesEveryLineAsReadOnlyState)
 
     EXPECT_EQ (thirdLineValue->getCurrentValueAsString(), "active");
 }
+
+TEST (TTLMonitorAccessibilityTests, ScopesEveryPublishedIdToItsDataStream)
+{
+    TTLMonitor monitor (8, 2);
+
+    monitor.setAccessibilityContext (
+        "oe.processor.100.streams.stream_3.ttl_lines",
+        "Probe AP TTL line states",
+        "Current digital event state for Probe AP.");
+
+    EXPECT_EQ (monitor.getComponentID(),
+               "oe.processor.100.streams.stream_3.ttl_lines");
+    EXPECT_EQ (monitor.getTitle(), "Probe AP TTL line states");
+    EXPECT_EQ (monitor.getDescription(),
+               "Current digital event state for Probe AP.");
+    EXPECT_EQ (monitor.getChildComponent (0)->getComponentID(),
+               "oe.processor.100.streams.stream_3.ttl_lines.line_1");
+    EXPECT_EQ (monitor.getChildComponent (1)->getComponentID(),
+               "oe.processor.100.streams.stream_3.ttl_lines.line_2");
+}

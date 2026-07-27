@@ -31,6 +31,17 @@
 #include "VisualizerEditor.h"
 
 #include "../Settings/DataStream.h"
+#include "../../UI/SemanticComponent.h"
+
+namespace
+{
+String getStreamSelectorSemanticId (const GenericEditor& editor)
+{
+    return createProcessorControlSemanticId (
+        editor.getProcessor()->getNodeId(),
+        "streams");
+}
+} // namespace
 
 StreamTableModel::StreamTableModel (StreamSelectorTable* owner_)
     : owner (owner_)
@@ -131,6 +142,15 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
         {
             ttlMonitor = new TTLMonitor (8, 8);
         }
+
+        const auto* stream = streams[rowNumber];
+        const auto streamId = getStreamSelectorSemanticId (*owner->editor)
+                              + ".stream_" + sanitiseSemanticSegment (stream->getName())
+                              + ".ttl_lines";
+        ttlMonitor->setAccessibilityContext (
+            streamId,
+            stream->getName() + " TTL line states",
+            "Current digital event state for " + stream->getName() + ".");
 
         return ttlMonitor;
     }
@@ -265,6 +285,16 @@ StreamSelectorTable::StreamSelectorTable (GenericEditor* ed_) : editor (ed_),
                                                                 viewedStreamIndex (0)
 {
     isRecordNode = editor->getProcessor()->isRecordNode();
+    const auto semanticId = getStreamSelectorSemanticId (*editor);
+    const auto processorName = editor->getProcessor()->getName();
+    const auto processorId = editor->getProcessor()->getNodeId();
+
+    applySemanticMetadata (
+        *this,
+        semanticId,
+        processorName + " data streams",
+        "Select and inspect data streams for " + processorName
+            + " (node " + String (processorId) + ").");
 
     tableModel = std::make_unique<StreamTableModel> (this);
     streamTable.reset (createTableView());
@@ -276,6 +306,12 @@ StreamSelectorTable::StreamSelectorTable (GenericEditor* ed_) : editor (ed_),
     streamTable->getViewport()->setScrollBarThickness (10);
 
     expanderButton = std::make_unique<ExpanderButton>();
+    applySemanticMetadata (
+        *expanderButton,
+        semanticId + ".expand",
+        "Expand data streams",
+        "Open the full data stream table for " + processorName
+            + " (node " + String (processorId) + ").");
     addAndMakeVisible (expanderButton.get());
     expanderButton->setBounds (222, 4, 15, 15);
     expanderButton->addListener (this);
@@ -284,6 +320,17 @@ StreamSelectorTable::StreamSelectorTable (GenericEditor* ed_) : editor (ed_),
 TableListBox* StreamSelectorTable::createTableView (bool expanded)
 {
     TableListBox* table = new TableListBox ("Stream Table", tableModel.get());
+    const auto processorName = editor->getProcessor()->getName();
+    const auto processorId = editor->getProcessor()->getNodeId();
+    const auto semanticId = getStreamSelectorSemanticId (*editor)
+                            + (expanded ? ".expanded_table" : ".table");
+
+    applySemanticMetadata (
+        *table,
+        semanticId,
+        expanded ? "Expanded data streams" : "Available data streams",
+        "Select the data stream shown by " + processorName
+            + " (node " + String (processorId) + ").");
 
     table->setHeader (std::make_unique<TableHeaderComponent>());
 

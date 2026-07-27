@@ -89,6 +89,11 @@ public:
     /** Sets the state of a particular line */
     void setState (int line, bool state);
 
+    /** Scopes published accessibility IDs and meaning to a data stream */
+    void setAccessibilityContext (StringRef semanticId,
+                                  StringRef title,
+                                  StringRef description);
+
     /** Places the bit squares */
     void resized();
 
