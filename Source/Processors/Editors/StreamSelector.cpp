@@ -176,6 +176,13 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
             syncStartTimeMonitor = new SyncStartTimeMonitor();
         }
 
+        const auto* stream = streams[rowNumber];
+        syncStartTimeMonitor->setAccessibilityContext (
+            getStreamSemanticId (*owner->editor, *stream)
+                + ".sync_start_offset",
+            stream->getName() + " synchronization start offset",
+            "Synchronization start offset for " + stream->getName() + ".");
+
         return syncStartTimeMonitor;
     }
     else if (columnId == StreamTableModel::Columns::LATEST_SYNC)
@@ -187,6 +194,14 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
             lastSyncEventMonitor = new LastSyncEventMonitor();
         }
 
+        const auto* stream = streams[rowNumber];
+        lastSyncEventMonitor->setAccessibilityContext (
+            getStreamSemanticId (*owner->editor, *stream)
+                + ".last_sync_event",
+            stream->getName() + " last synchronization event",
+            "Approximate time since the last synchronization event for "
+                + stream->getName() + ".");
+
         return lastSyncEventMonitor;
     }
     else if (columnId == StreamTableModel::Columns::SYNC_ACCURACY)
@@ -197,6 +212,13 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
         {
             syncAccuracyMonitor = new SyncAccuracyMonitor();
         }
+
+        const auto* stream = streams[rowNumber];
+        syncAccuracyMonitor->setAccessibilityContext (
+            getStreamSemanticId (*owner->editor, *stream)
+                + ".sync_accuracy",
+            stream->getName() + " synchronization accuracy",
+            "Synchronization accuracy for " + stream->getName() + ".");
 
         return syncAccuracyMonitor;
     }

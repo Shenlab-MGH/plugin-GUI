@@ -40,6 +40,9 @@ void SyncMonitor::setSyncMetric (bool isSynchronized_, float syncMetric_)
 {
     isSynchronized = isSynchronized_;
     metric = syncMetric_;
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
 }
 
 void SyncMonitor::setEnabled (bool state)
@@ -47,6 +50,44 @@ void SyncMonitor::setEnabled (bool state)
     isEnabled = state;
 
     repaint();
+}
+
+void SyncMonitor::setAccessibilityContext (StringRef semanticId,
+                                           StringRef title,
+                                           StringRef description)
+{
+    applySemanticMetadata (*this, semanticId, title, description);
+}
+
+std::unique_ptr<AccessibilityHandler>
+SyncMonitor::createAccessibilityHandler()
+{
+    return createReadOnlyTextAccessibilityHandler (
+        *this,
+        [this]
+        { return getAccessibleValue(); });
+}
+
+LastSyncEventMonitor::LastSyncEventMonitor()
+{
+    setAccessibilityContext (
+        "oe.status.last_sync_event",
+        "Last synchronization event",
+        "Approximate time since the last synchronization event.");
+}
+
+String LastSyncEventMonitor::getAccessibleValue() const
+{
+    if (! isSynchronized || metric == -1.0f)
+        return "--";
+
+    if (metric <= 60.0f)
+        return "<1 min";
+
+    if (metric < 60.0f * 5.0f)
+        return ">1 min";
+
+    return ">5 min";
 }
 
 void LastSyncEventMonitor::paint (Graphics& g)
@@ -80,6 +121,21 @@ void LastSyncEventMonitor::paint (Graphics& g)
     }
 }
 
+SyncStartTimeMonitor::SyncStartTimeMonitor()
+{
+    setAccessibilityContext (
+        "oe.status.sync_start_offset",
+        "Synchronization start offset",
+        "Offset between this stream and the main synchronization stream.");
+}
+
+String SyncStartTimeMonitor::getAccessibleValue() const
+{
+    return isSynchronized
+               ? String (metric, 2) + " ms"
+               : String ("--");
+}
+
 void SyncStartTimeMonitor::paint (Graphics& g)
 {
     g.setFont (FontOptions ("Fira Sans", "SemiBold", 12));
@@ -95,6 +151,21 @@ void SyncStartTimeMonitor::paint (Graphics& g)
         g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.5f));
         g.drawText ("--", 0, 0, 50, 20, Justification::centred);
     }
+}
+
+SyncAccuracyMonitor::SyncAccuracyMonitor()
+{
+    setAccessibilityContext (
+        "oe.status.sync_accuracy",
+        "Synchronization accuracy",
+        "Discrepancy between actual and expected synchronization event times.");
+}
+
+String SyncAccuracyMonitor::getAccessibleValue() const
+{
+    return isSynchronized
+               ? String (std::abs (metric), 3) + " ms"
+               : String ("--");
 }
 
 void SyncAccuracyMonitor::paint (Graphics& g)

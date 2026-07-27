@@ -41,7 +41,7 @@ class RecordNode;
     Sub-classes override paint() to display the metric
 
 */
-class SyncMonitor : public Component
+class PLUGIN_API SyncMonitor : public Component
 {
 public:
     /** Constructor */
@@ -56,7 +56,18 @@ public:
     /** Enable or disable this component*/
     void setEnabled (bool isEnabled);
 
+    /** Sets stable accessibility meaning for this stream metric */
+    void setAccessibilityContext (StringRef semanticId,
+                                  StringRef title,
+                                  StringRef description);
+
+    /** Exposes the displayed metric as read-only text */
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
 protected:
+    virtual String getAccessibleValue() const = 0;
+
     bool isEnabled = true;
     bool isSynchronized = false;
     float metric = 0.0f;
@@ -68,17 +79,20 @@ protected:
     event times, given the current sync parameters
 
 */
-class SyncAccuracyMonitor : public SyncMonitor
+class PLUGIN_API SyncAccuracyMonitor : public SyncMonitor
 {
 public:
     /** Constructor */
-    SyncAccuracyMonitor() {}
+    SyncAccuracyMonitor();
 
     /** Destructor */
     ~SyncAccuracyMonitor() {}
 
     /** Paints the metric */
     void paint (Graphics& g);
+
+protected:
+    String getAccessibleValue() const override;
 };
 
 /** 
@@ -87,17 +101,20 @@ public:
     was received
 
 */
-class LastSyncEventMonitor : public SyncMonitor
+class PLUGIN_API LastSyncEventMonitor : public SyncMonitor
 {
 public:
     /** Constructor */
-    LastSyncEventMonitor() {}
+    LastSyncEventMonitor();
 
     /** Destructor */
     ~LastSyncEventMonitor() {}
 
     /** Paints the metric */
     void paint (Graphics& g);
+
+protected:
+    String getAccessibleValue() const override;
 };
 
 /** 
@@ -105,17 +122,20 @@ public:
     Displays the offset between stream start times
 
 */
-class SyncStartTimeMonitor : public SyncMonitor
+class PLUGIN_API SyncStartTimeMonitor : public SyncMonitor
 {
 public:
     /** Constructor */
-    SyncStartTimeMonitor() {}
+    SyncStartTimeMonitor();
 
     /** Destructor */
     ~SyncStartTimeMonitor() {}
 
     /** Paints the metric */
     void paint (Graphics& g);
+
+protected:
+    String getAccessibleValue() const override;
 };
 
 class StreamMonitor : public LevelMonitor

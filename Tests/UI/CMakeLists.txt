@@ -16,6 +16,7 @@ add_sources(${COMPONENT_NAME}_tests
 		ParameterEditorAccessibilityTests.cpp
 		PopupChannelSelectorAccessibilityTests.cpp
 		ProcessorListAccessibilityTests.cpp
+		RecordNodeSyncMonitorAccessibilityTests.cpp
 		SyncLineSelectorAccessibilityTests.cpp
 		SemanticComponentTests.cpp
 		TTLMonitorAccessibilityTests.cpp
