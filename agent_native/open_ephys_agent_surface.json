@@ -1,0 +1,370 @@
+{
+  "schema_version": "0.1.0",
+  "product": "Open Ephys GUI",
+  "fork": "Shenlab-MGH/plugin-GUI",
+  "baseline": {
+    "upstream": "open-ephys/plugin-GUI",
+    "version": "1.0.2",
+    "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"
+  },
+  "transport": {
+    "http_base_url": "http://127.0.0.1:37497",
+    "windows_uia": true,
+    "screenshot_control": "not_required"
+  },
+  "principles": [
+    "Prefer the HTTP API for state and deterministic commands.",
+    "Prefer Windows UI Automation for GUI-only dialogs, menus, popups, and safety prompts.",
+    "Use screenshot-based computer control only as a last-resort diagnostic.",
+    "Every agent action should name the capability id, transport, request, and readback evidence."
+  ],
+  "commands": [
+    {
+      "name": "get_capabilities",
+      "capability": "oe.capabilities",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/capabilities" },
+      "readback": "response.capabilities"
+    },
+    {
+      "name": "get_status",
+      "capability": "oe.control.acquisition",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/status" },
+      "readback": "response.mode"
+    },
+    {
+      "name": "set_mode",
+      "capability": "oe.control.acquisition",
+      "operation": "set",
+      "http": {
+        "method": "PUT",
+        "path": "/api/status",
+        "body_fields": ["mode"]
+      },
+      "post_command": true,
+      "constraints": {
+        "mode": ["IDLE", "ACQUIRE", "RECORD"],
+        "record_policy": "Only request RECORD after explicit human approval and same-run readback; prefer UIA when a GUI safety prompt is required."
+      },
+      "readback": "response.mode"
+    },
+    {
+      "name": "get_cpu",
+      "capability": "oe.status.cpu_usage",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/cpu" },
+      "readback": "response.usage"
+    },
+    {
+      "name": "get_disk",
+      "capability": "oe.status.disk_usage",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/disk" },
+      "readback": "response.usage"
+    },
+    {
+      "name": "get_time",
+      "capability": "oe.status.elapsed_time",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/time" },
+      "readback": "response.elapsed_milliseconds"
+    },
+    {
+      "name": "get_recording",
+      "capability": "oe.control.recording",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/recording" },
+      "readback": "response"
+    },
+    {
+      "name": "set_recording",
+      "capability": "oe.control.recording",
+      "operation": "set",
+      "http": {
+        "method": "PUT",
+        "path": "/api/recording",
+        "body_fields": [
+          "parent_directory",
+          "prepend_text",
+          "base_text",
+          "append_text",
+          "default_record_engine",
+          "start_new_directory"
+        ]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "get_recording_options",
+      "capability": "oe.control.recording.options",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/recording/options" },
+      "readback": "response"
+    },
+    {
+      "name": "set_recording_options",
+      "capability": "oe.control.recording.options",
+      "operation": "set",
+      "http": {
+        "method": "PUT",
+        "path": "/api/recording/options",
+        "body_fields": [
+          "expanded",
+          "force_new_directory",
+          "new_directory_requested"
+        ]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "set_record_node",
+      "capability": "oe.control.recording.node",
+      "operation": "set",
+      "http": {
+        "method": "PUT",
+        "path_template": "/api/recording/{processor_id}",
+        "path_fields": ["processor_id"],
+        "body_fields": ["parent_directory", "record_engine"]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "send_message",
+      "capability": "oe.message.broadcast",
+      "operation": "invoke",
+      "http": {
+        "method": "PUT",
+        "path": "/api/message",
+        "body_fields": ["text"]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "load_config",
+      "capability": "oe.config.load",
+      "operation": "invoke",
+      "http": {
+        "method": "PUT",
+        "path": "/api/load",
+        "body_fields": ["path"]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "save_config",
+      "capability": "oe.config.save",
+      "operation": "invoke",
+      "http": {
+        "method": "PUT",
+        "path": "/api/save",
+        "body_fields": ["filepath"]
+      },
+      "post_command": true,
+      "readback": "response.info"
+    },
+    {
+      "name": "list_available_processors",
+      "capability": "oe.processor_catalog",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/processors/list" },
+      "readback": "response.processors"
+    },
+    {
+      "name": "list_processors",
+      "capability": "oe.processors",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/processors" },
+      "readback": "response.processors"
+    },
+    {
+      "name": "get_processor",
+      "capability": "oe.processor",
+      "operation": "read",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/processors/{processor_id}",
+        "path_fields": ["processor_id"]
+      },
+      "readback": "response"
+    },
+    {
+      "name": "add_processor",
+      "capability": "oe.processors.add",
+      "operation": "invoke",
+      "http": {
+        "method": "PUT",
+        "path": "/api/processors/add",
+        "body_fields": ["name", "source_id", "dest_id"]
+      },
+      "post_command": true,
+      "readback": "response.info"
+    },
+    {
+      "name": "delete_processor",
+      "capability": "oe.processors.delete",
+      "operation": "invoke",
+      "http": {
+        "method": "PUT",
+        "path": "/api/processors/delete",
+        "body_fields": ["id"]
+      },
+      "post_command": true,
+      "readback": "response.info"
+    },
+    {
+      "name": "clear_processors",
+      "capability": "oe.processors.clear",
+      "operation": "invoke",
+      "http": { "method": "GET", "path": "/api/processors/clear" },
+      "post_command": true,
+      "readback": "response.info"
+    },
+    {
+      "name": "undo",
+      "capability": "oe.edit.undo",
+      "operation": "invoke",
+      "http": { "method": "GET", "path": "/api/undo" },
+      "post_command": true,
+      "readback": "response.info"
+    },
+    {
+      "name": "redo",
+      "capability": "oe.edit.redo",
+      "operation": "invoke",
+      "http": { "method": "GET", "path": "/api/redo" },
+      "post_command": true,
+      "readback": "response.info"
+    },
+    {
+      "name": "get_processor_parameters",
+      "capability": "oe.processor.parameters",
+      "operation": "read",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/processors/{processor_id}/parameters",
+        "path_fields": ["processor_id"]
+      },
+      "readback": "response.parameters"
+    },
+    {
+      "name": "get_parameter",
+      "capability": "oe.processor.parameter",
+      "operation": "read",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/processors/{processor_id}/parameters/{parameter_name}",
+        "path_fields": ["processor_id", "parameter_name"]
+      },
+      "readback": "response"
+    },
+    {
+      "name": "set_parameter",
+      "capability": "oe.processor.parameter",
+      "operation": "set",
+      "http": {
+        "method": "PUT",
+        "path_template": "/api/processors/{processor_id}/parameters/{parameter_name}",
+        "path_fields": ["processor_id", "parameter_name"],
+        "body_fields": ["value"]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "get_stream",
+      "capability": "oe.processor.stream",
+      "operation": "read",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/processors/{processor_id}/streams/{stream_index}",
+        "path_fields": ["processor_id", "stream_index"]
+      },
+      "readback": "response"
+    },
+    {
+      "name": "get_stream_parameters",
+      "capability": "oe.processor.stream.parameters",
+      "operation": "read",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/processors/{processor_id}/streams/{stream_index}/parameters",
+        "path_fields": ["processor_id", "stream_index"]
+      },
+      "readback": "response.parameters"
+    },
+    {
+      "name": "get_stream_parameter",
+      "capability": "oe.processor.stream.parameter",
+      "operation": "read",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/processors/{processor_id}/streams/{stream_index}/parameters/{parameter_name}",
+        "path_fields": ["processor_id", "stream_index", "parameter_name"]
+      },
+      "readback": "response"
+    },
+    {
+      "name": "set_stream_parameter",
+      "capability": "oe.processor.stream.parameter",
+      "operation": "set",
+      "http": {
+        "method": "PUT",
+        "path_template": "/api/processors/{processor_id}/streams/{stream_index}/parameters/{parameter_name}",
+        "path_fields": ["processor_id", "stream_index", "parameter_name"],
+        "body_fields": ["value"]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "set_audio",
+      "capability": "oe.audio.device",
+      "operation": "set",
+      "http": {
+        "method": "PUT",
+        "path": "/api/audio",
+        "body_fields": ["device_type", "device_name", "sample_rate", "buffer_size"]
+      },
+      "post_command": true,
+      "readback": "response"
+    },
+    {
+      "name": "get_audio_devices",
+      "capability": "oe.audio.devices",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/audio/devices" },
+      "readback": "response"
+    },
+    {
+      "name": "get_audio_device",
+      "capability": "oe.audio.device",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/audio/device" },
+      "readback": "response"
+    },
+    {
+      "name": "get_latency",
+      "capability": "oe.status.latency",
+      "operation": "read",
+      "http": { "method": "GET", "path": "/api/latency" },
+      "readback": "response.processors"
+    }
+  ],
+  "uia": {
+    "automation_id_rule": "Capability id is the Windows UIA AutomationId when the control exists in the visible GUI tree.",
+    "script": "Resources/Scripts/inspect_open_ephys_uia.ps1",
+    "examples": [
+      "oe.control.acquisition",
+      "oe.control.recording",
+      "oe.control.recording.options",
+      "oe.processor_catalog.<processor_slug>",
+      "oe.processor.<node_id>.parameter.<parameter_key>"
+    ]
+  }
+}
