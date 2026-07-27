@@ -644,6 +644,11 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
     filenameText->addListener (this);
 
     recordSelector = std::make_unique<ComboBox> ("Control Panel Record Engine Selector");
+    applySemanticMetadata (
+        *recordSelector,
+        "oe.control.recording.engine",
+        "Recording engine",
+        "Choose the default recording engine for future Record Nodes.");
     recordSelector->addListener (this);
     addChildComponent (recordSelector.get());
 

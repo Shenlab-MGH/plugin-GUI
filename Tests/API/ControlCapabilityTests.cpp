@@ -12,6 +12,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         "oe.control.recording.options",
         "oe.control.recording.filename",
         "oe.control.recording.directory",
+        "oe.control.recording.engine",
         "oe.control.recording.new_directory",
         "oe.control.recording.force_new_directory",
         "oe.status.cpu_usage",
@@ -37,7 +38,7 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
     ASSERT_TRUE (document["capabilities"].is_array());
-    ASSERT_EQ (document["capabilities"].size(), 10);
+    ASSERT_EQ (document["capabilities"].size(), 11);
 
     const auto acquisition = std::find_if (document["capabilities"].begin(),
                                            document["capabilities"].end(),
@@ -74,6 +75,24 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
     EXPECT_EQ ((*recordingDirectory)["api"][1]["method"], "PUT");
     EXPECT_EQ ((*recordingDirectory)["api"][1]["request_fields"][0],
                "parent_directory");
+
+    const auto recordingEngine = std::find_if (
+        document["capabilities"].begin(),
+        document["capabilities"].end(),
+        [] (const auto& item)
+        { return item["id"] == "oe.control.recording.engine"; });
+    ASSERT_NE (recordingEngine, document["capabilities"].end());
+    EXPECT_EQ ((*recordingEngine)["kind"], "selection");
+    EXPECT_EQ ((*recordingEngine)["uia"]["automation_id"],
+               "oe.control.recording.engine");
+    ASSERT_EQ ((*recordingEngine)["api"].size(), 2);
+    EXPECT_EQ ((*recordingEngine)["api"][0]["method"], "GET");
+    EXPECT_EQ ((*recordingEngine)["api"][0]["path"], "/api/recording");
+    EXPECT_EQ ((*recordingEngine)["api"][0]["response_fields"][0],
+               "default_record_engine");
+    EXPECT_EQ ((*recordingEngine)["api"][1]["method"], "PUT");
+    EXPECT_EQ ((*recordingEngine)["api"][1]["request_fields"][0],
+               "default_record_engine");
 }
 
 TEST (ControlCapabilityTests, CalculatesBoundedDiskUsage)

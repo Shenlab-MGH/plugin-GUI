@@ -207,3 +207,19 @@ TEST (ControlPanelAccessibilityTests, RetainsRecordingDirectorySemanticsAfterLoo
     EXPECT_NE (findDescendantById (panel, "oe.control.recording.directory"), nullptr);
     EXPECT_NE (findDescendantById (panel, "oe.control.recording.directory.browse"), nullptr);
 }
+
+TEST (ControlPanelAccessibilityTests, ExposesDefaultRecordingEngineSelector)
+{
+    ControlPanel panel (nullptr, nullptr, true);
+
+    auto* engine = findDescendantById (panel, "oe.control.recording.engine");
+    ASSERT_NE (engine, nullptr);
+    EXPECT_NE (dynamic_cast<ComboBox*> (engine), nullptr);
+    EXPECT_EQ (engine->getTitle(), "Recording engine");
+    EXPECT_EQ (engine->getDescription(),
+               "Choose the default recording engine for future Record Nodes.");
+    auto handler = engine->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::comboBox);
+    EXPECT_NE (handler->getValueInterface(), nullptr);
+}
