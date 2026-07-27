@@ -83,7 +83,32 @@ UIComponent::UIComponent (MainWindow* mainWindow_,
 
     LOGD ("Created control panel.");
 
-    processorList = new ProcessorList (&processorListViewport);
+    processorList = new ProcessorList (
+        &processorListViewport,
+        [this] (const Plugin::Description& description)
+        {
+            if (CoreServices::getAcquisitionStatus())
+            {
+                CoreServices::sendStatusMessage (
+                    "Cannot add a processor while acquisition is active.");
+                return false;
+            }
+
+            if (editorViewport->isSignalChainLocked())
+            {
+                CoreServices::sendStatusMessage (
+                    "Cannot add a processor while the signal chain is locked.");
+                return false;
+            }
+
+            const bool added =
+                editorViewport->addProcessor (
+                    description,
+                    -1);
+            if (added)
+                editorViewport->refreshEditors();
+            return added;
+        });
     processorListViewport.setViewedComponent (processorList, false);
     processorListViewport.setScrollBarsShown (false, false);
     addAndMakeVisible (&processorListViewport);

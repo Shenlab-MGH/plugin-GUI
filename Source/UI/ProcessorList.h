@@ -55,8 +55,13 @@ class TESTABLE ProcessorList : public Component,
 
 {
 public:
+    using AccessibilityAddProcessor =
+        std::function<bool (const Plugin::Description&)>;
+
     /** Constructor**/
-    ProcessorList (Viewport* v);
+    ProcessorList (
+        Viewport* v,
+        AccessibilityAddProcessor addProcessorFromAccessibility = {});
 
     /** Destructor*/
     ~ProcessorList() {}
@@ -135,6 +140,7 @@ private:
     /** Applies an accessibility action to a catalog item. */
     void toggleItemFromAccessibility (ProcessorListItem&);
     void selectItemFromAccessibility (ProcessorListItem&);
+    void addItemFromAccessibility (ProcessorListItem&);
 
     bool isDragging;
     int totalHeight, itemHeight, subItemHeight;
@@ -164,6 +170,7 @@ private:
     int maximumNameOffset;
 
     Viewport* viewport;
+    AccessibilityAddProcessor addProcessorFromAccessibility;
 
     std::unique_ptr<CustomArrowButton> arrowButton;
     Path openArrowPath;

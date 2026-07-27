@@ -1,5 +1,7 @@
 #include "../../Source/UI/ProcessorList.h"
 #include "gtest/gtest.h"
+#include <atomic>
+#include <thread>
 
 TEST (ProcessorListAccessibilityTests, ExposesListAndSearchControls)
 {
@@ -65,12 +67,21 @@ TEST (ProcessorListAccessibilityTests, ExposesProcessorCategoryIds)
     }
 }
 
-TEST (ProcessorListAccessibilityTests, GivesProcessorCatalogItemsStableSelectableSemantics)
+TEST (ProcessorListAccessibilityTests, PressingCatalogLeafAddsProcessor)
 {
     MessageManager::getInstance();
     MessageManagerLock lock;
     Viewport viewport;
-    ProcessorList processorList (&viewport);
+    int addCount = 0;
+    Plugin::Description addedDescription;
+    ProcessorList processorList (
+        &viewport,
+        [&] (const Plugin::Description& description)
+        {
+            ++addCount;
+            addedDescription = description;
+            return true;
+        });
     ProcessorListItem item ("File Reader", 0, Plugin::BUILT_IN, Plugin::Processor::SOURCE);
     item.setParentName ("Sources");
 
@@ -91,9 +102,97 @@ TEST (ProcessorListAccessibilityTests, GivesProcessorCatalogItemsStableSelectabl
     auto handler = item.createAccessibilityHandler();
     ASSERT_NE (handler, nullptr);
     EXPECT_EQ (handler->getRole(), AccessibilityRole::treeItem);
-    EXPECT_TRUE (handler->getCurrentState().isSelectable());
+    EXPECT_FALSE (handler->getCurrentState().isSelectable());
     EXPECT_TRUE (handler->getActions().contains (AccessibilityActionType::press));
+    EXPECT_FALSE (handler->getActions().contains (AccessibilityActionType::toggle));
+    EXPECT_FALSE (handler->getActions().contains (AccessibilityActionType::showMenu));
 
     EXPECT_TRUE (handler->getActions().invoke (AccessibilityActionType::press));
+    EXPECT_EQ (addCount, 1);
+    EXPECT_TRUE (addedDescription.fromProcessorList);
+    EXPECT_EQ (addedDescription.name, "File Reader");
+    EXPECT_EQ (addedDescription.index, 0);
+    EXPECT_EQ (addedDescription.type, Plugin::BUILT_IN);
+    EXPECT_EQ (
+        addedDescription.processorType,
+        Plugin::Processor::SOURCE);
     EXPECT_TRUE (item.isSelected());
+}
+
+TEST (ProcessorListAccessibilityTests, FailedAddDoesNotSelectCatalogLeaf)
+{
+    MessageManager::getInstance();
+    MessageManagerLock lock;
+    Viewport viewport;
+    ProcessorList processorList (
+        &viewport,
+        [] (const Plugin::Description&) { return false; });
+    ProcessorListItem item (
+        "File Reader",
+        0,
+        Plugin::BUILT_IN,
+        Plugin::Processor::SOURCE);
+    item.setParentName ("Sources");
+    configureProcessorCatalogItemAccessibility (
+        item,
+        processorList,
+        createProcessorCatalogAutomationId (
+            "File Reader",
+            1));
+
+    auto handler = item.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::press));
+    EXPECT_FALSE (item.isSelected());
+}
+
+TEST (ProcessorListAccessibilityTests, AddRunsOnMessageThread)
+{
+    auto* messageManager = MessageManager::getInstance();
+    Viewport viewport;
+    std::atomic<bool> callbackRan { false };
+    std::atomic<bool> callbackUsedMessageThread { false };
+    ProcessorList processorList (
+        &viewport,
+        [&] (const Plugin::Description&)
+        {
+            callbackUsedMessageThread.store (
+                messageManager->isThisTheMessageThread());
+            callbackRan.store (true);
+            return true;
+        });
+    ProcessorListItem item (
+        "File Reader",
+        0,
+        Plugin::BUILT_IN,
+        Plugin::Processor::SOURCE);
+    item.setParentName ("Sources");
+    configureProcessorCatalogItemAccessibility (
+        item,
+        processorList,
+        createProcessorCatalogAutomationId (
+            "File Reader",
+            1));
+    auto handler = item.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    std::thread worker (
+        [&]
+        {
+            handler->getActions().invoke (
+                AccessibilityActionType::press);
+        });
+    worker.join();
+
+    for (int attempt = 0;
+         attempt < 20 && ! callbackRan.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (10);
+    }
+
+    EXPECT_TRUE (callbackRan.load());
+    EXPECT_TRUE (callbackUsedMessageThread.load());
 }

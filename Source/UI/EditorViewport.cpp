@@ -32,6 +32,19 @@
 #include "ProcessorList.h"
 #include "SemanticComponent.h"
 
+int resolveProcessorInsertionPoint (
+    int requestedInsertionPoint,
+    int editorCount)
+{
+    if (requestedInsertionPoint < 0)
+        return editorCount;
+
+    return jlimit (
+        0,
+        editorCount,
+        requestedInsertionPoint);
+}
+
 const int BORDER_SIZE = 6;
 const int TAB_SIZE = 30;
 
@@ -244,35 +257,46 @@ void EditorViewport::itemDropped (const SourceDetails& dragSourceDetails)
     }
 }
 
-GenericProcessor* EditorViewport::addProcessor (Plugin::Description description, int insertionPt)
+bool EditorViewport::addProcessor (
+    Plugin::Description description,
+    int insertionPt)
 {
+    const int resolvedInsertionPoint =
+        resolveProcessorInsertionPoint (
+            insertionPt,
+            editorArray.size());
     GenericProcessor* source = nullptr;
     GenericProcessor* dest = nullptr;
 
-    if (insertionPoint > 0)
+    if (resolvedInsertionPoint > 0)
     {
-        source = editorArray[insertionPoint - 1]->getProcessor();
+        source = editorArray[resolvedInsertionPoint - 1]->getProcessor();
     }
 
-    if (editorArray.size() > insertionPoint)
+    if (editorArray.size() > resolvedInsertionPoint)
     {
-        dest = editorArray[insertionPoint]->getProcessor();
+        dest = editorArray[resolvedInsertionPoint]->getProcessor();
     }
 
-    AddProcessor* action = new AddProcessor (description, source, dest, loadingConfig);
+    auto action = std::make_unique<AddProcessor> (
+        description,
+        source,
+        dest,
+        loadingConfig);
 
     if (! loadingConfig)
     {
         AccessClass::getProcessorGraph()->getUndoManager()->beginNewTransaction ("Disabled during acquisition");
-        AccessClass::getProcessorGraph()->getUndoManager()->perform (action);
-        return action->processor;
+        return AccessClass::getProcessorGraph()
+            ->getUndoManager()
+            ->perform (action.release());
     }
-    else
-    {
-        action->perform();
-        orphanedActions.add (action);
-        return action->processor;
-    }
+
+    const bool added = action->perform();
+    if (added)
+        orphanedActions.add (action.release());
+
+    return added;
 }
 
 void EditorViewport::clearSignalChain()

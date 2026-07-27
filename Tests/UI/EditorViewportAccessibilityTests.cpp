@@ -52,3 +52,11 @@ TEST (EditorViewportAccessibilityTests, ExposesOneSignalChainPanelToggle)
     ASSERT_EQ (toggle.getNumChildComponents(), 1);
     EXPECT_FALSE (toggle.getChildComponent (0)->isAccessible());
 }
+
+TEST (EditorViewportAccessibilityTests, ResolvesAppendInsertionPoint)
+{
+    EXPECT_EQ (resolveProcessorInsertionPoint (-1, 0), 0);
+    EXPECT_EQ (resolveProcessorInsertionPoint (-1, 3), 3);
+    EXPECT_EQ (resolveProcessorInsertionPoint (1, 3), 1);
+    EXPECT_EQ (resolveProcessorInsertionPoint (99, 3), 3);
+}

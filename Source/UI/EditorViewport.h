@@ -45,6 +45,11 @@ class ControlPanel;
 class UIComponent;
 class AddProcessor;
 
+/** Resolves a requested insertion point; -1 appends to the signal chain. */
+TESTABLE int resolveProcessorInsertionPoint (
+    int requestedInsertionPoint,
+    int editorCount);
+
 /**
 
   Allows the user to view and edit the signal chain.
@@ -179,7 +184,7 @@ public:
     void removeEditor (GenericEditor* editor);
 
     /** Adds a processor to the signal chain, based on a Plugin description */
-    GenericProcessor* addProcessor (Plugin::Description desc, int insertionPt);
+    bool addProcessor (Plugin::Description desc, int insertionPt);
 
     /** Deletes all processors that are currently selected */
     void deleteSelectedProcessors();

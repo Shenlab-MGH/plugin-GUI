@@ -33,15 +33,20 @@
 #include "LookAndFeel/CustomLookAndFeel.h"
 #include "SemanticComponent.h"
 
-ProcessorList::ProcessorList (Viewport* v) : viewport (v),
-                                             isDragging (false),
-                                             totalHeight (800),
-                                             itemHeight (32),
-                                             subItemHeight (22),
-                                             xBuffer (1),
-                                             yBuffer (1),
-                                             hoverItem (nullptr),
-                                             maximumNameOffset (0)
+ProcessorList::ProcessorList (
+    Viewport* v,
+    AccessibilityAddProcessor addProcessorCallback)
+    : isDragging (false),
+      totalHeight (800),
+      itemHeight (32),
+      subItemHeight (22),
+      xBuffer (1),
+      yBuffer (1),
+      hoverItem (nullptr),
+      maximumNameOffset (0),
+      viewport (v),
+      addProcessorFromAccessibility (
+          std::move (addProcessorCallback))
 {
     listFontLight = FontOptions ("CP Mono", "Light", 25);
     listFontPlain = FontOptions ("CP Mono", "Plain", 20);
@@ -442,9 +447,24 @@ void ProcessorList::selectItemFromAccessibility (ProcessorListItem& item)
     clearSelectionState();
     item.setSelected (true);
     repaint();
+}
 
-    if (auto* handler = item.getAccessibilityHandler())
-        handler->notifyAccessibilityEvent (AccessibilityEvent::rowSelectionChanged);
+void ProcessorList::addItemFromAccessibility (ProcessorListItem& item)
+{
+    if (item.hasSubItems()
+        || ! addProcessorFromAccessibility)
+        return;
+
+    Plugin::Description description;
+    description.fromProcessorList = true;
+    description.name = item.getName();
+    description.index = item.index;
+    description.type = item.pluginType;
+    description.processorType = item.processorType;
+    description.nodeId = 0;
+
+    if (addProcessorFromAccessibility (description))
+        selectItemFromAccessibility (item);
 }
 
 void ProcessorList::mouseDown (const MouseEvent& e)
@@ -898,7 +918,7 @@ void configureProcessorCatalogItemAccessibility (
         item,
         automationId,
         item.getName(),
-        "Select the " + item.getName() + " processor in the available processor catalog.");
+        "Add the " + item.getName() + " processor to the end of the signal chain.");
 }
 
 namespace
@@ -930,9 +950,9 @@ public:
         }
         else
         {
-            state = state.withSelectable();
-            if (item.isSelected())
-                state = state.withSelected();
+            // A leaf exposes one stateless Invoke action: add this
+            // processor. Publishing SelectionItem here would make
+            // UIA Select() invoke the Add action on Windows.
         }
 
         return state;
@@ -945,13 +965,21 @@ private:
             AccessibilityActionType::press,
             [&item] { item.performAccessibilityPress(); });
 
-        actions = actions.addAction (
-            AccessibilityActionType::toggle,
-            [&item] { item.performAccessibilityToggle(); });
+        const bool isCategoryHeader =
+            item.getName().equalsIgnoreCase (
+                item.getParentName());
 
-        return actions.addAction (
-            AccessibilityActionType::showMenu,
-            [&item] { item.performAccessibilityToggle(); });
+        if (item.hasSubItems() || isCategoryHeader)
+        {
+            actions = actions.addAction (
+                AccessibilityActionType::toggle,
+                [&item] { item.performAccessibilityToggle(); });
+            actions = actions.addAction (
+                AccessibilityActionType::showMenu,
+                [&item] { item.performAccessibilityToggle(); });
+        }
+
+        return actions;
     }
 
     ProcessorListItem& item;
@@ -965,20 +993,52 @@ std::unique_ptr<AccessibilityHandler> ProcessorListItem::createAccessibilityHand
 
 void ProcessorListItem::performAccessibilityToggle()
 {
-    if (owner == nullptr)
-        return;
+    const auto perform =
+        [safeItem = Component::SafePointer<ProcessorListItem> (this)]
+        {
+            if (safeItem == nullptr
+                || safeItem->owner == nullptr)
+                return;
 
-    const bool isCategoryHeader = getName().equalsIgnoreCase (getParentName());
+            const bool isCategoryHeader =
+                safeItem->getName().equalsIgnoreCase (
+                    safeItem->getParentName());
 
-    if (hasSubItems() || isCategoryHeader)
-        owner->toggleItemFromAccessibility (*this);
+            if (safeItem->hasSubItems() || isCategoryHeader)
+                safeItem->owner->toggleItemFromAccessibility (*safeItem);
+            else
+                safeItem->owner->selectItemFromAccessibility (*safeItem);
+        };
+
+    if (MessageManager::getInstance()->isThisTheMessageThread())
+        perform();
     else
-        owner->selectItemFromAccessibility (*this);
+        MessageManager::callAsync (perform);
 }
 
 void ProcessorListItem::performAccessibilityPress()
 {
-    performAccessibilityToggle();
+    const auto perform =
+        [safeItem = Component::SafePointer<ProcessorListItem> (this)]
+        {
+            if (safeItem == nullptr
+                || safeItem->owner == nullptr)
+                return;
+
+            const bool isCategoryHeader =
+                safeItem->getName().equalsIgnoreCase (
+                    safeItem->getParentName());
+
+            if (safeItem->hasSubItems() || isCategoryHeader)
+                safeItem->owner->toggleItemFromAccessibility (*safeItem);
+            else
+                safeItem->owner->addItemFromAccessibility (*safeItem);
+        };
+
+    if (MessageManager::getInstance()->isThisTheMessageThread())
+        perform();
+    else
+        MessageManager::callAsync (perform);
 }
 
 bool ProcessorListItem::hasSubItems()
