@@ -1,4 +1,5 @@
 #include "../../Source/Processors/Editors/GenericEditor.h"
+#include "../../Source/Processors/Editors/ElectrodeButtons.h"
 #include "../../Source/Processors/Editors/StreamSelector.h"
 #include "../../Source/Processors/GenericProcessor/GenericProcessor.h"
 #include "../../Source/Processors/Settings/DataStream.h"
@@ -36,6 +37,17 @@ public:
     using UtilityButton::createAccessibilityHandler;
 };
 
+class InspectableElectrodeButton final : public ElectrodeButton
+{
+public:
+    explicit InspectableElectrodeButton (int channel)
+        : ElectrodeButton (channel)
+    {
+    }
+
+    using ElectrodeButton::createAccessibilityHandler;
+};
+
 Component* findDescendantBySemanticId (Component& parent, const String& id)
 {
     for (auto* child : parent.getChildren())
@@ -50,6 +62,31 @@ Component* findDescendantBySemanticId (Component& parent, const String& id)
     return nullptr;
 }
 } // namespace
+
+TEST (GenericEditorAccessibilityTests, PublishesElectrodeChannelAsValue)
+{
+    InspectableElectrodeButton button (-1);
+    button.setTitle ("Left audio output channel");
+
+    auto handler = button.createAccessibilityHandler();
+
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::button);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (handler->getValueInterface(), nullptr);
+    EXPECT_TRUE (handler->getValueInterface()->isReadOnly());
+    EXPECT_EQ (
+        handler->getValueInterface()->getCurrentValueAsString(),
+        "None");
+
+    button.setChannelNum (12);
+
+    EXPECT_EQ (
+        handler->getValueInterface()->getCurrentValueAsString(),
+        "12");
+}
 
 TEST (GenericEditorAccessibilityTests, PublishesUtilityButtonLabelAsValue)
 {

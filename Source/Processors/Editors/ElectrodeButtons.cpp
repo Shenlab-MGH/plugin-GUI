@@ -36,6 +36,101 @@ ElectrodeButton::ElectrodeButton (int chan_, Colour defaultColour_) : Button ("E
 
 ElectrodeButton::~ElectrodeButton() {}
 
+namespace
+{
+class ElectrodeButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    explicit ElectrodeButtonAccessibilityHandler (
+        ElectrodeButton& buttonToWrap)
+        : AccessibilityHandler (
+              buttonToWrap,
+              buttonToWrap.getRadioGroupId() != 0
+                  ? AccessibilityRole::radioButton
+                  : AccessibilityRole::button,
+              getActions (buttonToWrap),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<ChannelValue> (buttonToWrap) }),
+          button (buttonToWrap)
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto state = AccessibilityHandler::getCurrentState();
+
+        if (button.isToggleable())
+        {
+            state = state.withCheckable();
+
+            if (button.getToggleState())
+                state = state.withChecked();
+        }
+
+        return state;
+    }
+
+    String getTitle() const override
+    {
+        const auto title = AccessibilityHandler::getTitle();
+        return title.isNotEmpty() ? title : button.getButtonText();
+    }
+
+    String getHelp() const override { return button.getTooltip(); }
+
+private:
+    class ChannelValue final : public AccessibilityTextValueInterface
+    {
+    public:
+        explicit ChannelValue (ElectrodeButton& buttonToWrap)
+            : button (buttonToWrap)
+        {
+        }
+
+        bool isReadOnly() const override { return true; }
+        void setValueAsString (const String&) override {}
+        String getCurrentValueAsString() const override
+        {
+            const int channel = button.getChannelNum();
+            return channel >= 0 ? String (channel) : "None";
+        }
+
+    private:
+        ElectrodeButton& button;
+    };
+
+    static AccessibilityActions getActions (ElectrodeButton& button)
+    {
+        auto actions = AccessibilityActions().addAction (
+            AccessibilityActionType::press,
+            [&button] { button.triggerClick(); });
+
+        if (button.isToggleable())
+        {
+            actions = actions.addAction (
+                AccessibilityActionType::toggle,
+                [&button]
+                {
+                    button.setToggleState (
+                        ! button.getToggleState(),
+                        sendNotification);
+                });
+        }
+
+        return actions;
+    }
+
+    ElectrodeButton& button;
+};
+}
+
+std::unique_ptr<AccessibilityHandler>
+ElectrodeButton::createAccessibilityHandler()
+{
+    return std::make_unique<ElectrodeButtonAccessibilityHandler> (*this);
+}
+
 int ElectrodeButton::getChannelNum()
 {
     return chan;
@@ -81,6 +176,14 @@ void ElectrodeButton::setChannelNum (int i)
     chan = i;
 
     setButtonText (String (chan));
+
+    if (auto* handler = getAccessibilityHandler())
+    {
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::valueChanged);
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::titleChanged);
+    }
 }
 
 ElectrodeEditorButton::ElectrodeEditorButton (const String& name_) : Button ("Electrode Editor"),

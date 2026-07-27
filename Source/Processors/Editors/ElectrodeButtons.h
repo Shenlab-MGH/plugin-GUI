@@ -50,6 +50,10 @@ public:
     /** Updates the channel number*/
     void setChannelNum (int i);
 
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
 private:
     /** Draws the button.*/
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown);
