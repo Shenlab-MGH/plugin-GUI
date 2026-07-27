@@ -721,9 +721,17 @@ PopupMenu UIComponent::getMenuForIndex (int menuIndex, const String& menuName)
     }
     else if (menuIndex == 3)
     {
-        menu.addCommandItem (commandManager, showHelp);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            showHelp,
+            "oe.menu.help.documentation");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, checkForUpdates);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            checkForUpdates,
+            "oe.menu.help.check_for_updates");
     }
 
     return menu;
