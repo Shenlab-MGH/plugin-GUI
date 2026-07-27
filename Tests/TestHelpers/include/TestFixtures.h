@@ -16,6 +16,12 @@ enum class TestSourceNodeType
     Base
 };
 
+enum class ProcessorTesterMode
+{
+    GraphOnly,
+    FullApp
+};
+
 class TestSourceNodeBuilder
 {
 public:
@@ -63,7 +69,9 @@ private:
 class ProcessorTester
 {
 public:
-    ProcessorTester (TestSourceNodeBuilder sourceNodeBuilder)
+    ProcessorTester (
+        TestSourceNodeBuilder sourceNodeBuilder,
+        ProcessorTesterMode mode = ProcessorTesterMode::GraphOnly)
     {
         // Singletons...
         MessageManager::deleteInstance();
@@ -78,10 +86,16 @@ public:
         customLookAndFeel = std::make_unique<CustomLookAndFeel>();
         LookAndFeel::setDefaultLookAndFeel (customLookAndFeel.get());
 
-        // All of these sets the global state in AccessClass in their constructors
-        //audioComponent = std::make_unique<AudioComponent>();
         processorGraph = std::make_unique<ProcessorGraph> (true);
-        //controlPanel = std::make_unique<ControlPanel> (processorGraph.get(), audioComponent.get(), true);
+
+        if (mode == ProcessorTesterMode::FullApp)
+        {
+            audioComponent = std::make_unique<AudioComponent>();
+            controlPanel = std::make_unique<ControlPanel> (
+                processorGraph.get(),
+                audioComponent.get(),
+                true);
+        }
 
         SourceNode* snTemp = sourceNodeBuilder.buildSourceNode();
         sourceNodeId = nextProcessorId++;
@@ -97,12 +111,14 @@ public:
         sn->initialize (false);
         sn->setDestNode (nullptr);
 
-        //controlPanel->updateRecordEngineList();
+        if (controlPanel != nullptr)
+            controlPanel->updateRecordEngineList();
 
         // Refresh everything
         processorGraph->updateSettings (sn);
 
-        //controlPanel->colourChanged();
+        if (controlPanel != nullptr)
+            controlPanel->colourChanged();
     }
 
     virtual ~ProcessorTester()
