@@ -55,6 +55,9 @@ public:
     /** Returns the channel id */
     int getId() { return id; };
 
+    /** Creates the toggle-button accessibility handler */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
 private:
     /** Mouse-related callbacks*/
     void mouseDown (const MouseEvent& event) override;

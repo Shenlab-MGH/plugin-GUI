@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "../../UI/LookAndFeel/CustomLookAndFeel.h"
+#include "../../UI/SemanticComponent.h"
 #include "../../Utils/Utils.h"
 
 ChannelButton::ChannelButton (int _id, PopupChannelSelector* _parent) : Button (String (_id)),
@@ -33,6 +34,11 @@ ChannelButton::ChannelButton (int _id, PopupChannelSelector* _parent) : Button (
                                                                         parent (_parent)
 {
     setClickingTogglesState (true);
+}
+
+std::unique_ptr<AccessibilityHandler> ChannelButton::createAccessibilityHandler()
+{
+    return Button::createAccessibilityHandler();
 }
 
 void ChannelButton::mouseDown (const MouseEvent& event)
@@ -117,6 +123,22 @@ RangeEditor::RangeEditor (const String& name, const Font& font) : TextEditor (na
 PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelector::Listener* listener_, std::vector<bool> channelStates, Array<String> channelNames, const String& title_)
     : PopupComponent (parent), listener (listener_), nChannels (int (channelStates.size())), mouseDragged (false), startDragCoords (0, 0), shiftKeyDown (false), firstButtonSelectedState (false), isDragging (false), editable (true), maxSelectable (-1), title (title_)
 {
+    const auto accessibleTitle = title.isNotEmpty()
+                                     ? title
+                                     : String ("Channel selector");
+    const auto parentId = parent->getComponentID();
+    const auto semanticId = isValidSemanticId (parentId)
+                                ? parentId + ".popup"
+                                : "oe.popup.channel_selector."
+                                      + sanitiseSemanticSegment (
+                                          accessibleTitle);
+
+    applySemanticMetadata (
+        *this,
+        semanticId,
+        accessibleTitle,
+        "Select or deselect channels.");
+
     int nColumns;
 
     if (nChannels <= 8)
@@ -151,6 +173,11 @@ PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelec
     buttonColour = Colours::azure;
 
     contentComponent = std::make_unique<Component>();
+    applySemanticMetadata (
+        *contentComponent,
+        semanticId + ".content",
+        accessibleTitle + " choices",
+        "Available channel selection controls.");
 
     if (channelNames.isEmpty() || channelNames.size() != nChannels)
     {
@@ -172,6 +199,16 @@ PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelec
                 button->setBounds (width / nColumns * j, height / nRows * i, buttonSize, buttonSize);
                 button->setToggleState (channelStates[nColumns * i + j], NotificationType::dontSendNotification);
                 button->setTooltip (channelNames[nColumns * i + j]);
+                const auto channelNumber = nColumns * i + j + 1;
+                const auto description =
+                    "Select or deselect channel " + String (channelNumber)
+                    + " (" + channelNames[nColumns * i + j] + ").";
+                applySemanticMetadata (
+                    *button,
+                    semanticId + ".channel_" + String (channelNumber),
+                    channelNames[nColumns * i + j],
+                    description,
+                    description);
                 button->addListener (this);
                 contentComponent->addAndMakeVisible (button);
 
@@ -189,6 +226,12 @@ PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelec
 
         // Add "SELECT ALL" button
         auto* selectAllButton = new SelectButton ("ALL");
+        applySemanticMetadata (
+            *selectAllButton,
+            semanticId + ".select_all",
+            "Select all channels",
+            "Select all available channels, subject to the selection limit.",
+            "Select all available channels, subject to the selection limit.");
         selectAllButton->setBounds (0, height, widthScaling * width, width / nColumns);
         selectAllButton->addListener (this);
         contentComponent->addAndMakeVisible (selectAllButton);
@@ -196,6 +239,12 @@ PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelec
 
         // Add "SELECT NONE" button
         auto* selectNoneButton = new SelectButton ("NONE");
+        applySemanticMetadata (
+            *selectNoneButton,
+            semanticId + ".select_none",
+            "Select no channels",
+            "Deselect every channel.",
+            "Deselect every channel.");
         selectNoneButton->setBounds (widthScaling * width, height, widthScaling * width, width / nColumns);
         selectNoneButton->addListener (this);
         contentComponent->addAndMakeVisible (selectNoneButton);
@@ -205,6 +254,12 @@ PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelec
         {
             // Add "SELECT RANGE" button
             auto* selectRangeButton = new SelectButton ("RANGE");
+            applySemanticMetadata (
+                *selectRangeButton,
+                semanticId + ".select_range",
+                "Select channel range",
+                "Select the channels entered in the channel range field.",
+                "Select the channels entered in the channel range field.");
             selectRangeButton->setBounds (0.5 * width, height, 0.25 * width, width / nColumns);
             selectRangeButton->addListener (this);
             contentComponent->addAndMakeVisible (selectRangeButton);
@@ -212,6 +267,12 @@ PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelec
 
             // Add Range Editor
             rangeEditor = std::make_unique<RangeEditor> ("Range", FontOptions (12.0f));
+            applySemanticMetadata (
+                *rangeEditor,
+                semanticId + ".range",
+                "Channel range",
+                "Enter channels using ranges such as 1:10 or 2:2:20.",
+                "Enter channels using ranges such as 1:10 or 2:2:20.");
             rangeEditor->setInputRestrictions (0, "0123456789:");
             rangeEditor->setBounds (0.75 * width, height, 0.25 * width, width / nColumns);
             rangeEditor->addListener (this);
@@ -224,6 +285,11 @@ PopupChannelSelector::PopupChannelSelector (Component* parent, PopupChannelSelec
     int scrollBarThickness = 15;
 
     viewport = std::make_unique<Viewport>();
+    applySemanticMetadata (
+        *viewport,
+        semanticId + ".viewport",
+        accessibleTitle + " viewport",
+        "Scroll through the available channel choices.");
     viewport->setViewedComponent (contentComponent.get(), false);
     viewport->setScrollBarsShown (true, false);
     viewport->setScrollBarThickness (scrollBarThickness);
@@ -275,6 +341,9 @@ void PopupChannelSelector::updatePopup()
     }
 
     Array<int> selectedChannels = listener->getSelectedChannels();
+    activeChannels = selectedChannels;
+    const ScopedValueSetter<bool> suppressChannelCallback (isDragging, true);
+
     for (auto* btn : channelButtons)
     {
         if (selectedChannels.contains (btn->getId()))
@@ -360,16 +429,24 @@ void PopupChannelSelector::mouseDrag (const MouseEvent& event)
                 {
                     if (button->getToggleState())
                     {
-                        button->triggerClick();
+                        button->setToggleState (
+                            false,
+                            NotificationType::dontSendNotification);
                         activeChannels.removeFirstMatchingValue (button->getId());
                     }
                     else
                     {
-                        button->triggerClick();
+                        button->setToggleState (
+                            true,
+                            NotificationType::dontSendNotification);
 
-                        if (activeChannels.size() == maxSelectable)
+                        while (activeChannels.size() >= maxSelectable
+                               && ! activeChannels.isEmpty())
                         {
-                            getButtonForId (activeChannels.getFirst())->triggerClick();
+                            getButtonForId (activeChannels.getFirst())
+                                ->setToggleState (
+                                    false,
+                                    NotificationType::dontSendNotification);
                             activeChannels.remove (0);
                         }
 
@@ -382,9 +459,13 @@ void PopupChannelSelector::mouseDrag (const MouseEvent& event)
                     {
                         button->setToggleState (firstButtonSelectedState, NotificationType::dontSendNotification);
 
-                        if (activeChannels.size() == maxSelectable)
+                        while (activeChannels.size() >= maxSelectable
+                               && ! activeChannels.isEmpty())
                         {
-                            getButtonForId (activeChannels.getFirst())->triggerClick();
+                            getButtonForId (activeChannels.getFirst())
+                                ->setToggleState (
+                                    false,
+                                    NotificationType::dontSendNotification);
                             activeChannels.remove (0);
                         }
 
@@ -418,17 +499,26 @@ void PopupChannelSelector::mouseUp (const MouseEvent& event)
             {
                 if (button->getToggleState())
                 {
-                    button->triggerClick();
+                    button->setToggleState (
+                        false,
+                        NotificationType::dontSendNotification);
                     LOGA ("Deselecting channel ", button->getId() + 1);
                     activeChannels.removeFirstMatchingValue (button->getId());
                 }
                 else
                 {
-                    button->triggerClick();
+                    button->setToggleState (
+                        true,
+                        NotificationType::dontSendNotification);
 
-                    if (activeChannels.size() == maxSelectable && maxSelectable != nChannels)
+                    while (activeChannels.size() >= maxSelectable
+                           && maxSelectable != nChannels
+                           && ! activeChannels.isEmpty())
                     {
-                        getButtonForId (activeChannels.getFirst())->triggerClick();
+                        getButtonForId (activeChannels.getFirst())
+                            ->setToggleState (
+                                false,
+                                NotificationType::dontSendNotification);
                         activeChannels.remove (0);
                     }
 
@@ -477,9 +567,12 @@ void PopupChannelSelector::textEditorReturnKeyPressed (TextEditor& editor)
             {
                 channelButtons[ch]->setToggleState (true, NotificationType::dontSendNotification);
 
-                if (activeChannels.size() == maxSelectable)
+                while (activeChannels.size() >= maxSelectable
+                       && ! activeChannels.isEmpty())
                 {
-                    getButtonForId (activeChannels.getFirst())->triggerClick();
+                    getButtonForId (activeChannels.getFirst())->setToggleState (
+                        false,
+                        NotificationType::dontSendNotification);
                     activeChannels.remove (0);
                 }
 
@@ -530,9 +623,42 @@ void PopupChannelSelector::buttonClicked (Button* button)
             button->setToggleState (true, NotificationType::dontSendNotification);
             this->textEditorReturnKeyPressed (*rangeEditor);
         }
-        else //channel button was manually selected
+        else if (auto* channelButton = dynamic_cast<ChannelButton*> (button))
         {
-            //TODO: Update text box with range string
+            if (isDragging || mouseDragged)
+                return;
+
+            const auto channelId = channelButton->getId();
+
+            if (channelButton->getToggleState())
+            {
+                if (maxSelectable <= 0)
+                {
+                    channelButton->setToggleState (
+                        false,
+                        NotificationType::dontSendNotification);
+                    return;
+                }
+
+                while (activeChannels.size() >= maxSelectable
+                       && ! activeChannels.isEmpty())
+                {
+                    const auto removedChannel = activeChannels.getFirst();
+                    getButtonForId (removedChannel)->setToggleState (
+                        false,
+                        NotificationType::dontSendNotification);
+                    activeChannels.remove (0);
+                }
+
+                if (! activeChannels.contains (channelId))
+                    activeChannels.add (channelId);
+            }
+            else
+            {
+                activeChannels.removeFirstMatchingValue (channelId);
+            }
+
+            listener->channelStateChanged (activeChannels);
         }
 
         //rangeEditor->setText(rangeString);

@@ -14,6 +14,7 @@ add_sources(${COMPONENT_NAME}_tests
 		MainDocumentWindowAccessibilityTests.cpp
 		MessageWindowAccessibilityTests.cpp
 		ParameterEditorAccessibilityTests.cpp
+		PopupChannelSelectorAccessibilityTests.cpp
 		ProcessorListAccessibilityTests.cpp
 		SyncLineSelectorAccessibilityTests.cpp
 		SemanticComponentTests.cpp
