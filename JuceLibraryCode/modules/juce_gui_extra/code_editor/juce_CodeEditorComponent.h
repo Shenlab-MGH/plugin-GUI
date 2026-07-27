@@ -479,6 +479,11 @@ private:
 
     int indexToColumn (int line, int index) const noexcept;
     int columnToIndex (int line, int column) const noexcept;
+    void togglePopupMenu();
+    void showPopupMenu (const MouseEvent*);
+    static void popupMenuFinished (int, CodeEditorComponent*);
+
+    bool popupMenuActive = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CodeEditorComponent)
 };

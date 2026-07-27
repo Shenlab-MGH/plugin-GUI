@@ -19,6 +19,70 @@ TEST (ChromeAccessibilityTests, ExposesConsoleOutputAndActions)
     EXPECT_EQ (clear.getTitle(), "Clear console output");
 }
 
+TEST (ChromeAccessibilityTests, ExposesConsoleContextMenuMeaning)
+{
+    CodeDocument document;
+    ConsoleEditor editor (document);
+    PopupMenu menu;
+
+    editor.addPopupMenuItems (menu, nullptr);
+
+    PopupMenu::MenuItemIterator iterator (menu);
+
+    ASSERT_TRUE (iterator.next());
+    EXPECT_EQ (iterator.getItem().accessibilityId,
+               "oe.console.context.copy");
+    EXPECT_EQ (iterator.getItem().accessibilityDescription,
+               "Copy the selected console text.");
+
+    ASSERT_TRUE (iterator.next());
+    EXPECT_EQ (iterator.getItem().accessibilityId,
+               "oe.console.context.select_all");
+    EXPECT_EQ (iterator.getItem().accessibilityDescription,
+               "Select all console text.");
+
+    ASSERT_TRUE (iterator.next());
+    EXPECT_TRUE (iterator.getItem().isSeparator);
+
+    ASSERT_TRUE (iterator.next());
+    EXPECT_EQ (iterator.getItem().accessibilityId,
+               "oe.console.context.reset_font_size");
+    EXPECT_EQ (iterator.getItem().accessibilityDescription,
+               "Reset the console font size to 14 points.");
+}
+
+TEST (ChromeAccessibilityTests, OpensConsoleContextMenuThroughAccessibility)
+{
+    CodeDocument document;
+    ConsoleEditor editor (document);
+
+    auto handler = editor.createAccessibilityHandler();
+
+    ASSERT_NE (handler, nullptr);
+    EXPECT_NE (handler->getTextInterface(), nullptr);
+    EXPECT_TRUE (handler->getCurrentState().isExpandable());
+    EXPECT_TRUE (handler->getCurrentState().isCollapsed());
+    EXPECT_TRUE (
+        handler->getActions().contains (AccessibilityActionType::showMenu));
+}
+
+TEST (ChromeAccessibilityTests, CollapsesAnOpenConsoleContextMenu)
+{
+    CodeDocument document;
+    ConsoleEditor editor (document);
+
+    auto handler = editor.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    ASSERT_TRUE (
+        handler->getActions().invoke (AccessibilityActionType::showMenu));
+    EXPECT_TRUE (handler->getCurrentState().isExpanded());
+
+    ASSERT_TRUE (
+        handler->getActions().invoke (AccessibilityActionType::showMenu));
+    EXPECT_TRUE (handler->getCurrentState().isCollapsed());
+}
+
 TEST (ChromeAccessibilityTests, ExposesMessageCenterToggleAndEditorControls)
 {
     MessageCenterButton toggle;

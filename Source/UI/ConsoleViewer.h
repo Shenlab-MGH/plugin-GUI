@@ -56,17 +56,38 @@ public:
         setMouseCursor (MouseCursor::NormalCursor);
     }
 
-    void addPopupMenuItems (PopupMenu& m, const MouseEvent*)
+    void addPopupMenuItems (PopupMenu& m, const MouseEvent*) override
     {
-        m.addItem (StandardApplicationCommandIDs::copy, TRANS ("Copy"), ! getHighlightedRegion().isEmpty());
-        m.addItem (StandardApplicationCommandIDs::selectAll, TRANS ("Select All"));
+        PopupMenu::Item copyItem (TRANS ("Copy"));
+        copyItem.itemID = StandardApplicationCommandIDs::copy;
+        copyItem.isEnabled = ! getHighlightedRegion().isEmpty();
+        copyItem.accessibilityId = "oe.console.context.copy";
+        copyItem.accessibilityDescription = "Copy the selected console text.";
+        copyItem.accessibilityHelp = copyItem.accessibilityDescription;
+        m.addItem (std::move (copyItem));
+
+        PopupMenu::Item selectAllItem (TRANS ("Select All"));
+        selectAllItem.itemID = StandardApplicationCommandIDs::selectAll;
+        selectAllItem.accessibilityId = "oe.console.context.select_all";
+        selectAllItem.accessibilityDescription = "Select all console text.";
+        selectAllItem.accessibilityHelp = selectAllItem.accessibilityDescription;
+        m.addItem (std::move (selectAllItem));
 
         m.addSeparator();
-        
-        m.addItem (3, "Reset Font Size", getFont().getHeight() != 14.0f);
+
+        PopupMenu::Item resetFontItem ("Reset Font Size");
+        resetFontItem.itemID = 3;
+        resetFontItem.isEnabled = getFont().getHeight() != 14.0f;
+        resetFontItem.accessibilityId =
+            "oe.console.context.reset_font_size";
+        resetFontItem.accessibilityDescription =
+            "Reset the console font size to 14 points.";
+        resetFontItem.accessibilityHelp =
+            resetFontItem.accessibilityDescription;
+        m.addItem (std::move (resetFontItem));
     }
 
-    void performPopupMenuAction (int menuItemID)
+    void performPopupMenuAction (int menuItemID) override
     {
         if (menuItemID == StandardApplicationCommandIDs::copy)
             copyToClipboard();

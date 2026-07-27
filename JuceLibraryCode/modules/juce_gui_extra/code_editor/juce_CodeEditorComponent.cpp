@@ -43,9 +43,22 @@ public:
         : AccessibilityHandler (codeEditorComponentToWrap,
                                 codeEditorComponentToWrap.isReadOnly() ? AccessibilityRole::staticText
                                                                        : AccessibilityRole::editableText,
-                                {},
+                                AccessibilityActions().addAction (
+                                    AccessibilityActionType::showMenu,
+                                    [&codeEditorComponentToWrap]
+                                    {
+                                        codeEditorComponentToWrap.togglePopupMenu();
+                                    }),
                                 { std::make_unique<CodeEditorComponentTextInterface> (codeEditorComponentToWrap) })
     {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto state = AccessibilityHandler::getCurrentState().withExpandable();
+
+        return codeEditorComponent.popupMenuActive ? state.withExpanded()
+                                                   : state.withCollapsed();
     }
 
 private:
@@ -123,6 +136,9 @@ private:
     };
 
     //==============================================================================
+    CodeEditorComponent& codeEditorComponent =
+        static_cast<CodeEditorComponent&> (getComponent());
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CodeEditorAccessibilityHandler)
 };
 
@@ -1534,10 +1550,56 @@ void CodeEditorComponent::performPopupMenuAction (const int menuItemID)
     performCommand (menuItemID);
 }
 
-static void codeEditorMenuCallback (int menuResult, CodeEditorComponent* editor)
+void CodeEditorComponent::popupMenuFinished (int menuResult,
+                                             CodeEditorComponent* editor)
 {
-    if (editor != nullptr && menuResult != 0)
+    if (editor == nullptr)
+        return;
+
+    editor->popupMenuActive = false;
+
+    if (auto* handler = editor->getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::structureChanged);
+
+    if (menuResult != 0)
         editor->performPopupMenuAction (menuResult);
+}
+
+void CodeEditorComponent::togglePopupMenu()
+{
+    if (! popupMenuActive)
+    {
+        showPopupMenu (nullptr);
+        return;
+    }
+
+    popupMenuActive = false;
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::structureChanged);
+
+    PopupMenu::dismissAllActiveMenus();
+}
+
+void CodeEditorComponent::showPopupMenu (const MouseEvent* event)
+{
+    PopupMenu menu;
+    menu.setLookAndFeel (&getLookAndFeel());
+    addPopupMenuItems (menu, event);
+
+    popupMenuActive = true;
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::structureChanged);
+
+    auto options = PopupMenu::Options();
+
+    if (event == nullptr)
+        options = options.withTargetComponent (this);
+
+    menu.showMenuAsync (
+        options,
+        ModalCallbackFunction::forComponent (popupMenuFinished, this));
 }
 
 //==============================================================================
@@ -1559,12 +1621,7 @@ void CodeEditorComponent::mouseDown (const MouseEvent& e)
                 selectRegion (start, end);
         }
 
-        PopupMenu m;
-        m.setLookAndFeel (&getLookAndFeel());
-        addPopupMenuItems (m, &e);
-
-        m.showMenuAsync (PopupMenu::Options(),
-                         ModalCallbackFunction::forComponent (codeEditorMenuCallback, this));
+        showPopupMenu (&e);
     }
     else
     {
