@@ -539,7 +539,18 @@ public:
     {
     }
 
-    String getTitle() const override  { return label.getText(); }
+    String getTitle() const override
+    {
+        if (label.isEditable())
+        {
+            const auto title = AccessibilityHandler::getTitle();
+
+            if (title.isNotEmpty())
+                return title;
+        }
+
+        return label.getText();
+    }
     String getHelp() const override   { return label.getTooltip(); }
 
     AccessibleState getCurrentState() const override
@@ -559,9 +570,22 @@ private:
         {
         }
 
-        bool isReadOnly() const override                 { return true; }
+        bool isReadOnly() const override                 { return ! label.isEditable(); }
         String getCurrentValueAsString() const override  { return label.getText(); }
-        void setValueAsString (const String&) override   {}
+        void setValueAsString (const String& newText) override
+        {
+            if (label.isEditable())
+            {
+                const auto maxLength = static_cast<int> (
+                    label.getProperties().getWithDefault (
+                        "accessibilityMaxTextLength",
+                        0));
+                label.setText (maxLength > 0
+                                   ? newText.substring (0, maxLength)
+                                   : newText,
+                               sendNotification);
+            }
+        }
 
     private:
         Label& label;

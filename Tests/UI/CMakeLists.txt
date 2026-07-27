@@ -10,6 +10,7 @@ add_sources(${COMPONENT_NAME}_tests
 		ChromeAccessibilityTests.cpp
 		DefaultConfigAccessibilityTests.cpp
 		MainDocumentWindowAccessibilityTests.cpp
+		MessageWindowAccessibilityTests.cpp
 		ParameterEditorAccessibilityTests.cpp
 		ProcessorListAccessibilityTests.cpp
 		SemanticComponentTests.cpp

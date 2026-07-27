@@ -273,6 +273,23 @@ std::vector<AccessibilityHandler*> AccessibilityHandler::getChildren() const
             addChildComponentHandler (focusableChild, children);
     }
 
+    const auto addDisabledChildren = [&] (const auto& self, Component& parent) -> void
+    {
+        for (auto* child : parent.getChildren())
+        {
+            if (! child->isVisible())
+                continue;
+
+            if (! child->isEnabled())
+                addChildComponentHandler (child, children);
+
+            if (! child->isFocusContainer())
+                self (self, *child);
+        }
+    };
+
+    addDisabledChildren (addDisabledChildren, component);
+
     return children;
 }
 

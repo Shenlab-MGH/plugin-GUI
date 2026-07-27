@@ -25,8 +25,20 @@
 #define MESSAGEWINDOW_H_INCLUDED
 
 #include "../../JuceLibraryCode/JuceHeader.h"
+#include "../TestableExport.h"
 
 class UIComponent;
+
+TESTABLE void configureMessageWindowAccessibility (
+    Component& content,
+    Label& timestamp,
+    Button& resetTimestamp,
+    Label& message,
+    Button& send,
+    ComboBox& savedMessages,
+    Button& clearSavedMessages);
+
+TESTABLE void configureMessageWindowDialogAccessibility (Component& window);
 
 /** 
 

@@ -28,7 +28,70 @@
 #include "../CoreServices.h"
 #include "../Processors/MessageCenter/MessageCenter.h"
 
+#include "SemanticComponent.h"
 #include "UIComponent.h"
+
+//-----------------------------------------------------------------------
+
+void configureMessageWindowAccessibility (
+    Component& content,
+    Label& timestamp,
+    Button& resetTimestamp,
+    Label& message,
+    Button& send,
+    ComboBox& savedMessages,
+    Button& clearSavedMessages)
+{
+    applySemanticMetadata (
+        content,
+        "oe.dialog.message.content",
+        "Message controls",
+        "Compose and broadcast a timestamped message to the signal chain.");
+    applySemanticMetadata (
+        timestamp,
+        "oe.dialog.message.timestamp",
+        "Message timestamp",
+        "Recording-relative timestamp or recording availability for the message.");
+    applySemanticMetadata (
+        resetTimestamp,
+        "oe.dialog.message.reset_timestamp",
+        "Reset message timestamp",
+        "Reset the message timestamp to the current recording time.",
+        "Available while recording.");
+    applySemanticMetadata (
+        message,
+        "oe.dialog.message.text",
+        "Message text",
+        "Editable message to broadcast to processors.",
+        "Enter up to 490 characters.");
+    message.getProperties().set ("accessibilityMaxTextLength", 490);
+    applySemanticMetadata (
+        send,
+        "oe.dialog.message.send",
+        "Send message",
+        "Broadcast the message to all processors in the signal chain.",
+        "Available while acquisition is active.");
+    applySemanticMetadata (
+        savedMessages,
+        "oe.dialog.message.saved_messages",
+        "Saved messages",
+        "Choose a previously saved message.");
+    applySemanticMetadata (
+        clearSavedMessages,
+        "oe.dialog.message.clear_saved_messages",
+        "Clear saved messages",
+        "Remove every saved message from the selector.",
+        "This clears the saved-message list.");
+}
+
+void configureMessageWindowDialogAccessibility (Component& window)
+{
+    applySemanticMetadata (
+        window,
+        "oe.dialog.message",
+        "Message window",
+        "Compose and broadcast a timestamped Open Ephys message.");
+}
 
 //-----------------------------------------------------------------------
 
@@ -62,6 +125,7 @@ void MessageWindow::launch()
     options.resizable = false;
 
     auto* window = options.launchAsync();
+    configureMessageWindowDialogAccessibility (*window);
     window->setAlwaysOnTop (true);
     messageWindow = window;
 }
@@ -116,6 +180,14 @@ MessageWindowComponent::MessageWindowComponent()
     clearSavedMessagesButton->setButtonText ("Clear");
     clearSavedMessagesButton->addListener (this);
     addAndMakeVisible (clearSavedMessagesButton.get());
+
+    configureMessageWindowAccessibility (*this,
+                                         *timestampLabel,
+                                         *timestampResetButton,
+                                         *messageLabel,
+                                         *sendMessageButton,
+                                         *savedMessageSelector,
+                                         *clearSavedMessagesButton);
 }
 
 MessageWindowComponent::~MessageWindowComponent()

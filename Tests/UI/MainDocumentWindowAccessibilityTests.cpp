@@ -1,4 +1,5 @@
 #include "../../Source/MainWindow.h"
+#include "../../Source/UI/SemanticComponent.h"
 #include "gtest/gtest.h"
 
 namespace
@@ -102,4 +103,37 @@ TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheApplicationMenuBar)
     for (int index = 0; index < expectedIds.size(); ++index)
         EXPECT_EQ (menuBar.getChildComponent (index)->getComponentID(),
                    expectedIds[index]);
+}
+
+TEST_F (MainDocumentWindowAccessibilityTests, KeepsDisabledSemanticControlsDiscoverable)
+{
+    Component content;
+    TextButton unavailable ("Unavailable action");
+
+    content.setSize (300, 200);
+    content.setFocusContainerType (Component::FocusContainerType::focusContainer);
+    content.addAndMakeVisible (unavailable);
+    unavailable.setBounds (10, 10, 120, 30);
+    unavailable.setEnabled (false);
+    applySemanticMetadata (unavailable,
+                           "oe.test.unavailable",
+                           "Unavailable action",
+                           "Action exists but is not currently available.");
+    content.addToDesktop (0);
+
+    auto* contentHandler = content.getAccessibilityHandler();
+    ASSERT_NE (contentHandler, nullptr);
+
+    const auto children = contentHandler->getChildren();
+    const auto unavailableHandler = std::find_if (
+        children.begin(),
+        children.end(),
+        [] (const AccessibilityHandler* handler)
+        {
+            return handler->getComponent().getComponentID()
+                   == "oe.test.unavailable";
+        });
+
+    ASSERT_NE (unavailableHandler, children.end());
+    EXPECT_FALSE ((*unavailableHandler)->isEnabled());
 }
