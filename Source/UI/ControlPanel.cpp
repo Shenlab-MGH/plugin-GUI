@@ -69,6 +69,52 @@ public:
 private:
     std::function<String()> getValue;
 };
+
+void configureRecordingDirectoryAccessibility (FilenameComponent& component)
+{
+    for (auto* child : component.getChildren())
+    {
+        if (auto* directory = dynamic_cast<ComboBox*> (child))
+        {
+            applySemanticMetadata (
+                *directory,
+                "oe.control.recording.directory",
+                "Recording directory",
+                "Choose the parent directory inherited by new Record Nodes.");
+        }
+        else if (auto* browse = dynamic_cast<Button*> (child))
+        {
+            applySemanticMetadata (
+                *browse,
+                "oe.control.recording.directory.browse",
+                "Browse recording directory",
+                "Choose the parent recording directory.");
+        }
+    }
+}
+
+class RecordingDirectoryComponent final : public FilenameComponent
+{
+public:
+    explicit RecordingDirectoryComponent (const File& currentDirectory)
+        : FilenameComponent ("folder selector",
+                             currentDirectory,
+                             true,
+                             true,
+                             true,
+                             "*",
+                             "",
+                             "")
+    {
+        configureRecordingDirectoryAccessibility (*this);
+    }
+
+    void lookAndFeelChanged() override
+    {
+        FilenameComponent::lookAndFeelChanged();
+        configureRecordingDirectoryAccessibility (*this);
+    }
+};
 } // namespace
 
 NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
@@ -582,14 +628,7 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
 
     const File dataDirectory = CoreServices::getDefaultUserSaveDirectory();
 
-    filenameComponent = std::make_unique<FilenameComponent> ("folder selector",
-                                                             dataDirectory.getFullPathName(),
-                                                             true,
-                                                             true,
-                                                             true,
-                                                             "*",
-                                                             "",
-                                                             "");
+    filenameComponent = std::make_unique<RecordingDirectoryComponent> (dataDirectory);
     filenameComponent->addListener (this);
     addChildComponent (filenameComponent.get());
 

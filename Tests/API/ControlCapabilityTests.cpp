@@ -11,6 +11,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         "oe.control.recording",
         "oe.control.recording.options",
         "oe.control.recording.filename",
+        "oe.control.recording.directory",
         "oe.control.recording.new_directory",
         "oe.control.recording.force_new_directory",
         "oe.status.cpu_usage",
@@ -36,7 +37,7 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
     ASSERT_TRUE (document["capabilities"].is_array());
-    ASSERT_EQ (document["capabilities"].size(), 9);
+    ASSERT_EQ (document["capabilities"].size(), 10);
 
     const auto acquisition = std::find_if (document["capabilities"].begin(),
                                            document["capabilities"].end(),
@@ -55,6 +56,24 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
     ASSERT_NE (newDirectory, document["capabilities"].end());
     EXPECT_EQ ((*newDirectory)["api"][0]["response_fields"][1],
                "new_directory_request_available");
+
+    const auto recordingDirectory = std::find_if (
+        document["capabilities"].begin(),
+        document["capabilities"].end(),
+        [] (const auto& item)
+        { return item["id"] == "oe.control.recording.directory"; });
+    ASSERT_NE (recordingDirectory, document["capabilities"].end());
+    EXPECT_EQ ((*recordingDirectory)["kind"], "value");
+    EXPECT_EQ ((*recordingDirectory)["uia"]["automation_id"],
+               "oe.control.recording.directory");
+    ASSERT_EQ ((*recordingDirectory)["api"].size(), 2);
+    EXPECT_EQ ((*recordingDirectory)["api"][0]["method"], "GET");
+    EXPECT_EQ ((*recordingDirectory)["api"][0]["path"], "/api/recording");
+    EXPECT_EQ ((*recordingDirectory)["api"][0]["response_fields"][0],
+               "parent_directory");
+    EXPECT_EQ ((*recordingDirectory)["api"][1]["method"], "PUT");
+    EXPECT_EQ ((*recordingDirectory)["api"][1]["request_fields"][0],
+               "parent_directory");
 }
 
 TEST (ControlCapabilityTests, CalculatesBoundedDiskUsage)

@@ -19,6 +19,20 @@ void expectSemanticButton (Button& button,
     EXPECT_EQ (button.getDescription(), expectedDescription);
     EXPECT_TRUE (button.isAccessible());
 }
+
+Component* findDescendantById (Component& parent, const String& componentId)
+{
+    for (auto* child : parent.getChildren())
+    {
+        if (child->getComponentID() == componentId)
+            return child;
+
+        if (auto* descendant = findDescendantById (*child, componentId))
+            return descendant;
+    }
+
+    return nullptr;
+}
 } // namespace
 
 TEST (ControlPanelAccessibilityTests, ExposesGlobalActionButtons)
@@ -150,4 +164,46 @@ TEST (ControlPanelAccessibilityTests, SharesForceNewDirectoryStateWithTheButton)
 
     panel.setRecordingOptionsExpanded (true);
     EXPECT_TRUE (panel.getRecordingOptionsStatus().expanded);
+}
+
+TEST (ControlPanelAccessibilityTests, ExposesRecordingDirectoryEditorAndBrowser)
+{
+    ControlPanel panel (nullptr, nullptr, true);
+
+    auto* directory = findDescendantById (panel, "oe.control.recording.directory");
+    ASSERT_NE (directory, nullptr);
+    EXPECT_NE (dynamic_cast<ComboBox*> (directory), nullptr);
+    EXPECT_EQ (directory->getTitle(), "Recording directory");
+    EXPECT_EQ (directory->getDescription(),
+               "Choose the parent directory inherited by new Record Nodes.");
+    auto directoryHandler = directory->createAccessibilityHandler();
+    ASSERT_NE (directoryHandler, nullptr);
+    EXPECT_EQ (directoryHandler->getRole(), AccessibilityRole::comboBox);
+    ASSERT_NE (directoryHandler->getValueInterface(), nullptr);
+    EXPECT_EQ (directoryHandler->getValueInterface()->getCurrentValueAsString(),
+               panel.getRecordingParentDirectory().getFullPathName());
+
+    auto* browse = findDescendantById (panel, "oe.control.recording.directory.browse");
+    ASSERT_NE (browse, nullptr);
+    EXPECT_NE (dynamic_cast<Button*> (browse), nullptr);
+    EXPECT_EQ (browse->getTitle(), "Browse recording directory");
+    EXPECT_EQ (browse->getDescription(), "Choose the parent recording directory.");
+    auto browseHandler = browse->createAccessibilityHandler();
+    ASSERT_NE (browseHandler, nullptr);
+    EXPECT_EQ (browseHandler->getRole(), AccessibilityRole::button);
+}
+
+TEST (ControlPanelAccessibilityTests, RetainsRecordingDirectorySemanticsAfterLookAndFeelChanges)
+{
+    ControlPanel panel (nullptr, nullptr, true);
+
+    auto* directory = findDescendantById (panel, "oe.control.recording.directory");
+    ASSERT_NE (directory, nullptr);
+    auto* filenameComponent = dynamic_cast<FilenameComponent*> (directory->getParentComponent());
+    ASSERT_NE (filenameComponent, nullptr);
+
+    filenameComponent->lookAndFeelChanged();
+
+    EXPECT_NE (findDescendantById (panel, "oe.control.recording.directory"), nullptr);
+    EXPECT_NE (findDescendantById (panel, "oe.control.recording.directory.browse"), nullptr);
 }
