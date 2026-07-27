@@ -16,6 +16,7 @@ add_sources(${COMPONENT_NAME}_tests
 		ProcessorListAccessibilityTests.cpp
 		SyncLineSelectorAccessibilityTests.cpp
 		SemanticComponentTests.cpp
+		TTLMonitorAccessibilityTests.cpp
 )
 target_include_directories(
 		${COMPONENT_NAME}_tests

@@ -52,6 +52,9 @@ public:
     /** Turns a bit display on or off*/
     void setState (bool state);
 
+    /** Exposes the current bit state to accessibility clients */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
     /** Renders the state of a single bit*/
     void paint (Graphics& g);
 
