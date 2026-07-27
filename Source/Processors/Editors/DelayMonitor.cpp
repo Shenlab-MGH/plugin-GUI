@@ -23,12 +23,17 @@
 
 #include "DelayMonitor.h"
 #include "../../UI/LookAndFeel/CustomLookAndFeel.h"
+#include "../../UI/SemanticComponent.h"
 
 DelayMonitor::DelayMonitor() : delay (0.0f),
                                isEnabled (true),
                                colour (Colours::white)
 {
     setInterceptsMouseClicks (false, false);
+    setAccessibilityContext (
+        "oe.status.processing_delay",
+        "Processing delay",
+        "Elapsed processing time for this data stream.");
 }
 
 DelayMonitor::~DelayMonitor()
@@ -38,6 +43,16 @@ DelayMonitor::~DelayMonitor()
 void DelayMonitor::setDelay (float delayMs)
 {
     delay = delayMs;
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
+}
+
+void DelayMonitor::setAccessibilityContext (StringRef semanticId,
+                                            StringRef title,
+                                            StringRef description)
+{
+    applySemanticMetadata (*this, semanticId, title, description);
 }
 
 void DelayMonitor::setEnabled (bool state)
@@ -65,6 +80,14 @@ void DelayMonitor::stopAcquisition()
 void DelayMonitor::timerCallback()
 {
     repaint();
+}
+
+std::unique_ptr<AccessibilityHandler> DelayMonitor::createAccessibilityHandler()
+{
+    return createReadOnlyTextAccessibilityHandler (
+        *this,
+        [this]
+        { return String (delay, 2) + " ms"; });
 }
 
 void DelayMonitor::paint (Graphics& g)

@@ -112,4 +112,20 @@ TEST (GenericEditorAccessibilityTests, ScopesStreamStatusControlsToProcessorAndS
                "Current digital event state for Probe AP.");
     EXPECT_EQ (ttlMonitor->getChildComponent (0)->getComponentID(),
                expectedId + ".line_1");
+
+    auto* delayMonitor = selector.getDelayMonitor (&stream);
+    ASSERT_NE (delayMonitor, nullptr);
+    EXPECT_EQ (
+        delayMonitor->getComponentID(),
+        "oe.processor.100.streams.stream_probe_ap.processing_delay");
+    EXPECT_EQ (delayMonitor->getTitle(), "Probe AP processing delay");
+    EXPECT_EQ (delayMonitor->getDescription(),
+               "Processing delay for Probe AP.");
+
+    auto delayHandler = delayMonitor->createAccessibilityHandler();
+    ASSERT_NE (delayHandler, nullptr);
+    ASSERT_NE (delayHandler->getValueInterface(), nullptr);
+    EXPECT_EQ (
+        delayHandler->getValueInterface()->getCurrentValueAsString(),
+        "0.00 ms");
 }

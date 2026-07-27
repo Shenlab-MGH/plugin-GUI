@@ -107,6 +107,26 @@ TEST (SemanticComponentTests, CreatesReadOnlyProgressSemantics)
     EXPECT_DOUBLE_EQ (range->getCurrentValue(), 1.0);
 }
 
+TEST (SemanticComponentTests, CreatesReadOnlyTextSemantics)
+{
+    Component status;
+    String value = "idle";
+    auto handler = createReadOnlyTextAccessibilityHandler (
+        status,
+        [&] { return value; });
+
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::staticText);
+
+    auto* text = handler->getValueInterface();
+    ASSERT_NE (text, nullptr);
+    EXPECT_TRUE (text->isReadOnly());
+    EXPECT_EQ (text->getCurrentValueAsString(), "idle");
+
+    value = "active";
+    EXPECT_EQ (text->getCurrentValueAsString(), "active");
+}
+
 TEST (SemanticComponentTests, PreservesPopupMenuAccessibilityMetadata)
 {
     PopupMenu menu;

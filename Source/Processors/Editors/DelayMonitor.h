@@ -52,8 +52,16 @@ public:
     /** Sets the most recent delay (in ms)*/
     void setDelay (float delayMs);
 
+    /** Scopes published accessibility IDs and meaning to a data stream */
+    void setAccessibilityContext (StringRef semanticId,
+                                  StringRef title,
+                                  StringRef description);
+
     /** Enable or disable this component*/
     void setEnabled (bool isEnabled);
+
+    /** Exposes the formatted delay to accessibility clients */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
     /** Render the delay*/
     void paint (Graphics& g);

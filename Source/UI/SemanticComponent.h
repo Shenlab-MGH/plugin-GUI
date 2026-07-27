@@ -36,6 +36,11 @@ createReadOnlyProgressAccessibilityHandler (
     Component& component,
     std::function<double()> getValue);
 
+TESTABLE std::unique_ptr<AccessibilityHandler>
+createReadOnlyTextAccessibilityHandler (
+    Component& component,
+    std::function<String()> getValue);
+
 TESTABLE void addSemanticCommandItem (
     PopupMenu& menu,
     ApplicationCommandManager* commandManager,

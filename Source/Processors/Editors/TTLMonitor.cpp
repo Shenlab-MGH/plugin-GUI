@@ -26,25 +26,6 @@
 #include "GenericEditor.h"
 #include "../../UI/SemanticComponent.h"
 
-namespace
-{
-class ReadOnlyTTLStateValue final : public AccessibilityTextValueInterface
-{
-public:
-    explicit ReadOnlyTTLStateValue (std::function<String()> getValueIn)
-        : getValue (std::move (getValueIn))
-    {
-    }
-
-    bool isReadOnly() const override { return true; }
-    void setValueAsString (const String&) override { jassertfalse; }
-    String getCurrentValueAsString() const override { return getValue(); }
-
-private:
-    std::function<String()> getValue;
-};
-} // namespace
-
 TTLBitDisplay::TTLBitDisplay (Colour colour_, String tooltipString_)
     : colour (colour_),
       tooltipString (tooltipString_),
@@ -70,14 +51,10 @@ void TTLBitDisplay::setState (bool state_)
 
 std::unique_ptr<AccessibilityHandler> TTLBitDisplay::createAccessibilityHandler()
 {
-    return std::make_unique<AccessibilityHandler> (
+    return createReadOnlyTextAccessibilityHandler (
         *this,
-        AccessibilityRole::staticText,
-        AccessibilityActions {},
-        AccessibilityHandler::Interfaces {
-            std::make_unique<ReadOnlyTTLStateValue> (
-                [this]
-                { return state ? "active" : "inactive"; }) });
+        [this]
+        { return state ? "active" : "inactive"; });
 }
 
 void TTLBitDisplay::paint (Graphics& g)

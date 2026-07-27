@@ -47,6 +47,22 @@ public:
 private:
     std::function<double()> getValue;
 };
+
+class ReadOnlyTextValue final : public AccessibilityTextValueInterface
+{
+public:
+    explicit ReadOnlyTextValue (std::function<String()> getValueIn)
+        : getValue (std::move (getValueIn))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (const String&) override { jassertfalse; }
+    String getCurrentValueAsString() const override { return getValue(); }
+
+private:
+    std::function<String()> getValue;
+};
 } // namespace
 
 bool isValidSemanticId (StringRef id)
@@ -129,6 +145,19 @@ createReadOnlyProgressAccessibilityHandler (
         AccessibilityActions {},
         AccessibilityHandler::Interfaces {
             std::make_unique<ReadOnlyProgressValue> (std::move (getValue)) });
+}
+
+std::unique_ptr<AccessibilityHandler>
+createReadOnlyTextAccessibilityHandler (
+    Component& component,
+    std::function<String()> getValue)
+{
+    return std::make_unique<AccessibilityHandler> (
+        component,
+        AccessibilityRole::staticText,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces {
+            std::make_unique<ReadOnlyTextValue> (std::move (getValue)) });
 }
 
 void addSemanticCommandItem (

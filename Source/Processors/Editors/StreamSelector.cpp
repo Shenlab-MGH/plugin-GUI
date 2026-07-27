@@ -41,6 +41,13 @@ String getStreamSelectorSemanticId (const GenericEditor& editor)
         editor.getProcessor()->getNodeId(),
         "streams");
 }
+
+String getStreamSemanticId (const GenericEditor& editor,
+                            const DataStream& stream)
+{
+    return getStreamSelectorSemanticId (editor)
+           + ".stream_" + sanitiseSemanticSegment (stream.getName());
+}
 } // namespace
 
 StreamTableModel::StreamTableModel (StreamSelectorTable* owner_)
@@ -132,6 +139,13 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
             delayMonitor = new DelayMonitor();
         }
 
+        const auto* stream = streams[rowNumber];
+        delayMonitor->setAccessibilityContext (
+            getStreamSemanticId (*owner->editor, *stream)
+                + ".processing_delay",
+            stream->getName() + " processing delay",
+            "Processing delay for " + stream->getName() + ".");
+
         return delayMonitor;
     }
     else if (columnId == StreamTableModel::Columns::TTL_LINE_STATES)
@@ -144,8 +158,7 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
         }
 
         const auto* stream = streams[rowNumber];
-        const auto streamId = getStreamSelectorSemanticId (*owner->editor)
-                              + ".stream_" + sanitiseSemanticSegment (stream->getName())
+        const auto streamId = getStreamSemanticId (*owner->editor, *stream)
                               + ".ttl_lines";
         ttlMonitor->setAccessibilityContext (
             streamId,
