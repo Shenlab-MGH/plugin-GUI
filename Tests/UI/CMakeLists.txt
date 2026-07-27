@@ -5,6 +5,7 @@ add_sources(${COMPONENT_NAME}_tests
 		ControlPanelAccessibilityTests.cpp
 		GenericEditorAccessibilityTests.cpp
 		EditorViewportAccessibilityTests.cpp
+		FilenameConfigAccessibilityTests.cpp
 		AudioEditorAccessibilityTests.cpp
 		AutoUpdaterAccessibilityTests.cpp
 		ChromeAccessibilityTests.cpp

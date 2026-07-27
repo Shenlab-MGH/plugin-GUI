@@ -271,9 +271,30 @@ void CallOutBox::timerCallback()
 }
 
 //==============================================================================
+class CallOutBoxAccessibilityHandler final : public AccessibilityHandler
+{
+public:
+    explicit CallOutBoxAccessibilityHandler (CallOutBox& callout)
+        : AccessibilityHandler (
+              callout,
+              AccessibilityRole::dialogWindow,
+              AccessibilityActions().addAction (
+                  AccessibilityActionType::showMenu,
+                  [&callout] { callout.dismiss(); }))
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        return AccessibilityHandler::getCurrentState()
+            .withExpandable()
+            .withExpanded();
+    }
+};
+
 std::unique_ptr<AccessibilityHandler> CallOutBox::createAccessibilityHandler()
 {
-    return std::make_unique<AccessibilityHandler> (*this, AccessibilityRole::dialogWindow);
+    return std::make_unique<CallOutBoxAccessibilityHandler> (*this);
 }
 
 } // namespace juce

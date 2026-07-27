@@ -25,6 +25,18 @@
 #define __FILENAMECONFIGWINDOW_H_F0BD2DD9__
 
 #include "../../JuceLibraryCode/JuceHeader.h"
+#include "../TestableExport.h"
+
+TESTABLE void configureFilenameFieldAccessibility (
+    Component& row,
+    Label& typeLabel,
+    Button& mode,
+    Label& value,
+    int type,
+    int state);
+
+TESTABLE void configureFilenameConfigAccessibility (Component& content);
+TESTABLE void configureFilenameCalloutAccessibility (Component& callout);
 
 /** 
 
@@ -92,6 +104,7 @@ public:
     /** Constructor */
     FilenameConfigWindow (Array<std::shared_ptr<FilenameFieldComponent>> _fields)
     {
+        configureFilenameConfigAccessibility (*this);
         setSize (360, 100);
 
         for (int i = 0; i < _fields.size(); i++)

@@ -1279,6 +1279,7 @@ void ControlPanel::buttonClicked (Button* button)
         CallOutBox& myBox = CallOutBox::launchAsynchronously (std::move (filenameConfigWindow),
                                                               button->getScreenBounds(),
                                                               nullptr);
+        configureFilenameCalloutAccessibility (myBox);
         myBox.addComponentListener (this);
         myBox.setDismissalMouseClicksAreAlwaysConsumed (true);
 
@@ -1602,6 +1603,7 @@ static void forceFilenameEditor (int result, ControlPanel* panel)
     CallOutBox& myBox = CallOutBox::launchAsynchronously (std::move (panel->filenameConfigWindow),
                                                           panel->filenameText->getScreenBounds(),
                                                           nullptr);
+    configureFilenameCalloutAccessibility (myBox);
     myBox.addComponentListener (panel);
     myBox.setDismissalMouseClicksAreAlwaysConsumed (true);
 

@@ -541,7 +541,9 @@ public:
 
     String getTitle() const override
     {
-        if (label.isEditable())
+        const auto text = label.getText();
+
+        if (label.isEditable() || text.isEmpty())
         {
             const auto title = AccessibilityHandler::getTitle();
 
@@ -549,7 +551,7 @@ public:
                 return title;
         }
 
-        return label.getText();
+        return text;
     }
     String getHelp() const override   { return label.getTooltip(); }
 

@@ -23,7 +23,70 @@
 
 #include "FilenameConfigWindow.h"
 #include "LookAndFeel/CustomLookAndFeel.h"
+#include "SemanticComponent.h"
 #include <stdio.h>
+
+void configureFilenameFieldAccessibility (
+    Component& row,
+    Label& typeLabel,
+    Button& mode,
+    Label& value,
+    int type,
+    int state)
+{
+    const StringArray segments { "prepend", "main", "append" };
+    const StringArray typeNames { "Prepend", "Main", "Append" };
+    const StringArray stateNames { "None", "Auto", "Custom" };
+    const auto typeIndex = jlimit (0, segments.size() - 1, type);
+    const auto stateIndex = jlimit (0, stateNames.size() - 1, state);
+    const auto prefix =
+        "oe.popup.recording_filename." + segments[typeIndex];
+    const auto fieldName = typeNames[typeIndex];
+
+    applySemanticMetadata (
+        row,
+        prefix,
+        fieldName + " filename field",
+        "Configure the " + fieldName.toLowerCase()
+            + " portion of the recording directory name.");
+    applySemanticMetadata (
+        typeLabel,
+        prefix + ".type",
+        fieldName + " field type",
+        "Identifies the " + fieldName.toLowerCase()
+            + " filename field.");
+    applySemanticMetadata (
+        mode,
+        prefix + ".mode",
+        fieldName + " mode: " + stateNames[stateIndex],
+        "Cycle the " + fieldName.toLowerCase()
+            + " field between its supported filename modes.",
+        "Current mode: " + stateNames[stateIndex] + ".");
+    applySemanticMetadata (
+        value,
+        prefix + ".value",
+        fieldName + " value",
+        "Value generated or entered for the "
+            + fieldName.toLowerCase() + " filename field.");
+}
+
+void configureFilenameConfigAccessibility (Component& content)
+{
+    applySemanticMetadata (
+        content,
+        "oe.popup.recording_filename.content",
+        "Recording filename fields",
+        "Configure the prepend, main, and append recording filename fields.");
+}
+
+void configureFilenameCalloutAccessibility (Component& callout)
+{
+    applySemanticMetadata (
+        callout,
+        "oe.popup.recording_filename",
+        "Recording filename",
+        "Recording filename configuration popup.");
+}
 
 FilenameFieldComponent::FilenameFieldComponent (int type_, int state_, String value_)
     : type (static_cast<Type> (type_)),
@@ -72,6 +135,9 @@ FilenameFieldComponent::FilenameFieldComponent (int type_, int state_, String va
     {
         savedValue = "_append";
     }
+
+    configureFilenameFieldAccessibility (
+        *this, *typeLabel, *stateButton, *valueLabel, type, state);
 }
 
 /* Returns an empty string if the candidate is valid, else returns the error as a string */
@@ -221,6 +287,9 @@ void FilenameFieldComponent::buttonClicked (Button* button)
         newDirectoryNeeded = true;
         getNextValue (true);
     }
+
+    configureFilenameFieldAccessibility (
+        *this, *typeLabel, *stateButton, *valueLabel, type, state);
 }
 
 void FilenameConfigWindow::paint (Graphics& g)
@@ -277,6 +346,14 @@ void FilenameConfigWindow::loadStateFromXml (XmlElement* xml)
                     fields[type]->valueLabel->setEditable (true, sendNotification);
                     fields[type]->valueLabel->setColour (Label::outlineColourId, findColour (ThemeColours::outline));
                 }
+
+                configureFilenameFieldAccessibility (
+                    *fields[type],
+                    *fields[type]->typeLabel,
+                    *fields[type]->stateButton,
+                    *fields[type]->valueLabel,
+                    fields[type]->type,
+                    fields[type]->state);
             }
         }
     }
