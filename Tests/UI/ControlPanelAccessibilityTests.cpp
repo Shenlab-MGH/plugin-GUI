@@ -223,3 +223,16 @@ TEST (ControlPanelAccessibilityTests, ExposesDefaultRecordingEngineSelector)
     EXPECT_EQ (handler->getRole(), AccessibilityRole::comboBox);
     EXPECT_NE (handler->getValueInterface(), nullptr);
 }
+
+TEST (ControlPanelAccessibilityTests, QueuedUpdatesDoNotOutlivePanel)
+{
+    auto* messageManager = MessageManager::getInstance();
+
+    {
+        ControlPanel panel (nullptr, nullptr, true);
+        panel.createNewRecordingDirectory();
+    }
+
+    messageManager->runDispatchLoopUntil (20);
+    SUCCEED();
+}

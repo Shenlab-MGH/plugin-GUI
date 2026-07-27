@@ -1663,8 +1663,15 @@ void ControlPanel::createNewRecordingDirectory()
 {
     //TODO: Remove dependency on button states/callbacks
     newDirectoryNeeded = true;
-    MessageManager::callAsync ([this]
-                               { newDirectoryButton->setToggleState (true, dontSendNotification); });
+    MessageManager::callAsync (
+        [safePanel =
+             Component::SafePointer<ControlPanel> (this)]
+        {
+            if (safePanel != nullptr)
+                safePanel->newDirectoryButton->setToggleState (
+                    true,
+                    dontSendNotification);
+        });
 }
 
 String ControlPanel::getRecordingDirectoryPrependText()
@@ -1804,8 +1811,15 @@ String ControlPanel::generateFilenameFromFields (bool usePlaceholderText)
         filename += field->getNextValue (usePlaceholderText);
     }
 
-    MessageManager::callAsync ([this, filename]
-                               { filenameText->setButtonText (filename); });
+    MessageManager::callAsync (
+        [safePanel =
+             Component::SafePointer<ControlPanel> (this),
+         filename]
+        {
+            if (safePanel != nullptr)
+                safePanel->filenameText->setButtonText (
+                    filename);
+        });
 
     return filename;
 }
