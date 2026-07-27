@@ -181,6 +181,38 @@ createReadOnlyButtonTextAccessibilityHandler (
                 std::move (getValue)) });
 }
 
+std::unique_ptr<AccessibilityHandler>
+ReadOnlyValueTextButton::createAccessibilityHandler()
+{
+    return createReadOnlyButtonTextAccessibilityHandler (
+        *this,
+        [safeButton =
+             Component::SafePointer<
+                 ReadOnlyValueTextButton> (this)]
+        {
+            return safeButton != nullptr
+                       ? safeButton->getButtonText()
+                       : String();
+        });
+}
+
+void setButtonTextWithAccessibilityValue (
+    Button& button,
+    StringRef value)
+{
+    const String newValue (value);
+
+    if (button.getButtonText() == newValue)
+        return;
+
+    button.setButtonText (newValue);
+
+    if (auto* handler =
+            button.getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::valueChanged);
+}
+
 void addSemanticCommandItem (
     PopupMenu& menu,
     ApplicationCommandManager* commandManager,

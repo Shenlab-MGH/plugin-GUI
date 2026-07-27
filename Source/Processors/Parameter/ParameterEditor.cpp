@@ -624,7 +624,9 @@ SelectedChannelsParameterEditor::SelectedChannelsParameterEditor (Parameter* par
     int selectedChannels = ((SelectedChannelsParameter*) param)->getArrayValue().size();
     size_t numChannels = ((SelectedChannelsParameter*) param)->getChannelStates().size();
 
-    button = std::make_unique<TextButton> (String (selectedChannels) + "/" + String (numChannels));
+    button = std::make_unique<ReadOnlyValueTextButton> (
+        String (selectedChannels) + "/"
+        + String (numChannels));
     button->setName (param->getKey());
     button->addListener (this);
     button->setClickingTogglesState (false);
@@ -721,11 +723,16 @@ void SelectedChannelsParameterEditor::updateView()
 
         if (numSelected == 0)
         {
-            button->setButtonText ("None");
+            setButtonTextWithAccessibilityValue (
+                *button,
+                "None");
         }
         else if (numSelected > 4)
         {
-            button->setButtonText (String (numSelected) + "/" + String (numChannels));
+            setButtonTextWithAccessibilityValue (
+                *button,
+                String (numSelected) + "/"
+                    + String (numChannels));
         }
         else
         {
@@ -738,7 +745,9 @@ void SelectedChannelsParameterEditor::updateView()
                 if (i < numSelected - 1)
                     selectedChannelsString += ", ";
             }
-            button->setButtonText (selectedChannelsString);
+            setButtonTextWithAccessibilityValue (
+                *button,
+                selectedChannelsString);
         }
     }
 }
@@ -758,7 +767,8 @@ MaskChannelsParameterEditor::MaskChannelsParameterEditor (Parameter* param, int 
         if (chan)
             selected++;
 
-    button = std::make_unique<TextButton> (String (selected) + "/" + String (numChannels));
+    button = std::make_unique<ReadOnlyValueTextButton> (
+        String (selected) + "/" + String (numChannels));
     button->addListener (this);
     button->setClickingTogglesState (false);
     button->setTooltip ("Mask channels to filter within this stream");
@@ -850,7 +860,10 @@ void MaskChannelsParameterEditor::updateView()
         for (auto chan : ((MaskChannelsParameter*) param)->getChannelStates())
             if (chan)
                 selected++;
-        button->setButtonText (String (selected) + "/" + String (numChannels));
+        setButtonTextWithAccessibilityValue (
+            *button,
+            String (selected) + "/"
+                + String (numChannels));
     }
 }
 
@@ -997,7 +1010,10 @@ TtlLineParameterEditor::TtlLineParameterEditor (Parameter* param,
     else
     {
         int selectedLine = ((TtlLineParameter*) param)->getSelectedLine();
-        textButton = std::make_unique<TextButton> ("Line " + String (selectedLine + 1), "Selected TTL Line");
+        textButton =
+            std::make_unique<ReadOnlyValueTextButton> (
+                "Line " + String (selectedLine + 1),
+                "Selected TTL Line");
         textButton->setName (param->getKey());
         textButton->addListener (this);
         textButton->setClickingTogglesState (false);
@@ -1136,7 +1152,9 @@ void TtlLineParameterEditor::updateView()
         {
             int selected = ((TtlLineParameter*) param)->getSelectedLine();
             String btnText = selected == -1 ? "None" : "Line " + String (selected + 1);
-            textButton->setButtonText (btnText);
+            setButtonTextWithAccessibilityValue (
+                *textButton,
+                btnText);
         }
     }
 }
@@ -1153,7 +1171,9 @@ PathParameterEditor::PathParameterEditor (Parameter* param, int rowHeightPixels,
 
     setBounds (0, 0, rowWidthPixels, rowHeightPixels);
 
-    button = std::make_unique<TextButton> ("Browse");
+    button =
+        std::make_unique<ReadOnlyValueTextButton> (
+            "Browse");
     button->setName (param->getKey());
     button->addListener (this);
     button->setClickingTogglesState (false);
@@ -1210,7 +1230,9 @@ void PathParameterEditor::updateView()
     if (param)
     {
         String value = param->getValueAsString();
-        button->setButtonText (value);
+        setButtonTextWithAccessibilityValue (
+            *button,
+            value);
         if (! ((PathParameter*) param)->isValid())
         {
             button->setColour (TextButton::textColourOnId, Colours::red);
@@ -1229,12 +1251,16 @@ void PathParameterEditor::updateView()
             String defaultValue = param->getDefaultValue().toString();
             if (defaultValue == "None" || defaultValue.isEmpty())
             {
-                button->setButtonText ("None");
+                setButtonTextWithAccessibilityValue (
+                    *button,
+                    "None");
                 button->setTooltip (param->getDescription());
             }
             else
             {
-                button->setButtonText ("default");
+                setButtonTextWithAccessibilityValue (
+                    *button,
+                    "default");
                 button->setTooltip ("Override default path");
             }
         }
@@ -1344,7 +1370,9 @@ TimeParameterEditor::TimeParameterEditor (Parameter* param, int rowHeightPixels,
     label->setFont (FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels)));
     addAndMakeVisible (label.get());
 
-    button = std::make_unique<TextButton> (param->getValueAsString());
+    button =
+        std::make_unique<ReadOnlyValueTextButton> (
+            param->getValueAsString());
     button->setName (param->getKey());
     button->addListener (this);
     button->setClickingTogglesState (false);
@@ -1394,9 +1422,15 @@ void TimeParameterEditor::timerCallback()
 {
     if (param != nullptr)
     {
-        button->setButtonText (((TimeParameter*) param)->getTimeValue()->toString());
+        setButtonTextWithAccessibilityValue (
+            *button,
+            ((TimeParameter*) param)
+                ->getTimeValue()
+                ->toString());
         button->setTooltip ("Max time: " + String (((TimeParameter*) param)->getTimeValue()->getMaxTimeInMilliseconds()) + " ms");
     }
     else
-        button->setButtonText ("00:00:00.000");
+        setButtonTextWithAccessibilityValue (
+            *button,
+            "00:00:00.000");
 }

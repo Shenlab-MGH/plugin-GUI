@@ -1,8 +1,21 @@
 #include "../../Source/Processors/Parameter/ParameterEditor.h"
+#include "../../Source/Processors/Parameter/ParameterOwner.h"
 #include "gtest/gtest.h"
 
 namespace
 {
+class TestParameterOwner final : public ParameterOwner
+{
+public:
+    TestParameterOwner() : ParameterOwner (Type::OTHER) {}
+
+    void parameterChangeRequest (
+        Parameter* parameter) override
+    {
+        parameter->updateValue();
+    }
+};
+
 class ParameterEditorAccessibilityTests : public ::testing::Test
 {
 protected:
@@ -30,6 +43,31 @@ protected:
         EXPECT_EQ (valueControl->getTitle(), expectedTitle);
         EXPECT_EQ (valueControl->getDescription(), expectedDescription);
         EXPECT_TRUE (valueControl->isAccessible());
+    }
+
+    static void expectReadOnlyButtonValue (
+        ParameterEditor& editor,
+        const String& expectedValue)
+    {
+        auto* valueControl = editor.getEditor();
+        ASSERT_NE (valueControl, nullptr);
+
+        auto handler =
+            valueControl->createAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::button);
+        ASSERT_NE (
+            handler->getValueInterface(),
+            nullptr);
+        EXPECT_TRUE (
+            handler->getValueInterface()
+                ->isReadOnly());
+        EXPECT_EQ (
+            handler->getValueInterface()
+                ->getCurrentValueAsString(),
+            expectedValue);
     }
 
     std::unique_ptr<MessageManagerLock> messageManagerLock;
@@ -127,4 +165,102 @@ TEST_F (ParameterEditorAccessibilityTests, RefreshesSemanticMetadataWhenAControl
                                 "oe.parameter.106_channel",
                                 "Channel",
                                 "Selects the monitored channel.");
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ExposesCurrentValuesForButtonBasedEditors)
+{
+    TestParameterOwner owner;
+
+    {
+        Array<var> selected { 0, 2 };
+        SelectedChannelsParameter parameter (
+            &owner,
+            Parameter::GLOBAL_SCOPE,
+            "channels",
+            "Channels",
+            "Selects channels.",
+            selected);
+        parameter.setKey ("101|channels");
+        parameter.setChannelCount (4);
+        SelectedChannelsParameterEditor editor (
+            &parameter);
+        expectReadOnlyButtonValue (editor, "1, 3");
+        auto liveHandler =
+            editor.getEditor()
+                ->createAccessibilityHandler();
+        ASSERT_NE (liveHandler, nullptr);
+        ASSERT_NE (
+            liveHandler->getValueInterface(),
+            nullptr);
+
+        Array<var> updated { 1 };
+        parameter.setNextValue (updated, false);
+        EXPECT_EQ (
+            liveHandler->getValueInterface()
+                ->getCurrentValueAsString(),
+            "2");
+    }
+
+    {
+        MaskChannelsParameter parameter (
+            &owner,
+            Parameter::GLOBAL_SCOPE,
+            "mask",
+            "Mask",
+            "Masks channels.");
+        parameter.setKey ("101|mask");
+        parameter.setChannelCount (4);
+        MaskChannelsParameterEditor editor (&parameter);
+        expectReadOnlyButtonValue (editor, "4/4");
+    }
+
+    {
+        TtlLineParameter parameter (
+            &owner,
+            Parameter::STREAM_SCOPE,
+            "ttl_line",
+            "TTL line",
+            "Selects a TTL line.");
+        parameter.setKey ("101|ttl_line");
+        TtlLineParameterEditor editor (&parameter);
+        expectReadOnlyButtonValue (editor, "Line 1");
+    }
+
+    {
+        const auto directory =
+            File::getSpecialLocation (
+                File::tempDirectory);
+        PathParameter parameter (
+            &owner,
+            Parameter::GLOBAL_SCOPE,
+            "directory",
+            "Directory",
+            "Selects a directory.",
+            directory,
+            StringArray {},
+            true,
+            true);
+        parameter.setKey ("101|directory");
+        PathParameterEditor editor (&parameter);
+        editor.updateView();
+        expectReadOnlyButtonValue (
+            editor,
+            directory.getFullPathName());
+    }
+
+    {
+        TimeParameter parameter (
+            &owner,
+            Parameter::GLOBAL_SCOPE,
+            "start_time",
+            "Start time",
+            "Sets the start time.",
+            "00:00:01.000");
+        parameter.setKey ("101|start_time");
+        TimeParameterEditor editor (&parameter);
+        expectReadOnlyButtonValue (
+            editor,
+            "00:00:01.000");
+    }
 }

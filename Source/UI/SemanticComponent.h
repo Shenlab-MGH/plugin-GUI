@@ -46,6 +46,19 @@ createReadOnlyButtonTextAccessibilityHandler (
     Button& button,
     std::function<String()> getValue);
 
+class ReadOnlyValueTextButton : public TextButton
+{
+public:
+    using TextButton::TextButton;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+};
+
+TESTABLE void setButtonTextWithAccessibilityValue (
+    Button& button,
+    StringRef value);
+
 TESTABLE void addSemanticCommandItem (
     PopupMenu& menu,
     ApplicationCommandManager* commandManager,

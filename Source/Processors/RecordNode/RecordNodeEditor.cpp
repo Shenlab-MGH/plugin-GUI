@@ -29,27 +29,6 @@
 
 namespace
 {
-class RecordPathButton final : public TextButton
-{
-public:
-    RecordPathButton() : TextButton ("Browse") {}
-
-    std::unique_ptr<AccessibilityHandler>
-    createAccessibilityHandler() override
-    {
-        return createReadOnlyButtonTextAccessibilityHandler (
-            *this,
-            [safeButton =
-                 Component::SafePointer<RecordPathButton> (
-                     this)]
-            {
-                return safeButton != nullptr
-                           ? safeButton->getButtonText()
-                           : String();
-            });
-    }
-};
-
 String getParameterSemanticId (Parameter& parameter)
 {
     return "oe.parameter."
@@ -560,7 +539,9 @@ RecordPathParameterEditor::RecordPathParameterEditor (Parameter* param, int rowH
 
     setBounds (0, 0, rowWidthPixels, rowHeightPixels);
 
-    button = std::make_unique<RecordPathButton>();
+    button =
+        std::make_unique<ReadOnlyValueTextButton> (
+            "Browse");
     button->setName (param->getKey());
     button->addListener (this);
     button->setClickingTogglesState (false);
@@ -647,10 +628,9 @@ void RecordPathParameterEditor::updateView()
         String value = param->getValueAsString();
         const String accessibleValue =
             value == "None" ? "default" : value;
-        const bool valueChanged =
-            button->getButtonText()
-            != accessibleValue;
-        button->setButtonText (accessibleValue);
+        setButtonTextWithAccessibilityValue (
+            *button,
+            accessibleValue);
         clearButton->setVisible (
             value != "None" && button->isEnabled());
         if (! ((PathParameter*) param)->isValid())
@@ -673,14 +653,6 @@ void RecordPathParameterEditor::updateView()
         else
         {
             button->setTooltip (value);
-        }
-
-        if (valueChanged)
-        {
-            if (auto* handler =
-                    button->getAccessibilityHandler())
-                handler->notifyAccessibilityEvent (
-                    AccessibilityEvent::valueChanged);
         }
     }
 }
