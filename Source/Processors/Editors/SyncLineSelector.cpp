@@ -23,6 +23,7 @@
 
 #include "SyncLineSelector.h"
 #include "../../UI/LookAndFeel/CustomLookAndFeel.h"
+#include "../../UI/SemanticComponent.h"
 #include <string>
 #include <vector>
 
@@ -156,6 +157,7 @@ SyncLineSelector::SyncLineSelector (Component* parent, SyncLineSelector::Listene
 
     setSize (width, height + buttonSize);
     setColour (ColourSelector::backgroundColourId, Colours::transparentBlack);
+    updateAccessibilityMetadata();
 }
 
 SyncLineSelector::~SyncLineSelector() {}
@@ -168,7 +170,7 @@ void SyncLineSelector::mouseUp (const MouseEvent& event) {}
 
 void SyncLineSelector::buttonClicked (Button* button)
 {
-    if (button->getComponentID() == "SETPRIMARY")
+    if (button == setPrimaryStreamButton.get())
     {
         setSize (width, buttonSize * nRows);
         height = buttonSize * (nRows);
@@ -178,6 +180,10 @@ void SyncLineSelector::buttonClicked (Button* button)
     }
     else
     {
+        auto* channelButton = dynamic_cast<SyncChannelButton*> (button);
+        if (channelButton == nullptr)
+            return;
+
         bool sameButton = false;
 
         for (int i = 0; i < buttons.size(); i++)
@@ -198,7 +204,7 @@ void SyncLineSelector::buttonClicked (Button* button)
         else
         {
             button->setToggleState (true, dontSendNotification);
-            selectedLine = std::stoi (button->getComponentID().toStdString());
+            selectedLine = channelButton->getId() - 1;
 
             if (! isPrimary)
                 setPrimaryStreamButton->setEnabled (true);
@@ -209,6 +215,7 @@ void SyncLineSelector::buttonClicked (Button* button)
     }
 
     detectedChange = true;
+    updateAccessibilityMetadata();
 }
 
 void SyncLineSelector::updatePopup()
@@ -246,5 +253,36 @@ void SyncLineSelector::updatePopup()
 
         if (canSelectNone && selectedLine == -1)
             setPrimaryStreamButton->setEnabled (false);
+    }
+
+    updateAccessibilityMetadata();
+}
+
+void SyncLineSelector::updateAccessibilityMetadata()
+{
+    applySemanticMetadata (*this,
+                           "oe.popup.sync_line",
+                           "Line selector",
+                           "Choose a TTL or synchronization line.");
+
+    for (auto* button : buttons)
+    {
+        const auto lineNumber = button->getId();
+        const auto selected = button->getToggleState();
+        applySemanticMetadata (
+            *button,
+            "oe.popup.sync_line.line_" + String (lineNumber),
+            "Line " + String (lineNumber) + (selected ? " (selected)" : ""),
+            selected ? "Selected line " + String (lineNumber) + "."
+                     : "Select line " + String (lineNumber) + ".");
+    }
+
+    if (setPrimaryStreamButton != nullptr)
+    {
+        applySemanticMetadata (
+            *setPrimaryStreamButton,
+            "oe.popup.sync_line.set_primary",
+            "Set as main clock",
+            "Use this stream as the main synchronization clock.");
     }
 }

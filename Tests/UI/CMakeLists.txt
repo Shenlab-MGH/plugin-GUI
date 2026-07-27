@@ -14,6 +14,7 @@ add_sources(${COMPONENT_NAME}_tests
 		MessageWindowAccessibilityTests.cpp
 		ParameterEditorAccessibilityTests.cpp
 		ProcessorListAccessibilityTests.cpp
+		SyncLineSelectorAccessibilityTests.cpp
 		SemanticComponentTests.cpp
 )
 target_include_directories(

@@ -128,6 +128,8 @@ public:
     Array<Colour> lineColours;
 
 private:
+    void updateAccessibilityMetadata();
+
     Listener* listener;
 
     ScopedPointer<SetPrimaryButton> setPrimaryStreamButton;
