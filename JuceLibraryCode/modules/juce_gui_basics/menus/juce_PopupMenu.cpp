@@ -209,7 +209,10 @@ struct ItemComponent final : public Component
 
     static bool isAccessibilityHandlerRequired (const PopupMenu::Item& item)
     {
-        return item.isSectionHeader || hasActiveSubMenu (item) || canBeTriggered (item);
+        return item.isSectionHeader
+            || item.accessibilityId.isNotEmpty()
+            || hasActiveSubMenu (item)
+            || canBeTriggered (item);
     }
 
     PopupMenu::Item item;
@@ -231,6 +234,11 @@ private:
         String getTitle() const override
         {
             return itemComponent.item.text;
+        }
+
+        bool isEnabled() const override
+        {
+            return itemComponent.item.isEnabled;
         }
 
         AccessibleState getCurrentState() const override

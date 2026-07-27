@@ -395,7 +395,7 @@ JUCE_COMRESULT AccessibilityNativeHandle::GetPropertyValue (PROPERTYID propertyI
                 VariantHelpers::setBool (role == AccessibilityRole::dialogWindow, pRetVal);
                 break;
             case UIA_IsEnabledPropertyId:
-                VariantHelpers::setBool (accessibilityHandler.getComponent().isEnabled(), pRetVal);
+                VariantHelpers::setBool (accessibilityHandler.isEnabled(), pRetVal);
                 break;
             case UIA_IsKeyboardFocusablePropertyId:
                 VariantHelpers::setBool (state.isFocusable(), pRetVal);

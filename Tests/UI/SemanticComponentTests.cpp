@@ -30,6 +30,17 @@ public:
 
     bool perform (const InvocationInfo&) override { return true; }
 };
+
+class DisabledAccessibilityHandler final : public AccessibilityHandler
+{
+public:
+    explicit DisabledAccessibilityHandler (Component& component)
+        : AccessibilityHandler (component, AccessibilityRole::menuItem)
+    {
+    }
+
+    bool isEnabled() const override { return false; }
+};
 } // namespace
 
 TEST (SemanticComponentTests, ValidatesStableSemanticIds)
@@ -137,6 +148,15 @@ TEST (SemanticComponentTests, CopiesCommandMeaningToSemanticMenuItems)
                "Open a saved signal chain.");
     EXPECT_EQ (iterator.getItem().accessibilityHelp,
                "Open a saved signal chain.");
+}
+
+TEST (SemanticComponentTests, AllowsSemanticElementsToReportDisabledState)
+{
+    Component component;
+    DisabledAccessibilityHandler handler (component);
+
+    EXPECT_TRUE (component.isEnabled());
+    EXPECT_FALSE (handler.isEnabled());
 }
 
 TEST (SemanticComponentTests, IgnoresInvalidSemanticIds)

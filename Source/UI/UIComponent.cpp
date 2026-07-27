@@ -577,15 +577,21 @@ PopupMenu UIComponent::getMenuForIndex (int menuIndex, const String& menuName)
     }
     else if (menuIndex == 1)
     {
-        menu.addCommandItem (commandManager, undo);
-        menu.addCommandItem (commandManager, redo);
+        addSemanticCommandItem (
+            menu, commandManager, undo, "oe.menu.edit.undo");
+        addSemanticCommandItem (
+            menu, commandManager, redo, "oe.menu.edit.redo");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, copySignalChain);
-        menu.addCommandItem (commandManager, pasteSignalChain);
+        addSemanticCommandItem (
+            menu, commandManager, copySignalChain, "oe.menu.edit.copy");
+        addSemanticCommandItem (
+            menu, commandManager, pasteSignalChain, "oe.menu.edit.paste");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, clearSignalChain);
+        addSemanticCommandItem (
+            menu, commandManager, clearSignalChain, "oe.menu.edit.clear");
         menu.addSeparator();
-        menu.addCommandItem (commandManager, lockSignalChain);
+        addSemanticCommandItem (
+            menu, commandManager, lockSignalChain, "oe.menu.edit.lock");
     }
     else if (menuIndex == 2)
     {

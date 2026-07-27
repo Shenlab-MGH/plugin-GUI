@@ -160,6 +160,14 @@ public:
     */
     virtual String getHelp() const                   { return component.getHelpText(); }
 
+    /** Returns true if this UI element is currently available for interaction.
+
+        The default implementation returns `Component::isEnabled()`, but handlers for
+        virtual or model-backed elements may override this without disabling the
+        Component that keeps them present in the accessibility tree.
+    */
+    virtual bool isEnabled() const                   { return component.isEnabled(); }
+
     /** Returns the current state of the UI element.
 
         The default implementation of this method will set the focusable flag and, if
