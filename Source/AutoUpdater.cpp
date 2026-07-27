@@ -25,10 +25,70 @@
 #include "AutoUpdater.h"
 #include "CoreServices.h"
 #include "MainWindow.h"
+#include "UI/SemanticComponent.h"
 #ifdef _WIN32
 #include <shellapi.h>
 #include <windows.h>
 #endif
+
+//==============================================================================
+void configureUpdatePromptAccessibility (
+    Component& content,
+    Label& title,
+    Label& summary,
+    TextEditor& releaseNotes,
+    Button& download,
+    Button& cancel,
+    Button& dontAskAgain)
+{
+    applySemanticMetadata (
+        content,
+        "oe.dialog.update.content",
+        "Software update prompt",
+        "Review an available Open Ephys GUI update.");
+    applySemanticMetadata (
+        title,
+        "oe.dialog.update.title",
+        "Available version",
+        "Version of the available Open Ephys GUI update.");
+    applySemanticMetadata (
+        summary,
+        "oe.dialog.update.summary",
+        "Update summary",
+        "Explains that a newer Open Ephys GUI version is available.");
+    applySemanticMetadata (
+        releaseNotes,
+        "oe.dialog.update.release_notes",
+        "Release notes",
+        "Read-only release notes for the available update.");
+    applySemanticMetadata (
+        download,
+        "oe.dialog.update.download",
+        "Download update",
+        "Continue to choose where to download the available update.",
+        "Opens a folder chooser before downloading.");
+    applySemanticMetadata (
+        cancel,
+        "oe.dialog.update.cancel",
+        "Cancel update",
+        "Close the update prompt without downloading.",
+        "Keeps the currently installed Open Ephys GUI version.");
+    applySemanticMetadata (
+        dontAskAgain,
+        "oe.dialog.update.dont_ask_again",
+        "Don't ask again",
+        "Disable automatic update prompts.",
+        "When selected, cancelling disables automatic version checking.");
+}
+
+void configureUpdateDialogAccessibility (Component& window)
+{
+    applySemanticMetadata (
+        window,
+        "oe.dialog.update",
+        "Software update",
+        "Open Ephys GUI software update dialog.");
+}
 
 //==============================================================================
 LatestVersionCheckerAndUpdater::LatestVersionCheckerAndUpdater()
@@ -234,6 +294,14 @@ public:
         dontAskAgainButton.setToggleState (! automaticVerCheck, dontSendNotification);
         addAndMakeVisible (dontAskAgainButton);
 
+        configureUpdatePromptAccessibility (*this,
+                                            titleLabel,
+                                            contentLabel,
+                                            releaseNotesEditor,
+                                            downloadButton,
+                                            cancelButton,
+                                            dontAskAgainButton);
+
 #if JUCE_MAC
         File iconDir = File::getSpecialLocation (File::currentApplicationFile).getChildFile ("Contents/Resources");
 #else
@@ -287,6 +355,7 @@ public:
 
         std::unique_ptr<DialogWindow> dialog (options.create());
 
+        configureUpdateDialogAccessibility (*dialog);
         content->setParentWindow (dialog.get());
         dialog->enterModalState (true, nullptr, true);
 

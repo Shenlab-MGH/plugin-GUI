@@ -82,6 +82,7 @@ TEST (SemanticComponentTests, AppliesStableAccessibleMeaning)
     EXPECT_EQ (button.getDescription(), "Configure recording engine and directory behavior.");
     EXPECT_EQ (button.getHelpText(), "Opens the recording options panel.");
     EXPECT_TRUE (button.isAccessible());
+    EXPECT_EQ (button.getTooltip(), "Opens the recording options panel.");
 }
 
 TEST (SemanticComponentTests, CreatesReadOnlyProgressSemantics)

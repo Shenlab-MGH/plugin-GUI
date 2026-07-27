@@ -55,4 +55,23 @@ TESTABLE void applySemanticMetadata (Component& component,
                                      StringRef description,
                                      StringRef help = {});
 
+template <typename ComponentType,
+          std::enable_if_t<
+              std::is_base_of_v<Component, ComponentType>
+                  && std::is_base_of_v<SettableTooltipClient, ComponentType>,
+              int> = 0>
+void applySemanticMetadata (ComponentType& component,
+                            StringRef id,
+                            StringRef title,
+                            StringRef description,
+                            StringRef help = {})
+{
+    applySemanticMetadata (static_cast<Component&> (component),
+                           id,
+                           title,
+                           description,
+                           help);
+    component.setTooltip (String (help));
+}
+
 #endif // SEMANTICCOMPONENT_H

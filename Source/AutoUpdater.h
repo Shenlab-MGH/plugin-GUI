@@ -25,9 +25,21 @@
 #pragma once
 
 #include "../JuceLibraryCode/JuceHeader.h"
+#include "TestableExport.h"
 
 class MainWindow;
 class DownloadThread;
+
+TESTABLE void configureUpdatePromptAccessibility (
+    Component& content,
+    Label& title,
+    Label& summary,
+    TextEditor& releaseNotes,
+    Button& download,
+    Button& cancel,
+    Button& dontAskAgain);
+
+TESTABLE void configureUpdateDialogAccessibility (Component& window);
 
 /** 
 	Helper class to check for new versions of the application and download them.
