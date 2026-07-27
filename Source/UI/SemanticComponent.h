@@ -41,6 +41,11 @@ createReadOnlyTextAccessibilityHandler (
     Component& component,
     std::function<String()> getValue);
 
+TESTABLE std::unique_ptr<AccessibilityHandler>
+createReadOnlyButtonTextAccessibilityHandler (
+    Button& button,
+    std::function<String()> getValue);
+
 TESTABLE void addSemanticCommandItem (
     PopupMenu& menu,
     ApplicationCommandManager* commandManager,

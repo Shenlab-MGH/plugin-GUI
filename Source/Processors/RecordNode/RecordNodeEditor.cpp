@@ -27,6 +27,45 @@
 #include "RecordNode.h"
 #include <stdio.h>
 
+namespace
+{
+class RecordPathButton final : public TextButton
+{
+public:
+    RecordPathButton() : TextButton ("Browse") {}
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override
+    {
+        return createReadOnlyButtonTextAccessibilityHandler (
+            *this,
+            [safeButton =
+                 Component::SafePointer<RecordPathButton> (
+                     this)]
+            {
+                return safeButton != nullptr
+                           ? safeButton->getButtonText()
+                           : String();
+            });
+    }
+};
+
+String getParameterSemanticId (Parameter& parameter)
+{
+    return "oe.parameter."
+           + sanitiseSemanticSegment (
+               String (parameter.getKey()));
+}
+
+String getParameterSemanticTitle (
+    Parameter& parameter)
+{
+    return parameter.getDisplayName().isNotEmpty()
+               ? parameter.getDisplayName()
+               : parameter.getName().replace ("_", " ");
+}
+} // namespace
+
 SyncMonitor::SyncMonitor()
 {
     setInterceptsMouseClicks (false, false);
@@ -444,6 +483,7 @@ RecordToggleParameterEditor::RecordToggleParameterEditor (Parameter* param) : Pa
 {
     label = std::make_unique<Label> ("Parameter name", param->getDisplayName());
     label->setFont (FontOptions ("Inter", "Regular", 13.0f));
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     toggleButton = std::make_unique<RecordToggleButton> (param->getDisplayName()); //param->getDisplayName());
@@ -452,6 +492,11 @@ RecordToggleParameterEditor::RecordToggleParameterEditor (Parameter* param) : Pa
     toggleButton->addListener (this);
     toggleButton->setToggleState (true, dontSendNotification);
     toggleButton->setBounds (50, 0, 15, 15);
+    applySemanticMetadata (
+        *toggleButton,
+        getParameterSemanticId (*param),
+        getParameterSemanticTitle (*param),
+        param->getDescription());
     addAndMakeVisible (toggleButton.get());
 
     label->setBounds (0, 0, 100, 15);
@@ -501,30 +546,50 @@ void ClearButton::paintButton (Graphics& g, bool isMouseOverButton, bool isButto
     g.strokePath (path, PathStrokeType (1.0f));
 }
 
+std::unique_ptr<AccessibilityHandler>
+ClearButton::createAccessibilityHandler()
+{
+    return createReadOnlyButtonTextAccessibilityHandler (
+        *this,
+        [] { return String ("default"); });
+}
+
 RecordPathParameterEditor::RecordPathParameterEditor (Parameter* param, int rowHeightPixels, int rowWidthPixels) : ParameterEditor (param)
 {
     jassert (param->getType() == Parameter::PATH_PARAM);
 
     setBounds (0, 0, rowWidthPixels, rowHeightPixels);
 
-    button = std::make_unique<TextButton> ("Browse");
+    button = std::make_unique<RecordPathButton>();
     button->setName (param->getKey());
     button->addListener (this);
     button->setClickingTogglesState (false);
     button->setTooltip (param->getValueAsString());
     button->addMouseListener (this, true);
+    applySemanticMetadata (
+        *button,
+        getParameterSemanticId (*param),
+        getParameterSemanticTitle (*param),
+        param->getDescription());
     addAndMakeVisible (button.get());
 
     label = std::make_unique<Label> ("Parameter name", param->getDisplayName()); // == "" ? param->getName().replace("_", " ") : param->getDisplayName());
     Font labelFont = FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels));
     label->setFont (labelFont);
     label->setJustificationType (Justification::left);
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     clearButton = std::make_unique<ClearButton>();
     clearButton->addListener (this);
     clearButton->addMouseListener (this, true);
     clearButton->setTooltip ("Set to default");
+    applySemanticMetadata (
+        *clearButton,
+        getParameterSemanticId (*param)
+            + ".use_default",
+        "Use default recording directory",
+        "Remove this Record Node directory override.");
     addChildComponent (clearButton.get());
 
     int width = rowWidthPixels;
@@ -580,7 +645,14 @@ void RecordPathParameterEditor::updateView()
     if (param)
     {
         String value = param->getValueAsString();
-        button->setButtonText (value);
+        const String accessibleValue =
+            value == "None" ? "default" : value;
+        const bool valueChanged =
+            button->getButtonText()
+            != accessibleValue;
+        button->setButtonText (accessibleValue);
+        clearButton->setVisible (
+            value != "None" && button->isEnabled());
         if (! ((PathParameter*) param)->isValid())
         {
             button->setColour (TextButton::textColourOnId, Colours::red);
@@ -596,12 +668,19 @@ void RecordPathParameterEditor::updateView()
         //button->setButtonText(File(param->getValueAsString()).getFileName());
         if (value == "None")
         {
-            button->setButtonText ("default");
             button->setTooltip ("Override default path");
         }
         else
         {
             button->setTooltip (value);
+        }
+
+        if (valueChanged)
+        {
+            if (auto* handler =
+                    button->getAccessibilityHandler())
+                handler->notifyAccessibilityEvent (
+                    AccessibilityEvent::valueChanged);
         }
     }
 }
@@ -629,7 +708,7 @@ void RecordPathParameterEditor::mouseEnter (const MouseEvent& event)
 
 void RecordPathParameterEditor::mouseExit (const MouseEvent& event)
 {
-    clearButton->setVisible (false);
+    updateView();
 }
 
 RecordNodeEditor::RecordNodeEditor (RecordNode* parentNode)

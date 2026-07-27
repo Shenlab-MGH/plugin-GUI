@@ -246,8 +246,8 @@ private:
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
 };
 
-class RecordToggleParameterEditor : public ParameterEditor,
-                                    public Button::Listener
+class PLUGIN_API RecordToggleParameterEditor : public ParameterEditor,
+                                               public Button::Listener
 {
 public:
     /** Constructor */
@@ -307,12 +307,16 @@ public:
     /** Constructor */
     ClearButton() : Button ("Revert Dir") {}
 
+    /** Exposes a reliable press action to accessibility clients. */
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
     /** Renders the button */
     void paintButton (Graphics& g, bool isMouseOverButton, bool isButtonDown) override;
 };
 
-class RecordPathParameterEditor : public ParameterEditor,
-                                  public Button::Listener
+class PLUGIN_API RecordPathParameterEditor : public ParameterEditor,
+                                             public Button::Listener
 {
 public:
     /** Constructor */
