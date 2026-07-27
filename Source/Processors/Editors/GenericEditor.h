@@ -460,6 +460,10 @@ public:
 
     void setFont (const FontOptions& font);
 
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
 private:
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
 

@@ -25,6 +25,17 @@ public:
     StreamSelectorTable& getStreamSelector() { return *streamSelector; }
 };
 
+class InspectableUtilityButton final : public UtilityButton
+{
+public:
+    explicit InspectableUtilityButton (String label)
+        : UtilityButton (std::move (label))
+    {
+    }
+
+    using UtilityButton::createAccessibilityHandler;
+};
+
 Component* findDescendantBySemanticId (Component& parent, const String& id)
 {
     for (auto* child : parent.getChildren())
@@ -39,6 +50,72 @@ Component* findDescendantBySemanticId (Component& parent, const String& id)
     return nullptr;
 }
 } // namespace
+
+TEST (GenericEditorAccessibilityTests, PublishesUtilityButtonLabelAsValue)
+{
+    InspectableUtilityButton button ("16");
+    button.setTitle ("Headstage channel count");
+    button.setClickingTogglesState (true);
+
+    auto handler = button.createAccessibilityHandler();
+
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::button);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    ASSERT_NE (handler->getValueInterface(), nullptr);
+    EXPECT_TRUE (handler->getValueInterface()->isReadOnly());
+    EXPECT_EQ (
+        handler->getValueInterface()->getCurrentValueAsString(),
+        "16");
+
+    button.setLabel ("32");
+
+    EXPECT_EQ (
+        handler->getValueInterface()->getCurrentValueAsString(),
+        "32");
+
+    EXPECT_FALSE (button.getToggleState());
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (button.getToggleState());
+}
+
+TEST (GenericEditorAccessibilityTests, PreservesUtilityButtonRadioSemantics)
+{
+    InspectableUtilityButton button ("Data");
+    button.setClickingTogglesState (true);
+    button.setRadioGroupId (100, dontSendNotification);
+
+    auto handler = button.createAccessibilityHandler();
+
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getRole(), AccessibilityRole::radioButton);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+}
+
+TEST (GenericEditorAccessibilityTests, RefreshesUtilityButtonFallbackName)
+{
+    InspectableUtilityButton button ("16");
+    auto handler = button.createAccessibilityHandler();
+
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (handler->getTitle(), "16");
+
+    button.setLabel ("32");
+
+    EXPECT_EQ (handler->getTitle(), "32");
+}
 
 TEST (GenericEditorAccessibilityTests, ExposesProcessorDrawerAsStableToggle)
 {

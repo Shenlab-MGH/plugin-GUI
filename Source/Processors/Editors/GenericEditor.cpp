@@ -928,10 +928,108 @@ String UtilityButton::getLabel()
     return label;
 }
 
+namespace
+{
+class UtilityButtonAccessibilityHandler final : public AccessibilityHandler
+{
+public:
+    explicit UtilityButtonAccessibilityHandler (UtilityButton& buttonToWrap)
+        : AccessibilityHandler (
+              buttonToWrap,
+              buttonToWrap.getRadioGroupId() != 0
+                  ? AccessibilityRole::radioButton
+                  : AccessibilityRole::button,
+              getActions (buttonToWrap),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<LabelValue> (buttonToWrap) }),
+          button (buttonToWrap)
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto state = AccessibilityHandler::getCurrentState();
+
+        if (button.isToggleable())
+        {
+            state = state.withCheckable();
+
+            if (button.getToggleState())
+                state = state.withChecked();
+        }
+
+        return state;
+    }
+
+    String getTitle() const override
+    {
+        const auto title = AccessibilityHandler::getTitle();
+        return title.isNotEmpty() ? title : button.getLabel();
+    }
+
+    String getHelp() const override { return button.getTooltip(); }
+
+private:
+    class LabelValue final : public AccessibilityTextValueInterface
+    {
+    public:
+        explicit LabelValue (UtilityButton& buttonToWrap)
+            : button (buttonToWrap)
+        {
+        }
+
+        bool isReadOnly() const override { return true; }
+        void setValueAsString (const String&) override {}
+        String getCurrentValueAsString() const override
+        {
+            return button.getLabel();
+        }
+
+    private:
+        UtilityButton& button;
+    };
+
+    static AccessibilityActions getActions (UtilityButton& button)
+    {
+        auto actions = AccessibilityActions().addAction (
+            AccessibilityActionType::press,
+            [&button] { button.triggerClick(); });
+
+        if (button.isToggleable())
+        {
+            actions = actions.addAction (
+                AccessibilityActionType::toggle,
+                [&button]
+                {
+                    button.setToggleState (
+                        ! button.getToggleState(),
+                        sendNotification);
+                });
+        }
+
+        return actions;
+    }
+
+    UtilityButton& button;
+};
+}
+
+std::unique_ptr<AccessibilityHandler>
+UtilityButton::createAccessibilityHandler()
+{
+    return std::make_unique<UtilityButtonAccessibilityHandler> (*this);
+}
+
 void UtilityButton::setLabel (String label_)
 {
     label = label_;
     repaint();
+
+    if (auto* handler = getAccessibilityHandler())
+    {
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
+        handler->notifyAccessibilityEvent (AccessibilityEvent::titleChanged);
+    }
 }
 
 void UtilityButton::setFont (const FontOptions& newFont)
