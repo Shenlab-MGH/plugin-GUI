@@ -42,6 +42,13 @@ TESTABLE void addSemanticCommandItem (
     CommandID commandId,
     StringRef semanticId);
 
+TESTABLE void addSemanticSubMenu (
+    PopupMenu& menu,
+    StringRef name,
+    PopupMenu subMenu,
+    StringRef semanticId,
+    StringRef description);
+
 TESTABLE void applySemanticMetadata (Component& component,
                                      StringRef id,
                                      StringRef title,

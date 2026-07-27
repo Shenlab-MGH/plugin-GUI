@@ -160,6 +160,32 @@ void addSemanticCommandItem (
     }
 }
 
+void addSemanticSubMenu (
+    PopupMenu& menu,
+    StringRef name,
+    PopupMenu subMenu,
+    StringRef semanticId,
+    StringRef description)
+{
+    menu.addSubMenu (String (name), std::move (subMenu));
+
+    if (! isValidSemanticId (semanticId))
+        return;
+
+    PopupMenu::MenuItemIterator iterator (menu);
+    PopupMenu::Item* addedItem = nullptr;
+
+    while (iterator.next())
+        addedItem = &iterator.getItem();
+
+    if (addedItem == nullptr || addedItem->subMenu == nullptr)
+        return;
+
+    addedItem->accessibilityId = String (semanticId);
+    addedItem->accessibilityDescription = String (description);
+    addedItem->accessibilityHelp = String (description);
+}
+
 void applySemanticMetadata (Component& component,
                             StringRef id,
                             StringRef title,

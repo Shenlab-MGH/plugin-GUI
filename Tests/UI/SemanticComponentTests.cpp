@@ -150,6 +150,31 @@ TEST (SemanticComponentTests, CopiesCommandMeaningToSemanticMenuItems)
                "Open a saved signal chain.");
 }
 
+TEST (SemanticComponentTests, AddsSemanticSubMenus)
+{
+    PopupMenu childMenu;
+    childMenu.addItem (1, "Default");
+    PopupMenu parentMenu;
+
+    addSemanticSubMenu (
+        parentMenu,
+        "Clock display mode",
+        std::move (childMenu),
+        "oe.menu.view.clock_display_mode",
+        "Choose how elapsed time is displayed.");
+
+    PopupMenu::MenuItemIterator iterator (parentMenu);
+    ASSERT_TRUE (iterator.next());
+    EXPECT_EQ (iterator.getItem().accessibilityId,
+               "oe.menu.view.clock_display_mode");
+    EXPECT_EQ (iterator.getItem().accessibilityDescription,
+               "Choose how elapsed time is displayed.");
+    EXPECT_EQ (iterator.getItem().accessibilityHelp,
+               "Choose how elapsed time is displayed.");
+    ASSERT_NE (iterator.getItem().subMenu, nullptr);
+    EXPECT_EQ (iterator.getItem().subMenu->getNumItems(), 1);
+}
+
 TEST (SemanticComponentTests, AllowsSemanticElementsToReportDisabledState)
 {
     Component component;

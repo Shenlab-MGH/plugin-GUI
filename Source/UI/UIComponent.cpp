@@ -596,40 +596,128 @@ PopupMenu UIComponent::getMenuForIndex (int menuIndex, const String& menuName)
     else if (menuIndex == 2)
     {
         PopupMenu clockModeMenu;
-        clockModeMenu.addCommandItem (commandManager, setClockModeDefault);
-        clockModeMenu.addCommandItem (commandManager, setClockModeHHMMSS);
+        addSemanticCommandItem (
+            clockModeMenu,
+            commandManager,
+            setClockModeDefault,
+            "oe.menu.view.clock_display_mode.default");
+        addSemanticCommandItem (
+            clockModeMenu,
+            commandManager,
+            setClockModeHHMMSS,
+            "oe.menu.view.clock_display_mode.hh_mm_ss");
 
         PopupMenu clockReferenceTimeMenu;
-        clockReferenceTimeMenu.addCommandItem (commandManager, setClockReferenceTimeCumulative);
-        clockReferenceTimeMenu.addCommandItem (commandManager, setClockReferenceTimeAcqStart);
+        addSemanticCommandItem (
+            clockReferenceTimeMenu,
+            commandManager,
+            setClockReferenceTimeCumulative,
+            "oe.menu.view.clock_reference_time.cumulative");
+        addSemanticCommandItem (
+            clockReferenceTimeMenu,
+            commandManager,
+            setClockReferenceTimeAcqStart,
+            "oe.menu.view.clock_reference_time.acquisition_start");
 
         PopupMenu themeMenu;
-        themeMenu.addCommandItem (commandManager, setColourThemeLight);
-        themeMenu.addCommandItem (commandManager, setColourThemeMedium);
-        themeMenu.addCommandItem (commandManager, setColourThemeDark);
+        addSemanticCommandItem (
+            themeMenu,
+            commandManager,
+            setColourThemeLight,
+            "oe.menu.view.theme.light");
+        addSemanticCommandItem (
+            themeMenu,
+            commandManager,
+            setColourThemeMedium,
+            "oe.menu.view.theme.medium");
+        addSemanticCommandItem (
+            themeMenu,
+            commandManager,
+            setColourThemeDark,
+            "oe.menu.view.theme.dark");
 
-        menu.addCommandItem (commandManager, toggleProcessorList);
-        menu.addCommandItem (commandManager, toggleSignalChain);
-        menu.addCommandItem (commandManager, toggleFileInfo);
-        menu.addCommandItem (commandManager, toggleInfoTab);
-        menu.addCommandItem (commandManager, toggleGraphViewer);
-        menu.addCommandItem (commandManager, toggleConsoleViewer);
-        menu.addCommandItem (commandManager, showMessageWindow);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            toggleProcessorList,
+            "oe.menu.view.processor_list");
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            toggleSignalChain,
+            "oe.menu.view.signal_chain");
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            toggleFileInfo,
+            "oe.menu.view.file_info");
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            toggleInfoTab,
+            "oe.menu.view.info_tab");
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            toggleGraphViewer,
+            "oe.menu.view.graph_viewer");
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            toggleConsoleViewer,
+            "oe.menu.view.console");
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            showMessageWindow,
+            "oe.menu.view.message_window");
         menu.addSeparator();
-        menu.addSubMenu ("Clock display mode", clockModeMenu);
-        menu.addSubMenu ("Clock reference time", clockReferenceTimeMenu);
+        addSemanticSubMenu (
+            menu,
+            "Clock display mode",
+            std::move (clockModeMenu),
+            "oe.menu.view.clock_display_mode",
+            "Choose how elapsed time is displayed.");
+        addSemanticSubMenu (
+            menu,
+            "Clock reference time",
+            std::move (clockReferenceTimeMenu),
+            "oe.menu.view.clock_reference_time",
+            "Choose when the displayed clock starts.");
         menu.addSeparator();
-        menu.addSubMenu ("Theme", themeMenu);
+        addSemanticSubMenu (
+            menu,
+            "Theme",
+            std::move (themeMenu),
+            "oe.menu.view.theme",
+            "Choose the application colour theme.");
         menu.addSeparator();
 
 #if JUCE_WINDOWS
         PopupMenu rendererMenu;
-        rendererMenu.addCommandItem (commandManager, setSoftwareRenderer);
-        rendererMenu.addCommandItem (commandManager, setDirect2DRenderer);
-        menu.addSubMenu ("Renderer", rendererMenu);
+        addSemanticCommandItem (
+            rendererMenu,
+            commandManager,
+            setSoftwareRenderer,
+            "oe.menu.view.renderer.software");
+        addSemanticCommandItem (
+            rendererMenu,
+            commandManager,
+            setDirect2DRenderer,
+            "oe.menu.view.renderer.direct2d");
+        addSemanticSubMenu (
+            menu,
+            "Renderer",
+            std::move (rendererMenu),
+            "oe.menu.view.renderer",
+            "Choose the Windows rendering engine.");
         menu.addSeparator();
 #endif
-        menu.addCommandItem (commandManager, resizeWindow);
+        addSemanticCommandItem (
+            menu,
+            commandManager,
+            resizeWindow,
+            "oe.menu.view.reset_window_bounds");
     }
     else if (menuIndex == 3)
     {
