@@ -42,12 +42,71 @@ String getStreamSelectorSemanticId (const GenericEditor& editor)
         "streams");
 }
 
+String getStreamSemanticSegment (const DataStream& stream)
+{
+    const auto identifier =
+        stream.getIdentifier().isNotEmpty()
+            ? stream.getIdentifier()
+            : stream.getName();
+
+    return "source_" + String (stream.getSourceNodeId())
+           + ".stream_" + sanitiseSemanticSegment (identifier);
+}
+
 String getStreamSemanticId (const GenericEditor& editor,
                             const DataStream& stream)
 {
     return getStreamSelectorSemanticId (editor)
-           + ".stream_" + sanitiseSemanticSegment (stream.getName());
+           + "." + getStreamSemanticSegment (stream);
 }
+
+class AccessibleStreamTableListBox final : public TableListBox
+{
+public:
+    AccessibleStreamTableListBox (
+        const String& name,
+        StreamTableModel& model,
+        String semanticId)
+        : TableListBox (name, &model),
+          streamModel (model),
+          tableSemanticId (std::move (semanticId))
+    {
+    }
+
+    Component* refreshComponentForRow (
+        int rowNumber,
+        bool isRowSelected,
+        Component* existingComponentToUpdate) override
+    {
+        auto* row = TableListBox::refreshComponentForRow (
+            rowNumber,
+            isRowSelected,
+            existingComponentToUpdate);
+
+        if (row != nullptr)
+        {
+            row->setComponentID (
+                streamModel.getSemanticIdForRow (
+                    rowNumber,
+                    tableSemanticId));
+            row->setTitle (
+                streamModel.getNameForRow (rowNumber));
+            row->setDescription (
+                streamModel.getDescriptionForRow (rowNumber));
+        }
+
+        return row;
+    }
+
+    String getNameForRow (int rowNumber) override
+    {
+        return streamModel.getNameForRow (rowNumber);
+    }
+
+private:
+    StreamTableModel& streamModel;
+    String tableSemanticId;
+};
 } // namespace
 
 StreamTableModel::StreamTableModel (StreamSelectorTable* owner_)
@@ -59,47 +118,7 @@ void StreamTableModel::cellClicked (int rowNumber, int columnId, const MouseEven
 {
     if (event.mods.isLeftButtonDown())
     {
-        if (owner->viewedStreamIndex != rowNumber)
-        {
-            owner->viewedStreamIndex = rowNumber;
-
-            bool foundSelectedStreamParam = false;
-
-            for (auto param : owner->editor->getProcessor()->getParameters())
-            {
-                if (param->getType() == Parameter::ParameterType::SELECTED_STREAM_PARAM
-                    && ((SelectedStreamParameter*) param)->shouldSyncWithStreamSelector())
-                {
-                    param->setNextValue (rowNumber);
-                    foundSelectedStreamParam = true;
-                    break;
-                }
-            }
-
-            if (owner->editor->isVisualizerEditor())
-            {
-                auto* visualizerEditor = dynamic_cast<VisualizerEditor*> (owner->editor);
-
-                if (visualizerEditor->canvas != nullptr)
-                {
-                    for (auto param : visualizerEditor->canvas->getParameters())
-                    {
-                        if (param->getType() == Parameter::ParameterType::SELECTED_STREAM_PARAM
-                            && ((SelectedStreamParameter*) param)->shouldSyncWithStreamSelector())
-                        {
-                            param->setNextValue (rowNumber);
-                            foundSelectedStreamParam = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (! foundSelectedStreamParam)
-                owner->editor->updateSelectedStream (streams[rowNumber]->getStreamId());
-
-            table->repaint();
-        }
+        owner->selectStreamFromRow (rowNumber);
 
         return;
     }
@@ -303,6 +322,48 @@ String StreamTableModel::getCellTooltip (int rowNumber, int columnId)
     return String();
 }
 
+String StreamTableModel::getNameForRow (int rowNumber)
+{
+    if (! isPositiveAndBelow (rowNumber, streams.size()))
+        return {};
+
+    const auto* stream = streams[rowNumber];
+    return stream->getName()
+           + " (source "
+           + String (stream->getSourceNodeId())
+           + ")";
+}
+
+void StreamTableModel::selectedRowsChanged (int lastRowSelected)
+{
+    owner->selectStreamFromRow (lastRowSelected);
+}
+
+String StreamTableModel::getSemanticIdForRow (
+    int rowNumber,
+    const String& tableSemanticId) const
+{
+    if (! isPositiveAndBelow (rowNumber, streams.size()))
+        return {};
+
+    return tableSemanticId
+           + "."
+           + getStreamSemanticSegment (*streams[rowNumber]);
+}
+
+String StreamTableModel::getDescriptionForRow (int rowNumber) const
+{
+    if (! isPositiveAndBelow (rowNumber, streams.size()))
+        return {};
+
+    const auto* stream = streams[rowNumber];
+    return "Select "
+           + stream->getName()
+           + " from source node "
+           + String (stream->getSourceNodeId())
+           + ".";
+}
+
 void StreamTableModel::listWasScrolled()
 {
     owner->editor->updateDelayAndTTLMonitors();
@@ -354,11 +415,14 @@ StreamSelectorTable::StreamSelectorTable (GenericEditor* ed_) : editor (ed_),
 
 TableListBox* StreamSelectorTable::createTableView (bool expanded)
 {
-    TableListBox* table = new TableListBox ("Stream Table", tableModel.get());
     const auto processorName = editor->getProcessor()->getName();
     const auto processorId = editor->getProcessor()->getNodeId();
     const auto semanticId = getStreamSelectorSemanticId (*editor)
                             + (expanded ? ".expanded_table" : ".table");
+    TableListBox* table = new AccessibleStreamTableListBox (
+        "Stream Table",
+        *tableModel,
+        semanticId);
 
     applySemanticMetadata (
         *table,
@@ -614,6 +678,74 @@ void StreamSelectorTable::resized()
 int StreamSelectorTable::getViewedIndex()
 {
     return viewedStreamIndex;
+}
+
+void StreamSelectorTable::selectStreamFromRow (int rowNumber)
+{
+    if (! isPositiveAndBelow (rowNumber, streams.size()))
+        return;
+
+    if (! MessageManager::getInstance()->isThisTheMessageThread())
+    {
+        MessageManager::callAsync (
+            [safeSelector =
+                 Component::SafePointer<StreamSelectorTable> (this),
+             rowNumber]
+            {
+                if (safeSelector != nullptr)
+                    safeSelector->selectStreamFromRow (rowNumber);
+            });
+        return;
+    }
+
+    if (viewedStreamIndex == rowNumber)
+        return;
+
+    viewedStreamIndex = rowNumber;
+    bool foundSelectedStreamParam = false;
+
+    for (auto* param : editor->getProcessor()->getParameters())
+    {
+        if (param->getType()
+                == Parameter::ParameterType::SELECTED_STREAM_PARAM
+            && static_cast<SelectedStreamParameter*> (param)
+                   ->shouldSyncWithStreamSelector())
+        {
+            param->setNextValue (rowNumber);
+            foundSelectedStreamParam = true;
+            break;
+        }
+    }
+
+    if (editor->isVisualizerEditor())
+    {
+        auto* visualizerEditor =
+            dynamic_cast<VisualizerEditor*> (editor);
+
+        if (visualizerEditor != nullptr
+            && visualizerEditor->canvas != nullptr)
+        {
+            for (auto* param :
+                 visualizerEditor->canvas->getParameters())
+            {
+                if (param->getType()
+                        == Parameter::ParameterType::SELECTED_STREAM_PARAM
+                    && static_cast<SelectedStreamParameter*> (param)
+                           ->shouldSyncWithStreamSelector())
+                {
+                    param->setNextValue (rowNumber);
+                    foundSelectedStreamParam = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (! foundSelectedStreamParam)
+        editor->updateSelectedStream (
+            streams[rowNumber]->getStreamId());
+
+    tableModel->table->repaint();
 }
 
 void StreamSelectorTable::setViewedIndex (int i)

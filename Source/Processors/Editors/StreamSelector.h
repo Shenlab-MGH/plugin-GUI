@@ -99,6 +99,19 @@ public:
     /** Returns the tooltip for a particular cell*/
     String getCellTooltip (int rowNumber, int columnId) override;
 
+    /** Returns an unambiguous accessible label for a stream row. */
+    String getNameForRow (int rowNumber);
+
+    /** Applies mouse, keyboard, and UIA row selection to the editor. */
+    void selectedRowsChanged (int lastRowSelected) override;
+
+    /** Returns the stable semantic ID for a stream row in a table. */
+    String getSemanticIdForRow (int rowNumber,
+                                const String& tableSemanticId) const;
+
+    /** Returns the accessible help text for a stream row. */
+    String getDescriptionForRow (int rowNumber) const;
+
     /** Called whenever the list is scrolled; tells the editor to update the monitors*/
     void listWasScrolled() override;
 
@@ -209,8 +222,13 @@ public:
     bool isRecordNode = false;
 
 private:
+    friend class StreamTableModel;
+
     /** Renders delay & TTL monitors */
     void timerCallback() override;
+
+    /** Applies a user-originated stream selection to the processor editor. */
+    void selectStreamFromRow (int rowNumber);
 
     /** Creates a new table view */
     TableListBox* createTableView (bool expanded = false);

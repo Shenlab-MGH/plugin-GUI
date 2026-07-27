@@ -4,6 +4,8 @@
 #include "../../Source/Processors/GenericProcessor/GenericProcessor.h"
 #include "../../Source/Processors/Settings/DataStream.h"
 #include "gtest/gtest.h"
+#include <atomic>
+#include <thread>
 
 namespace
 {
@@ -15,6 +17,16 @@ public:
     void process (AudioBuffer<float>&) override {}
 };
 
+class TestDataStream final : public DataStream
+{
+public:
+    TestDataStream (Settings settings, int sourceNodeId)
+        : DataStream (std::move (settings))
+    {
+        setSourceNodeId (sourceNodeId);
+    }
+};
+
 class InspectableGenericEditor final : public GenericEditor
 {
 public:
@@ -24,6 +36,17 @@ public:
     }
 
     StreamSelectorTable& getStreamSelector() { return *streamSelector; }
+
+    void selectedStreamHasChanged() override
+    {
+        selectedStreamChangeUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        selectedStreamChangeRan.store (true);
+    }
+
+    std::atomic<bool> selectedStreamChangeRan { false };
+    std::atomic<bool> selectedStreamChangeUsedMessageThread { false };
 };
 
 class InspectableUtilityButton final : public UtilityButton
@@ -200,17 +223,164 @@ TEST (GenericEditorAccessibilityTests, ExposesStreamSelectorNavigationControls)
     EXPECT_EQ (expandHandler->getRole(), AccessibilityRole::button);
 }
 
+TEST (GenericEditorAccessibilityTests, ExposesUniqueNamedStreamRows)
+{
+    TestStreamProcessor processor;
+    processor.setNodeId (100);
+    InspectableGenericEditor editor (&processor);
+    auto& selector = editor.getStreamSelector();
+    TestDataStream first ({ "Probe AP",
+                            "First Neuropixels action-potential stream",
+                            "probe.ap",
+                            30000.0f,
+                            true },
+                          101);
+    TestDataStream second ({ "Probe AP",
+                             "Second Neuropixels action-potential stream",
+                             "probe.ap",
+                             30000.0f,
+                             true },
+                           102);
+
+    selector.add (&first);
+    selector.add (&second);
+    selector.finishedUpdate();
+
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    auto* firstRow = table->getComponentForRowNumber (0);
+    auto* secondRow = table->getComponentForRowNumber (1);
+    ASSERT_NE (firstRow, nullptr);
+    ASSERT_NE (secondRow, nullptr);
+
+    EXPECT_EQ (
+        firstRow->getComponentID(),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap");
+    EXPECT_EQ (
+        secondRow->getComponentID(),
+        "oe.processor.100.streams.table.source_102.stream_probe_ap");
+
+    auto firstHandler = firstRow->createAccessibilityHandler();
+    auto secondHandler = secondRow->createAccessibilityHandler();
+    ASSERT_NE (firstHandler, nullptr);
+    ASSERT_NE (secondHandler, nullptr);
+    EXPECT_EQ (firstHandler->getTitle(), "Probe AP (source 101)");
+    EXPECT_EQ (secondHandler->getTitle(), "Probe AP (source 102)");
+}
+
+TEST (GenericEditorAccessibilityTests, SelectingStreamRowUpdatesEditor)
+{
+    MessageManager::getInstance();
+    MessageManagerLock lock;
+    TestStreamProcessor processor;
+    processor.setNodeId (100);
+    InspectableGenericEditor editor (&processor);
+    auto& selector = editor.getStreamSelector();
+    TestDataStream first ({ "Probe AP",
+                            "Neuropixels action-potential stream",
+                            "probe.ap",
+                            30000.0f,
+                            true },
+                          101);
+    TestDataStream second ({ "Probe LFP",
+                             "Neuropixels local-field-potential stream",
+                             "probe.lfp",
+                             2500.0f,
+                             true },
+                           101);
+
+    selector.add (&first);
+    selector.add (&second);
+    selector.finishedUpdate();
+
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    auto* secondRow = table->getComponentForRowNumber (1);
+    ASSERT_NE (secondRow, nullptr);
+    auto handler = secondRow->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::focus));
+    EXPECT_EQ (selector.getViewedIndex(), 1);
+    EXPECT_EQ (editor.getCurrentStream(), second.getStreamId());
+}
+
+TEST (GenericEditorAccessibilityTests, ModelSelectionUpdatesOnMessageThread)
+{
+    auto* messageManager = MessageManager::getInstance();
+    TestStreamProcessor processor;
+    processor.setNodeId (100);
+    InspectableGenericEditor editor (&processor);
+    auto& selector = editor.getStreamSelector();
+    TestDataStream first ({ "Probe AP",
+                            "Neuropixels action-potential stream",
+                            "probe.ap",
+                            30000.0f,
+                            true },
+                          101);
+    TestDataStream second ({ "Probe LFP",
+                             "Neuropixels local-field-potential stream",
+                             "probe.lfp",
+                             2500.0f,
+                             true },
+                           101);
+
+    selector.add (&first);
+    selector.add (&second);
+    selector.finishedUpdate();
+
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    auto* model = table->getTableListBoxModel();
+    ASSERT_NE (model, nullptr);
+
+    std::thread worker (
+        [model]
+        {
+            model->selectedRowsChanged (1);
+        });
+    worker.join();
+
+    EXPECT_FALSE (editor.selectedStreamChangeRan.load());
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! editor.selectedStreamChangeRan.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (10);
+    }
+
+    EXPECT_TRUE (editor.selectedStreamChangeRan.load());
+    EXPECT_TRUE (
+        editor.selectedStreamChangeUsedMessageThread.load());
+    EXPECT_EQ (selector.getViewedIndex(), 1);
+    EXPECT_EQ (editor.getCurrentStream(), second.getStreamId());
+}
+
 TEST (GenericEditorAccessibilityTests, ScopesStreamStatusControlsToProcessorAndStream)
 {
     TestStreamProcessor processor;
     processor.setNodeId (100);
     InspectableGenericEditor editor (&processor);
     auto& selector = editor.getStreamSelector();
-    DataStream stream ({ "Probe AP",
-                         "Neuropixels action-potential stream",
-                         "probe.ap",
-                         30000.0f,
-                         true });
+    TestDataStream stream ({ "Probe AP",
+                             "Neuropixels action-potential stream",
+                             "probe.ap",
+                             30000.0f,
+                             true },
+                           101);
 
     selector.add (&stream);
     selector.finishedUpdate();
@@ -219,7 +389,7 @@ TEST (GenericEditorAccessibilityTests, ScopesStreamStatusControlsToProcessorAndS
     ASSERT_NE (ttlMonitor, nullptr);
 
     const String expectedId =
-        "oe.processor.100.streams.stream_probe_ap.ttl_lines";
+        "oe.processor.100.streams.source_101.stream_probe_ap.ttl_lines";
     EXPECT_EQ (ttlMonitor->getComponentID(), expectedId);
     EXPECT_EQ (ttlMonitor->getTitle(), "Probe AP TTL line states");
     EXPECT_EQ (ttlMonitor->getDescription(),
@@ -231,7 +401,7 @@ TEST (GenericEditorAccessibilityTests, ScopesStreamStatusControlsToProcessorAndS
     ASSERT_NE (delayMonitor, nullptr);
     EXPECT_EQ (
         delayMonitor->getComponentID(),
-        "oe.processor.100.streams.stream_probe_ap.processing_delay");
+        "oe.processor.100.streams.source_101.stream_probe_ap.processing_delay");
     EXPECT_EQ (delayMonitor->getTitle(), "Probe AP processing delay");
     EXPECT_EQ (delayMonitor->getDescription(),
                "Processing delay for Probe AP.");
