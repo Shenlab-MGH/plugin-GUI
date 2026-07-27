@@ -8,6 +8,7 @@ add_sources(${COMPONENT_NAME}_tests
 		AudioEditorAccessibilityTests.cpp
 		AutoUpdaterAccessibilityTests.cpp
 		ChromeAccessibilityTests.cpp
+		DefaultConfigAccessibilityTests.cpp
 		MainDocumentWindowAccessibilityTests.cpp
 		ParameterEditorAccessibilityTests.cpp
 		ProcessorListAccessibilityTests.cpp

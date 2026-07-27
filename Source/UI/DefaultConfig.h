@@ -25,8 +25,22 @@
 #define DEFAULTCONFIG_H_INCLUDED
 
 #include "../../JuceLibraryCode/JuceHeader.h"
+#include "../TestableExport.h"
 
 class MainWindow;
+
+TESTABLE void configureDefaultConfigAccessibility (
+    Component& content,
+    Label& instructions,
+    Button& acquisitionBoard,
+    Label& acquisitionBoardLabel,
+    Button& fileReader,
+    Label& fileReaderLabel,
+    Button& neuropixels,
+    Label& neuropixelsLabel,
+    Button& load);
+
+TESTABLE void configureDefaultConfigWindowAccessibility (Component& window);
 
 /** 
 

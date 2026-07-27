@@ -27,7 +27,81 @@
 #include "../AccessClass.h"
 #include "../CoreServices.h"
 #include "EditorViewport.h"
+#include "SemanticComponent.h"
 #include "UIComponent.h"
+
+//-----------------------------------------------------------------------
+
+void configureDefaultConfigAccessibility (
+    Component& content,
+    Label& instructions,
+    Button& acquisitionBoard,
+    Label& acquisitionBoardLabel,
+    Button& fileReader,
+    Label& fileReaderLabel,
+    Button& neuropixels,
+    Label& neuropixelsLabel,
+    Button& load)
+{
+    applySemanticMetadata (
+        content,
+        "oe.dialog.default_config.content",
+        "Default configuration choices",
+        "Choose one of the bundled Open Ephys signal-chain configurations.");
+    applySemanticMetadata (
+        instructions,
+        "oe.dialog.default_config.instructions",
+        "Configuration instructions",
+        "Instructions for selecting a bundled default configuration.");
+    applySemanticMetadata (
+        acquisitionBoard,
+        "oe.dialog.default_config.acquisition_board",
+        "Acquisition board",
+        "Select the bundled Acquisition Board configuration.",
+        "Acquire data from an Open Ephys Acquisition Board.");
+    applySemanticMetadata (
+        acquisitionBoardLabel,
+        "oe.dialog.default_config.acquisition_board_label",
+        "Acquisition board label",
+        "Label for the Acquisition Board configuration.");
+    applySemanticMetadata (
+        fileReader,
+        "oe.dialog.default_config.file_reader",
+        "File reader",
+        "Select the bundled File Reader configuration.",
+        "Read data from a file.");
+    applySemanticMetadata (
+        fileReaderLabel,
+        "oe.dialog.default_config.file_reader_label",
+        "File reader label",
+        "Label for the File Reader configuration.");
+    applySemanticMetadata (
+        neuropixels,
+        "oe.dialog.default_config.neuropixels",
+        "Neuropixels",
+        "Select a bundled Neuropixels configuration.",
+        "Acquire data from Neuropixels probes.");
+    applySemanticMetadata (
+        neuropixelsLabel,
+        "oe.dialog.default_config.neuropixels_label",
+        "Neuropixels label",
+        "Label for the Neuropixels configuration.");
+    applySemanticMetadata (
+        load,
+        "oe.dialog.default_config.load",
+        "Load configuration",
+        "Load the selected bundled configuration.",
+        "Replaces the current signal chain with the selected configuration.");
+}
+
+void configureDefaultConfigWindowAccessibility (Component& window)
+{
+    applySemanticMetadata (
+        window,
+        "oe.dialog.default_config",
+        "Default configuration",
+        "Choose and load a bundled Open Ephys configuration.");
+}
 
 //-----------------------------------------------------------------------
 
@@ -61,6 +135,7 @@ void DefaultConfigWindow::launchWindow()
     options.resizable = false;
 
     auto* window = options.launchAsync();
+    configureDefaultConfigWindowAccessibility (*window);
     window->setAlwaysOnTop (true);
     window->addKeyListener ((DefaultConfigComponent*) window->getContentComponent());
     configWindow = window;
@@ -151,6 +226,16 @@ DefaultConfigComponent::DefaultConfigComponent()
     goButton->setColour (TextButton::buttonColourId, findColour (ThemeColours::highlightedFill));
     goButton->addListener (this);
     addAndMakeVisible (goButton.get());
+
+    configureDefaultConfigAccessibility (*this,
+                                         *configLabel,
+                                         *acqBoardButton,
+                                         *acqBoardLabel,
+                                         *fileReaderButton,
+                                         *fileReaderLabel,
+                                         *neuropixelsButton,
+                                         *neuropixelsLabel,
+                                         *goButton);
 }
 
 DefaultConfigComponent::~DefaultConfigComponent()
