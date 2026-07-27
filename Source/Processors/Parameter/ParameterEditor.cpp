@@ -163,6 +163,7 @@ TextBoxParameterEditor::TextBoxParameterEditor (Parameter* param, int rowHeightP
     Font labelFont = FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels));
     int width = rowWidthPixels;
     label->setFont (labelFont);
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     if (param->getType() == Parameter::FLOAT_PARAM)
@@ -286,6 +287,7 @@ ToggleParameterEditor::ToggleParameterEditor (Parameter* param, int rowHeightPix
 
     label = std::make_unique<Label> ("Parameter name", param->getDisplayName() == "" ? param->getName().replace ("_", " ") : param->getDisplayName());
     label->setFont (FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels)));
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     toggleButton = std::make_unique<CustomToggleButton>();
@@ -331,6 +333,7 @@ ComboBoxParameterEditor::ComboBoxParameterEditor (Parameter* param, int rowHeigh
 
     label = std::make_unique<Label> ("Parameter name", param->getDisplayName()); // == "" ? param->getName().replace("_", " ") : param->getDisplayName());
     label->setFont (FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels)));
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     valueComboBox = std::make_unique<ComboBox>();
@@ -529,6 +532,7 @@ BoundedValueParameterEditor::BoundedValueParameterEditor (Parameter* param, int 
     label = std::make_unique<Label> ("Parameter name", param->getDisplayName() == "" ? param->getName().replace ("_", " ") : param->getDisplayName());
     Font labelFont = FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels));
     label->setFont (labelFont);
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     if (param->getType() == Parameter::FLOAT_PARAM)
@@ -637,6 +641,7 @@ SelectedChannelsParameterEditor::SelectedChannelsParameterEditor (Parameter* par
     Font labelFont = FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels));
     label->setFont (labelFont);
     label->setJustificationType (Justification::left);
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     setBounds (0, 0, rowWidthPixels, rowHeightPixels);
@@ -778,6 +783,7 @@ MaskChannelsParameterEditor::MaskChannelsParameterEditor (Parameter* param, int 
     Font labelFont = FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels));
     label->setFont (labelFont);
     label->setJustificationType (Justification::left);
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     int width = rowWidthPixels;
@@ -1024,6 +1030,7 @@ TtlLineParameterEditor::TtlLineParameterEditor (Parameter* param,
         Font labelFont = FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels));
         label->setFont (labelFont);
         label->setJustificationType (Justification::left);
+        label->setAccessible (false);
         addAndMakeVisible (label.get());
 
         setBounds (0, 0, rowWidthPixels, rowHeightPixels);
@@ -1184,6 +1191,7 @@ PathParameterEditor::PathParameterEditor (Parameter* param, int rowHeightPixels,
     Font labelFont = FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels));
     label->setFont (labelFont);
     label->setJustificationType (Justification::left);
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     int width = rowWidthPixels;
@@ -1283,6 +1291,7 @@ SelectedStreamParameterEditor::SelectedStreamParameterEditor (Parameter* param, 
 
     label = std::make_unique<Label> ("Parameter name", param->getDisplayName() == "" ? param->getName().replace ("_", " ") : param->getDisplayName());
     label->setFont (FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels)));
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     valueComboBox = std::make_unique<ComboBox>();
@@ -1368,6 +1377,7 @@ TimeParameterEditor::TimeParameterEditor (Parameter* param, int rowHeightPixels,
 
     label = std::make_unique<Label> ("Parameter name", param->getDisplayName() == "" ? param->getName().replace ("_", " ") : param->getDisplayName());
     label->setFont (FontOptions ("Inter", "Regular", int (0.75 * rowHeightPixels)));
+    label->setAccessible (false);
     addAndMakeVisible (label.get());
 
     button =

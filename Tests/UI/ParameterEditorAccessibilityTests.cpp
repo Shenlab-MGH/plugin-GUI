@@ -43,6 +43,10 @@ protected:
         EXPECT_EQ (valueControl->getTitle(), expectedTitle);
         EXPECT_EQ (valueControl->getDescription(), expectedDescription);
         EXPECT_TRUE (valueControl->isAccessible());
+
+        auto* visualLabel = editor.getLabel();
+        ASSERT_NE (visualLabel, nullptr);
+        EXPECT_FALSE (visualLabel->isAccessible());
     }
 
     static void expectReadOnlyButtonValue (
