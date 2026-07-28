@@ -121,11 +121,15 @@ private:
     void mouseUp (const MouseEvent& event) override;
 };
 
-class ScrubberInterface : public Component, public Button::Listener
+class TESTABLE ScrubberInterface : public Component,
+                                   public Button::Listener
 {
 public:
     ScrubberInterface (FileReader* reader);
     ~ScrubberInterface() override {};
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
     std::unique_ptr<Label> zoomStartTimeLabel;
     std::unique_ptr<Label> zoomMiddleTimeLabel;

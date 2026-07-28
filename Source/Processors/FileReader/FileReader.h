@@ -61,8 +61,8 @@ static const Array<Colour> eventChannelColours = {
 
   @see GenericProcessor
 */
-class FileReader : public GenericProcessor,
-                   private Thread
+class TESTABLE FileReader : public GenericProcessor,
+                            private Thread
 {
 public:
     /** Constructor */

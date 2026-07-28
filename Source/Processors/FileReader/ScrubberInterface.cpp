@@ -22,6 +22,31 @@
 */
 
 #include "ScrubberInterface.h"
+#include "../../UI/SemanticComponent.h"
+
+namespace
+{
+class ScrubberTimeLabel final : public Label
+{
+public:
+    using Label::Label;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override
+    {
+        return createReadOnlyTextAccessibilityHandler (
+            *this,
+            [safeLabel =
+                 Component::SafePointer<ScrubberTimeLabel> (
+                     this)]
+            {
+                return safeLabel != nullptr
+                           ? safeLabel->getText()
+                           : String();
+            });
+    }
+};
+} // namespace
 
 void FullTimeline::paint (Graphics& g)
 {
@@ -292,15 +317,55 @@ ScrubberInterface::ScrubberInterface (FileReader* fileReader_)
     fileReader = fileReader_;
 
     int scrubInterfaceWidth = 420;
+    const auto scrubberId =
+        createProcessorControlSemanticId (
+            fileReader->getNodeId(),
+            "scrubber");
+    applySemanticMetadata (
+        *this,
+        scrubberId + ".panel",
+        "File reader scrubber",
+        "Inspect and navigate playback time in the loaded recording.");
 
-    zoomStartTimeLabel = std::make_unique<Label> ("ZoomStartTime", "");
+    auto createTimeLabel =
+        [&scrubberId] (
+            const String& internalName,
+            const String& initialText,
+            const String& idSuffix,
+            const String& title,
+            const String& description)
+    {
+        auto label =
+            std::make_unique<ScrubberTimeLabel> (
+                internalName,
+                initialText);
+        applySemanticMetadata (
+            *label,
+            scrubberId + "." + idSuffix,
+            title,
+            description);
+        label->setTooltip (description);
+        return label;
+    };
+
+    zoomStartTimeLabel =
+        createTimeLabel (
+            "ZoomStartTime",
+            "",
+            "zoom_start",
+            "Zoom window start",
+            "Start time of the zoom timeline.");
     zoomStartTimeLabel->setBounds (0, 30, 100, 10);
-    zoomStartTimeLabel->setTooltip ("Start time of the zoom timeline");
     addAndMakeVisible (zoomStartTimeLabel.get());
 
-    zoomMiddleTimeLabel = std::make_unique<Label> ("ZoomMidTime", "");
+    zoomMiddleTimeLabel =
+        createTimeLabel (
+            "ZoomMidTime",
+            "",
+            "zoom_playhead",
+            "Zoom playhead position",
+            "Current playhead position in the zoom timeline.");
     zoomMiddleTimeLabel->setBounds (0.39 * scrubInterfaceWidth, 30, 100, 10);
-    zoomMiddleTimeLabel->setTooltip ("Current playhead position");
     addAndMakeVisible (zoomMiddleTimeLabel.get());
 
     //Compute zoom end time based on start/stop time from fileReader
@@ -313,36 +378,66 @@ ScrubberInterface::ScrubberInterface (FileReader* fileReader_)
     TimeParameter::TimeValue duration = TimeParameter::TimeValue (durationMs);
     TimeParameter::TimeValue endTime = TimeParameter::TimeValue (endMs);
 
-    zoomEndTimeLabel = std::make_unique<Label> ("ZoomEndTime", duration.toString());
+    zoomEndTimeLabel =
+        createTimeLabel (
+            "ZoomEndTime",
+            duration.toString(),
+            "zoom_end",
+            "Zoom window end",
+            "End time of the zoom timeline.");
     zoomEndTimeLabel->setBounds (0.75 * scrubInterfaceWidth, 30, 100, 10);
-    zoomEndTimeLabel->setTooltip ("End time of the zoom timeline");
     addAndMakeVisible (zoomEndTimeLabel.get());
 
-    fullStartTimeLabel = std::make_unique<Label> ("FullStartTime", "");
+    fullStartTimeLabel =
+        createTimeLabel (
+            "FullStartTime",
+            "",
+            "playback_start",
+            "Playback start",
+            "Configured start time of playback.");
     fullStartTimeLabel->setBounds (0, 100, 100, 10);
-    fullStartTimeLabel->setTooltip ("Start time of the recording");
     addAndMakeVisible (fullStartTimeLabel.get());
 
-    minStartTimeLabel = std::make_unique<Label> ("MinStartTime", "00:00:00.000");
+    minStartTimeLabel =
+        createTimeLabel (
+            "MinStartTime",
+            "00:00:00.000",
+            "minimum_start",
+            "Minimum playback start",
+            "Earliest available time in the recording.");
     minStartTimeLabel->setBounds (0, 115, 100, 10);
-    minStartTimeLabel->setTooltip ("Minimum start time of the recording");
     minStartTimeLabel->setAlpha (0.5f);
     addAndMakeVisible (minStartTimeLabel.get());
 
-    fullMiddleTimeLabel = std::make_unique<Label> ("FullMidTime", "");
+    fullMiddleTimeLabel =
+        createTimeLabel (
+            "FullMidTime",
+            "",
+            "playback_position",
+            "Playback position",
+            "Current playback position in the recording.");
     fullMiddleTimeLabel->setBounds (0.39 * scrubInterfaceWidth, 108, 100, 10);
-    fullMiddleTimeLabel->setTooltip ("Current playback position");
     fullMiddleTimeLabel->setAlpha (0.5f);
     addAndMakeVisible (fullMiddleTimeLabel.get());
 
-    fullEndTimeLabel = std::make_unique<Label> ("FullEndTime", "");
+    fullEndTimeLabel =
+        createTimeLabel (
+            "FullEndTime",
+            "",
+            "playback_end",
+            "Playback end",
+            "Configured end time of playback.");
     fullEndTimeLabel->setBounds (0.75 * scrubInterfaceWidth, 100, 100, 10);
-    fullEndTimeLabel->setTooltip ("End time of the recording");
     addAndMakeVisible (fullEndTimeLabel.get());
 
-    maxEndTimeLabel = std::make_unique<Label> ("MaxEndTime", "00:00:00.000");
+    maxEndTimeLabel =
+        createTimeLabel (
+            "MaxEndTime",
+            "00:00:00.000",
+            "maximum_end",
+            "Maximum playback end",
+            "Latest available time in the recording.");
     maxEndTimeLabel->setBounds (0.75 * scrubInterfaceWidth, 115, 100, 10);
-    maxEndTimeLabel->setTooltip ("Maximum end time of the recording");
     maxEndTimeLabel->setAlpha (0.5f);
     addAndMakeVisible (maxEndTimeLabel.get());
 
@@ -356,6 +451,14 @@ ScrubberInterface::ScrubberInterface (FileReader* fileReader_)
     addAndMakeVisible (fullTimeline.get());
 
     setVisible (false);
+}
+
+std::unique_ptr<AccessibilityHandler>
+ScrubberInterface::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::group);
 }
 
 void ScrubberInterface::setCurrentSample (int zoomTimelinePos)
