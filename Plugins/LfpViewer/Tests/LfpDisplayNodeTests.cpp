@@ -4671,6 +4671,105 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        SpikeRasterComboBoxRemainsCoherentWithoutChannelsOrDisplayBuffer)
+{
+    auto zeroChannelTester = std::make_unique<ProcessorTester> (
+        TestSourceNodeBuilder (FakeSourceNodeParams { 0, sampleRate, bitVolts }));
+    auto* zeroChannelProcessor = zeroChannelTester->createProcessor<LfpViewer::LfpDisplayNode> (
+        Plugin::Processor::SINK);
+    auto zeroCanvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        zeroChannelProcessor, LfpViewer::SplitLayouts::SINGLE, false);
+    zeroCanvas->updateSettings();
+    zeroCanvas->setSize (900, 800);
+    zeroCanvas->addToDesktop (0);
+    zeroCanvas->setVisible (true);
+    zeroCanvas->toggleOptionsDrawer (true);
+
+    auto* zeroDisplay = findLfpDescendant<LfpViewer::LfpDisplay> (*zeroCanvas);
+    ASSERT_NE (zeroDisplay, nullptr);
+    ASSERT_EQ (zeroChannelProcessor->getNumInputs(), 0);
+    std::vector<ComboBox*> zeroComboBoxes;
+    collectLfpDescendants (*zeroCanvas, zeroComboBoxes);
+    const auto zeroSpikeRaster = std::find_if (
+        zeroComboBoxes.begin(), zeroComboBoxes.end(), [] (const ComboBox* candidate)
+        { return candidate->getName() == "spikeRasterSelection"; });
+    const auto zeroTimebase = std::find_if (
+        zeroComboBoxes.begin(), zeroComboBoxes.end(), [] (const ComboBox* candidate)
+        { return candidate->getName() == "Timebase"; });
+    ASSERT_NE (zeroSpikeRaster, zeroComboBoxes.end());
+    ASSERT_NE (zeroTimebase, zeroComboBoxes.end());
+
+    (*zeroSpikeRaster)->setSelectedId (3, sendNotificationSync);
+    EXPECT_TRUE (zeroDisplay->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (zeroDisplay->getSpikeRasterThreshold(), -100.0f);
+    EXPECT_TRUE (zeroDisplay->getMedianOffsetPlotting());
+    (*zeroSpikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_FALSE (zeroDisplay->getSpikeRasterPlotting());
+    EXPECT_FALSE (zeroDisplay->getMedianOffsetPlotting());
+
+    (*zeroSpikeRaster)->setText ("123.5", sendNotificationSync);
+    EXPECT_EQ ((*zeroSpikeRaster)->getText(), "-123.5");
+    EXPECT_TRUE (zeroDisplay->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (zeroDisplay->getSpikeRasterThreshold(), -123.5f);
+    (*zeroSpikeRaster)->setText ("999", sendNotificationSync);
+    EXPECT_EQ ((*zeroSpikeRaster)->getText(), "-500");
+    EXPECT_FLOAT_EQ (zeroDisplay->getSpikeRasterThreshold(), -500.0f);
+    (*zeroSpikeRaster)->setText ("0", sendNotificationSync);
+    EXPECT_EQ ((*zeroSpikeRaster)->getText(), "OFF");
+    EXPECT_FALSE (zeroDisplay->getSpikeRasterPlotting());
+    EXPECT_FALSE (zeroDisplay->getMedianOffsetPlotting());
+    (*zeroSpikeRaster)->setText ("not a number", sendNotificationSync);
+    EXPECT_EQ ((*zeroSpikeRaster)->getText(), "OFF");
+    EXPECT_FALSE (zeroDisplay->getSpikeRasterPlotting());
+
+    auto* zeroOptions = findLfpAncestor<LfpViewer::LfpDisplayOptions> (
+        **zeroSpikeRaster);
+    ASSERT_NE (zeroOptions, nullptr);
+    zeroOptions->setMedianOffset (true);
+    (*zeroSpikeRaster)->setSelectedId (2, sendNotificationSync);
+    (*zeroSpikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_FALSE (zeroDisplay->getSpikeRasterPlotting());
+    EXPECT_TRUE (zeroDisplay->getMedianOffsetPlotting());
+
+    auto* zeroSplitter = findLfpDescendant<LfpViewer::LfpDisplaySplitter> (
+        *zeroCanvas);
+    ASSERT_NE (zeroSplitter, nullptr);
+    const auto initialTimebase = zeroSplitter->timebase;
+    (*zeroTimebase)->setSelectedId (7, sendNotificationSync);
+    EXPECT_EQ ((*zeroTimebase)->getSelectedId(), 7);
+    EXPECT_FLOAT_EQ (zeroSplitter->timebase, initialTimebase);
+
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    canvas->removeBufferForDisplay (0);
+
+    auto* display = findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (display, nullptr);
+    std::vector<ComboBox*> comboBoxes;
+    collectLfpDescendants (*canvas, comboBoxes);
+    const auto spikeRaster = std::find_if (
+        comboBoxes.begin(), comboBoxes.end(), [] (const ComboBox* candidate)
+        { return candidate->getName() == "spikeRasterSelection"; });
+    ASSERT_NE (spikeRaster, comboBoxes.end());
+
+    (*spikeRaster)->setSelectedId (4, sendNotificationSync);
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -150.0f);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    (*spikeRaster)->setText ("234", sendNotificationSync);
+    EXPECT_EQ ((*spikeRaster)->getText(), "-234");
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -234.0f);
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_FALSE (display->getSpikeRasterPlotting());
+    EXPECT_FALSE (display->getMedianOffsetPlotting());
+}
+
+TEST_F (LfpDisplayNodeTests,
         SpikeRasterXmlRestoresSubtractOffsetOwnershipWithoutNotifications)
 {
     auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (

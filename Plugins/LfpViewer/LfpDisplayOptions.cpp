@@ -2595,9 +2595,6 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         return;
     }
 
-    if (canvasSplit->getNumChannels() == 0)
-        return;
-
     if (cb == spikeRasterSelection.get())
     {
         // if custom value
@@ -2667,7 +2664,10 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
             lfpDisplay->setSpikeRasterPlotting (true);
         }
     }
-    else if (cb == colourSchemeOptionSelection.get())
+    if (canvasSplit->getNumChannels() == 0)
+        return;
+
+    if (cb == colourSchemeOptionSelection.get())
     {
         lfpDisplay->setActiveColourSchemeIdx (cb->getSelectedId() - 1);
 
