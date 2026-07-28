@@ -3,16 +3,100 @@
 #include "../../Source/Processors/Editors/StreamSelector.h"
 #include "../../Source/Processors/GenericProcessor/GenericProcessor.h"
 #include "../../Source/Processors/Settings/DataStream.h"
+#include "../../Source/UI/EditorViewport.h"
 #include "gtest/gtest.h"
 #include <atomic>
 #include <thread>
 
+#if JUCE_WINDOWS
+#include <UIAutomation.h>
+#include <wrl/client.h>
+#endif
+
 namespace
 {
+class GenericEditorTestApplication final
+    : public JUCEApplication
+{
+public:
+    const String getApplicationName()
+        override
+    {
+        return "Generic editor accessibility tests";
+    }
+
+    const String getApplicationVersion()
+        override
+    {
+        return "1.0";
+    }
+
+    void initialise (
+        const String&) override
+    {
+    }
+
+    void shutdown() override
+    {
+    }
+};
+
+class ScopedGenericEditorTestApplication
+{
+public:
+    ScopedGenericEditorTestApplication()
+        : application (
+              std::make_unique<
+                  GenericEditorTestApplication>())
+    {
+        AccessClass::
+            clearAccessClassStateForTesting();
+        MessageManager::getInstance();
+        initialised =
+            static_cast<
+                JUCEApplicationBase*> (
+                    application.get())
+                ->initialiseApp();
+    }
+
+    ~ScopedGenericEditorTestApplication()
+    {
+        if (initialised)
+        {
+            static_cast<
+                JUCEApplicationBase*> (
+                    application.get())
+                ->shutdownApp();
+        }
+        AccessClass::
+            clearAccessClassStateForTesting();
+    }
+
+    bool wasInitialised() const
+    {
+        return initialised;
+    }
+
+private:
+    std::unique_ptr<
+        GenericEditorTestApplication>
+        application;
+    bool initialised = false;
+};
+
 class TestStreamProcessor final : public GenericProcessor
 {
 public:
-    TestStreamProcessor() : GenericProcessor ("Test Processor") {}
+    explicit TestStreamProcessor (
+        int nodeId = 0,
+        Plugin::Processor::Type type =
+            Plugin::Processor::FILTER)
+        : GenericProcessor (
+              "Test Processor")
+    {
+        setNodeId (nodeId);
+        setProcessorType (type);
+    }
 
     void process (AudioBuffer<float>&) override {}
 };
@@ -49,6 +133,46 @@ public:
     std::atomic<bool> selectedStreamChangeUsedMessageThread { false };
 };
 
+class ProcessorProxyHarness
+{
+public:
+    explicit ProcessorProxyHarness (
+        Plugin::Processor::Type type =
+            Plugin::Processor::FILTER)
+        : processor (100, type),
+          editor (&processor),
+          viewport (
+              new EditorViewport (
+                  &navigation))
+    {
+        viewport->editorArray.add (
+            &editor);
+        viewport->addAndMakeVisible (
+            &editor);
+        viewport->setBounds (
+            0,
+            0,
+            800,
+            400);
+        navigation.setBounds (
+            0,
+            0,
+            800,
+            400);
+        viewport->refreshEditors();
+        proxy =
+            viewport
+                ->getProcessorAccessibilityProxy (
+                    editor);
+    }
+
+    TestStreamProcessor processor;
+    InspectableGenericEditor editor;
+    SignalChainTabComponent navigation;
+    EditorViewport* viewport;
+    Component* proxy = nullptr;
+};
+
 class InspectableUtilityButton final : public UtilityButton
 {
 public:
@@ -73,6 +197,9 @@ public:
 
 Component* findDescendantBySemanticId (Component& parent, const String& id)
 {
+    if (parent.getComponentID() == id)
+        return &parent;
+
     for (auto* child : parent.getChildren())
     {
         if (child->getComponentID() == id)
@@ -84,7 +211,797 @@ Component* findDescendantBySemanticId (Component& parent, const String& id)
 
     return nullptr;
 }
+
+Component* findDesktopComponentBySemanticId (
+    StringRef id)
+{
+    auto& desktop =
+        Desktop::getInstance();
+
+    for (int index = 0;
+         index < desktop
+                     .getNumComponents();
+         ++index)
+    {
+        if (auto* component =
+                desktop.getComponent (
+                    index))
+        {
+            if (auto* match =
+                    findDescendantBySemanticId (
+                        *component,
+                        String (id)))
+                return match;
+        }
+    }
+
+    return nullptr;
+}
+
+const PopupMenu::Item* findMenuItem (
+    const PopupMenu& menu,
+    int itemId)
+{
+    PopupMenu::MenuItemIterator iterator (
+        menu);
+
+    while (iterator.next())
+        if (iterator.getItem().itemID
+            == itemId)
+            return &iterator.getItem();
+
+    return nullptr;
+}
 } // namespace
+
+TEST (GenericEditorAccessibilityTests,
+      ExposesProcessorAsContextMenuTarget)
+{
+    ProcessorProxyHarness harness;
+    ASSERT_NE (
+        harness.proxy,
+        nullptr);
+
+    EXPECT_EQ (
+        harness.editor
+            .getComponentID(),
+        "oe.processor.100.editor");
+    EXPECT_EQ (
+        harness.editor.getTitle(),
+        "Test Processor (node 100)");
+    EXPECT_EQ (
+        harness.editor
+            .getDescription(),
+        "Test Processor processor 100 in the signal chain.");
+    EXPECT_EQ (
+        harness.proxy
+            ->getComponentID(),
+        "oe.processor.100.editor.actions");
+    EXPECT_EQ (
+        harness.proxy->getTitle(),
+        "Test Processor processor actions");
+    EXPECT_EQ (
+        harness.proxy
+            ->getDescription(),
+        "Select Test Processor processor 100 or open its existing processor menu.");
+
+    auto handler =
+        createProcessorAccessibilityHandlerForTesting (
+            *harness.proxy);
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::group);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::
+                showMenu));
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isSelectable());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpandable());
+
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        harness.editor
+            .getSelectionState());
+
+    harness.processor
+        .setNodeId (101);
+    harness.editor.updateName();
+    harness.viewport
+        ->refreshEditors();
+    EXPECT_EQ (
+        harness.editor
+            .getComponentID(),
+        "oe.processor.101.editor");
+    EXPECT_EQ (
+        harness.editor.getTitle(),
+        "Test Processor (node 101)");
+    EXPECT_EQ (
+        harness.editor
+            .getDescription(),
+        "Test Processor processor 101 in the signal chain.");
+    EXPECT_EQ (
+        harness.proxy
+            ->getComponentID(),
+        "oe.processor.101.editor.actions");
+}
+
+TEST (GenericEditorAccessibilityTests,
+      ExposesEveryProcessorContextMenuAction)
+{
+    TestStreamProcessor processor;
+    processor.setNodeId (100);
+    InspectableGenericEditor editor (
+        &processor);
+
+    const auto menu =
+        createProcessorContextMenu (
+            editor,
+            false,
+            false);
+
+    struct ExpectedItem
+    {
+        int itemId;
+        const char* text;
+        const char* accessibilityId;
+        const char* description;
+    };
+
+    const std::array<ExpectedItem, 6>
+        expectedItems {
+            ExpectedItem {
+                3,
+                "Collapse",
+                "oe.processor.100.context.toggle_collapse",
+                "Collapse Test Processor processor 100." },
+            ExpectedItem {
+                2,
+                "Delete",
+                "oe.processor.100.context.delete_selected",
+                "Delete all selected processors from the signal chain." },
+            ExpectedItem {
+                1,
+                "Rename",
+                "oe.processor.100.context.rename",
+                "Rename Test Processor processor 100." },
+            ExpectedItem {
+                4,
+                "Save settings...",
+                "oe.processor.100.context.save_settings",
+                "Save settings for Test Processor processor 100." },
+            ExpectedItem {
+                5,
+                "Load settings...",
+                "oe.processor.100.context.load_settings",
+                "Load settings for Test Processor processor 100." },
+            ExpectedItem {
+                6,
+                "Save image...",
+                "oe.processor.100.context.save_image",
+                "Save an image of Test Processor processor 100." }
+        };
+
+    for (const auto& expected :
+         expectedItems)
+    {
+        const auto* item =
+            findMenuItem (
+                menu,
+                expected.itemId);
+        ASSERT_NE (item, nullptr);
+        EXPECT_EQ (
+            item->text,
+            expected.text);
+        EXPECT_EQ (
+            item->accessibilityId,
+            expected.accessibilityId);
+        EXPECT_EQ (
+            item->accessibilityDescription,
+            expected.description);
+        EXPECT_TRUE (item->isEnabled);
+    }
+
+    const auto restrictedMenu =
+        createProcessorContextMenu (
+            editor,
+            true,
+            true);
+    EXPECT_FALSE (
+        findMenuItem (
+            restrictedMenu,
+            1)
+            ->isEnabled);
+    EXPECT_FALSE (
+        findMenuItem (
+            restrictedMenu,
+            2)
+            ->isEnabled);
+    EXPECT_FALSE (
+        findMenuItem (
+            restrictedMenu,
+            5)
+            ->isEnabled);
+    EXPECT_TRUE (
+        findMenuItem (
+            restrictedMenu,
+            3)
+            ->isEnabled);
+    EXPECT_TRUE (
+        findMenuItem (
+            restrictedMenu,
+            4)
+            ->isEnabled);
+    EXPECT_TRUE (
+        findMenuItem (
+            restrictedMenu,
+            6)
+            ->isEnabled);
+
+}
+
+TEST (GenericEditorAccessibilityTests,
+      PreservesProcessorContextMenuMouseFallthrough)
+{
+    EXPECT_FALSE (
+        processorContextMenuConsumesTitleClick (
+            0));
+    EXPECT_TRUE (
+        processorContextMenuConsumesTitleClick (
+            1));
+    EXPECT_TRUE (
+        processorContextMenuConsumesTitleClick (
+            2));
+    EXPECT_TRUE (
+        processorContextMenuConsumesTitleClick (
+            3));
+    EXPECT_FALSE (
+        processorContextMenuConsumesTitleClick (
+            4));
+    EXPECT_FALSE (
+        processorContextMenuConsumesTitleClick (
+            5));
+    EXPECT_TRUE (
+        processorContextMenuConsumesTitleClick (
+            6));
+    EXPECT_FALSE (
+        processorContextMenuConsumesTitleClick (
+            7));
+}
+
+TEST (GenericEditorAccessibilityTests,
+      DoesNotAdvertiseUnavailableProcessorMenus)
+{
+    const std::array<
+        Plugin::Processor::Type,
+        3>
+        unsupportedTypes {
+            Plugin::Processor::EMPTY,
+            Plugin::Processor::MERGER,
+            Plugin::Processor::SPLITTER
+        };
+
+    for (const auto type :
+         unsupportedTypes)
+    {
+        ProcessorProxyHarness harness (
+            type);
+        ASSERT_NE (
+            harness.proxy,
+            nullptr);
+        auto handler =
+            createProcessorAccessibilityHandlerForTesting (
+                *harness.proxy);
+        ASSERT_NE (handler, nullptr);
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        showMenu));
+        EXPECT_FALSE (
+            handler->getCurrentState()
+                .isExpandable());
+    }
+}
+
+TEST (GenericEditorAccessibilityTests,
+      ProcessorSelectionRunsOnMessageThread)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    ProcessorProxyHarness harness;
+    ASSERT_NE (
+        harness.proxy,
+        nullptr);
+    auto handler =
+        createProcessorAccessibilityHandlerForTesting (
+            *harness.proxy);
+    ASSERT_NE (handler, nullptr);
+
+    std::thread worker (
+        [handler =
+             handler.get()]
+        {
+            handler->getActions()
+                .invoke (
+                    AccessibilityActionType::
+                        press);
+        });
+    worker.join();
+
+    EXPECT_FALSE (
+        harness.editor
+            .getSelectionState());
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! harness.editor
+                       .getSelectionState();
+         ++attempt)
+    {
+        messageManager
+            ->runDispatchLoopUntil (10);
+    }
+
+    EXPECT_TRUE (
+        harness.editor
+            .getSelectionState());
+}
+
+TEST (GenericEditorAccessibilityTests,
+      ProcessorContextMenuOpensWithSemanticItems)
+{
+    ScopedGenericEditorTestApplication
+        application;
+    ASSERT_TRUE (
+        application.wasInitialised());
+    auto* messageManager =
+        MessageManager::getInstance();
+
+    {
+        MessageManagerLock lock;
+        ProcessorProxyHarness harness;
+        ASSERT_NE (
+            harness.proxy,
+            nullptr);
+        harness.navigation
+            .setVisible (
+            true);
+        harness.navigation
+            .addToDesktop (0);
+        harness.navigation
+            .setAlwaysOnTop (
+            true);
+        harness.navigation
+            .toFront (
+            false);
+        ASSERT_TRUE (
+            harness.navigation
+                .isShowing());
+        ASSERT_TRUE (
+            harness.proxy
+                ->isShowing());
+
+        auto* handler =
+            harness.proxy
+                ->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+
+#if JUCE_WINDOWS
+        Microsoft::WRL::ComPtr<
+            IUIAutomation>
+            automation;
+        ASSERT_TRUE (
+            SUCCEEDED (
+                CoCreateInstance (
+                    CLSID_CUIAutomation,
+                    nullptr,
+                    CLSCTX_INPROC_SERVER,
+                    IID_PPV_ARGS (
+                        &automation))));
+        Microsoft::WRL::ComPtr<
+            IUIAutomationElement>
+            rootElement;
+        ASSERT_TRUE (
+            SUCCEEDED (
+                automation
+                    ->ElementFromHandle (
+                        static_cast<HWND> (
+                            harness
+                                .navigation
+                                .getWindowHandle()),
+                        &rootElement)));
+
+        VARIANT expectedId;
+        VariantInit (
+            &expectedId);
+        expectedId.vt = VT_BSTR;
+        expectedId.bstrVal =
+            SysAllocString (
+                L"oe.processor.100.editor.actions");
+        ASSERT_NE (
+            expectedId.bstrVal,
+            nullptr);
+        Microsoft::WRL::ComPtr<
+            IUIAutomationCondition>
+            idCondition;
+        const auto conditionResult =
+            automation
+                ->CreatePropertyCondition (
+                    UIA_AutomationIdPropertyId,
+                    expectedId,
+                    &idCondition);
+        VariantClear (
+            &expectedId);
+        ASSERT_TRUE (
+            SUCCEEDED (
+                conditionResult));
+
+        Microsoft::WRL::ComPtr<
+            IUIAutomationElement>
+            editorElement;
+        ASSERT_TRUE (
+            SUCCEEDED (
+                rootElement
+                    ->FindFirst (
+                        TreeScope_Subtree,
+                        idCondition.Get(),
+                        &editorElement)));
+        ASSERT_NE (
+            editorElement.Get(),
+            nullptr);
+        BSTR automationId =
+            nullptr;
+        ASSERT_TRUE (
+            SUCCEEDED (
+                editorElement
+                    ->get_CurrentAutomationId (
+                        &automationId)));
+        ASSERT_NE (
+            automationId,
+            nullptr);
+        EXPECT_EQ (
+            std::wstring (
+                automationId),
+            std::wstring (
+                L"oe.processor.100.editor.actions"));
+        SysFreeString (
+            automationId);
+
+        Microsoft::WRL::ComPtr<
+            IUIAutomationExpandCollapsePattern>
+            expandCollapse;
+        ASSERT_TRUE (
+            SUCCEEDED (
+                editorElement
+                    ->GetCurrentPatternAs (
+                        UIA_ExpandCollapsePatternId,
+                        IID_PPV_ARGS (
+                            &expandCollapse))));
+        ASSERT_NE (
+            expandCollapse.Get(),
+            nullptr);
+        EXPECT_TRUE (
+            SUCCEEDED (
+                expandCollapse
+                    ->Expand()));
+#else
+        EXPECT_TRUE (
+            handler->getActions().invoke (
+                AccessibilityActionType::
+                    showMenu));
+#endif
+
+        Component* deleteItem =
+            nullptr;
+        for (int attempt = 0;
+             attempt < 30
+                 && deleteItem
+                        == nullptr;
+             ++attempt)
+        {
+            messageManager
+                ->runDispatchLoopUntil (
+                    10);
+            deleteItem =
+                findDesktopComponentBySemanticId (
+                    "oe.processor.100.context.delete_selected");
+        }
+
+        EXPECT_TRUE (
+            handler->getCurrentState()
+                .isExpanded());
+        ASSERT_NE (
+            deleteItem,
+            nullptr);
+        EXPECT_EQ (
+            deleteItem->getDescription(),
+            "Delete all selected processors from the signal chain.");
+        auto* deleteHandler =
+            deleteItem
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            deleteHandler,
+            nullptr);
+        EXPECT_EQ (
+            deleteHandler->getRole(),
+            AccessibilityRole::
+                menuItem);
+        EXPECT_TRUE (
+            deleteHandler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+
+#if JUCE_WINDOWS
+        EXPECT_TRUE (
+            SUCCEEDED (
+                expandCollapse
+                    ->Collapse()));
+#else
+        EXPECT_TRUE (
+            handler->getActions().invoke (
+                AccessibilityActionType::
+                    showMenu));
+#endif
+        EXPECT_TRUE (
+            handler->getCurrentState()
+                .isCollapsed());
+
+        for (int attempt = 0;
+         attempt < 30
+                 && findDesktopComponentBySemanticId (
+                        "oe.processor.100.context.delete_selected")
+                        != nullptr;
+             ++attempt)
+        {
+            messageManager
+                ->runDispatchLoopUntil (
+                    10);
+        }
+
+        EXPECT_TRUE (
+            handler->getCurrentState()
+                .isCollapsed());
+        EXPECT_EQ (
+            findDesktopComponentBySemanticId (
+                "oe.processor.100.context.delete_selected"),
+            nullptr);
+
+#if JUCE_WINDOWS
+        ExpandCollapseState
+            expandCollapseState =
+                ExpandCollapseState_Expanded;
+        EXPECT_TRUE (
+            SUCCEEDED (
+                expandCollapse
+                    ->get_CurrentExpandCollapseState (
+                        &expandCollapseState)));
+        EXPECT_EQ (
+            expandCollapseState,
+            ExpandCollapseState_Collapsed);
+#endif
+    }
+
+}
+
+TEST (GenericEditorAccessibilityTests,
+      MouseOpenedProcessorMenuReportsExpandedUntilDismissed)
+{
+    ScopedGenericEditorTestApplication
+        application;
+    ASSERT_TRUE (
+        application.wasInitialised());
+
+    MessageManagerLock lock;
+    ProcessorProxyHarness harness;
+    ASSERT_NE (
+        harness.proxy,
+        nullptr);
+    harness.navigation
+        .setVisible (
+        true);
+    harness.navigation
+        .addToDesktop (0);
+    ASSERT_TRUE (
+        harness.navigation
+            .isShowing());
+
+    auto* handler =
+        harness.proxy
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+
+    struct MenuObservation
+    {
+        bool sawExpanded = false;
+        bool sawMenuItem = false;
+    };
+    auto observation =
+        std::make_shared<
+            MenuObservation>();
+    const auto safeProxy =
+        Component::SafePointer<
+            Component> (
+                harness.proxy);
+    MessageManager::callAsync (
+        [observation,
+         safeProxy]
+        {
+            if (safeProxy
+                != nullptr)
+            {
+                if (auto* currentHandler =
+                        safeProxy
+                            ->getAccessibilityHandler())
+                {
+                    observation
+                        ->sawExpanded =
+                            currentHandler
+                                ->getCurrentState()
+                                .isExpanded();
+                }
+            }
+            observation
+                ->sawMenuItem =
+                findDesktopComponentBySemanticId (
+                    "oe.processor.100.context.delete_selected")
+                != nullptr;
+            PopupMenu::
+                dismissAllActiveMenus();
+        });
+
+    const auto eventTime =
+        Time::getCurrentTime();
+    MouseEvent rightClick (
+        Desktop::getInstance()
+            .getMainMouseSource(),
+        Point<float> (
+            10.0f,
+            10.0f),
+        ModifierKeys (
+            ModifierKeys::
+                rightButtonModifier),
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        &harness.editor,
+        &harness.editor,
+        eventTime,
+        Point<float> (
+            10.0f,
+            10.0f),
+        eventTime,
+        1,
+        false);
+
+    harness.viewport
+        ->mouseDown (
+            rightClick);
+
+    EXPECT_TRUE (
+        observation
+            ->sawExpanded);
+    EXPECT_TRUE (
+        observation
+            ->sawMenuItem);
+    EXPECT_TRUE (
+        handler
+            ->getCurrentState()
+            .isCollapsed());
+}
+
+TEST (GenericEditorAccessibilityTests,
+      MouseMenuSurvivesProcessorRemovalDuringNestedDispatch)
+{
+    ScopedGenericEditorTestApplication
+        application;
+    ASSERT_TRUE (
+        application.wasInitialised());
+
+    MessageManagerLock lock;
+    ProcessorProxyHarness harness;
+    ASSERT_NE (
+        harness.proxy,
+        nullptr);
+    harness.navigation
+        .setVisible (
+        true);
+    harness.navigation
+        .addToDesktop (0);
+    ASSERT_TRUE (
+        harness.navigation
+            .isShowing());
+
+    auto removalRan =
+        std::make_shared<
+            bool> (
+                false);
+    const auto safeViewport =
+        Component::SafePointer<
+            EditorViewport> (
+                harness.viewport);
+    const auto safeEditor =
+        Component::SafePointer<
+            GenericEditor> (
+                &harness.editor);
+    MessageManager::callAsync (
+        [removalRan,
+         safeViewport,
+         safeEditor]
+        {
+            if (safeViewport
+                    != nullptr
+                && safeEditor
+                       != nullptr)
+            {
+                safeViewport
+                    ->removeEditor (
+                        safeEditor
+                            .getComponent());
+                *removalRan =
+                    true;
+            }
+            PopupMenu::
+                dismissAllActiveMenus();
+        });
+
+    const auto eventTime =
+        Time::getCurrentTime();
+    MouseEvent rightClick (
+        Desktop::getInstance()
+            .getMainMouseSource(),
+        Point<float> (
+            10.0f,
+            10.0f),
+        ModifierKeys (
+            ModifierKeys::
+                rightButtonModifier),
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        &harness.editor,
+        &harness.editor,
+        eventTime,
+        Point<float> (
+            10.0f,
+            10.0f),
+        eventTime,
+        1,
+        false);
+
+    harness.viewport
+        ->mouseDown (
+            rightClick);
+
+    EXPECT_TRUE (
+        *removalRan);
+    EXPECT_EQ (
+        harness.viewport
+            ->getProcessorAccessibilityProxy (
+                harness.editor),
+        nullptr);
+    EXPECT_FALSE (
+        harness.viewport
+            ->editorArray
+            .contains (
+                &harness.editor));
+}
 
 TEST (GenericEditorAccessibilityTests, PublishesElectrodeChannelAsValue)
 {

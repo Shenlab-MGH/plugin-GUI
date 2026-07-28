@@ -45,6 +45,141 @@ int resolveProcessorInsertionPoint (
         requestedInsertionPoint);
 }
 
+PopupMenu createProcessorContextMenu (
+    GenericEditor& editor,
+    bool acquisitionIsActive,
+    bool signalChainIsLocked)
+{
+    PopupMenu menu;
+    const auto nodeId =
+        editor.getProcessor()->getNodeId();
+    const auto processorName =
+        editor.getDisplayName();
+    const auto processorLabel =
+        processorName
+        + " processor "
+        + String (nodeId);
+    const auto idPrefix =
+        "oe.processor."
+        + String (nodeId)
+        + ".context.";
+
+    const auto addItem =
+        [&menu, &idPrefix] (
+            int itemId,
+            String text,
+            bool isEnabled,
+            StringRef semanticSuffix,
+            String description)
+        {
+            PopupMenu::Item item (
+                std::move (text));
+            item.itemID = itemId;
+            item.isEnabled = isEnabled;
+            item.accessibilityId =
+                idPrefix
+                + String (
+                    semanticSuffix);
+            item.accessibilityDescription =
+                std::move (description);
+            item.accessibilityHelp =
+                item.accessibilityDescription;
+            menu.addItem (
+                std::move (item));
+        };
+
+    const auto isCollapsed =
+        editor.getCollapsedState();
+    addItem (
+        3,
+        isCollapsed
+            ? "Uncollapse"
+            : "Collapse",
+        true,
+        "toggle_collapse",
+        (isCollapsed
+             ? "Uncollapse "
+             : "Collapse ")
+            + processorLabel
+            + ".");
+    addItem (
+        2,
+        "Delete",
+        ! acquisitionIsActive
+            && ! signalChainIsLocked,
+        "delete_selected",
+        "Delete all selected processors from the signal chain.");
+    addItem (
+        1,
+        "Rename",
+        ! signalChainIsLocked,
+        "rename",
+        "Rename "
+            + processorLabel
+            + ".");
+
+    menu.addSeparator();
+    addItem (
+        4,
+        "Save settings...",
+        true,
+        "save_settings",
+        "Save settings for "
+            + processorLabel
+            + ".");
+    addItem (
+        5,
+        "Load settings...",
+        ! acquisitionIsActive
+            && ! signalChainIsLocked,
+        "load_settings",
+        "Load settings for "
+            + processorLabel
+            + ".");
+
+    menu.addSeparator();
+    addItem (
+        6,
+        "Save image...",
+        true,
+        "save_image",
+        "Save an image of "
+            + processorLabel
+            + ".");
+
+    const auto type =
+        editor.getProcessor()
+            ->getPluginType();
+    if (type
+            != Plugin::Type::BUILT_IN
+        && type
+               != Plugin::Type::INVALID)
+    {
+        menu.addSeparator();
+        addItem (
+            7,
+            "Plugin v"
+                + editor.getProcessor()
+                      ->getLibVersion(),
+            false,
+            "plugin_version",
+            "Installed plugin version for "
+                + processorLabel
+                + ".");
+    }
+
+    return menu;
+}
+
+bool processorContextMenuConsumesTitleClick (
+    int menuItemId)
+{
+    return menuItemId == 1
+           || menuItemId == 2
+           || menuItemId == 3
+           || menuItemId == 6;
+}
+
 const int BORDER_SIZE = 6;
 const int TAB_SIZE = 30;
 
@@ -62,6 +197,350 @@ public:
     }
 };
 } // namespace
+
+class ProcessorEditorAccessibilityProxy final
+    : public Component
+{
+public:
+    ProcessorEditorAccessibilityProxy (
+        EditorViewport& viewportToControl,
+        GenericEditor& editorToWrap)
+        : viewport (viewportToControl),
+          editor (&editorToWrap)
+    {
+        setInterceptsMouseClicks (
+            false,
+            false);
+        updateMetadata (true);
+        editorToWrap
+            .addAndMakeVisible (
+                this);
+        refresh();
+    }
+
+    GenericEditor* getEditor() const
+    {
+        return editor.getComponent();
+    }
+
+    bool supportsContextMenu() const
+    {
+        auto* wrappedEditor =
+            getEditor();
+        return wrappedEditor != nullptr
+               && ! wrappedEditor
+                       ->getProcessor()
+                       ->isEmpty()
+               && ! wrappedEditor
+                       ->isMerger()
+               && ! wrappedEditor
+                       ->isSplitter();
+    }
+
+    bool canSelect() const
+    {
+        auto* wrappedEditor =
+            getEditor();
+        return wrappedEditor != nullptr
+               && ! wrappedEditor
+                       ->getProcessor()
+                       ->isEmpty();
+    }
+
+    bool isMenuOpen() const noexcept
+    {
+        return menuOpen.load();
+    }
+
+    void setMenuOpen (
+        bool shouldBeOpen)
+    {
+        if (menuOpen.exchange (
+                shouldBeOpen)
+            == shouldBeOpen)
+            return;
+
+        if (auto* handler =
+                getAccessibilityHandler())
+        {
+            handler
+                ->notifyAccessibilityEvent (
+                    AccessibilityEvent::
+                        structureChanged);
+        }
+    }
+
+    void refresh()
+    {
+        auto* wrappedEditor =
+            getEditor();
+        if (wrappedEditor == nullptr)
+            return;
+
+        updateMetadata (false);
+        setBounds (
+            wrappedEditor
+                ->getLocalBounds());
+        setVisible (
+            wrappedEditor->isVisible());
+        toBack();
+    }
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override
+    {
+        class Handler final
+            : public AccessibilityHandler
+        {
+        public:
+            explicit Handler (
+                ProcessorEditorAccessibilityProxy&
+                    proxyToWrap)
+                : AccessibilityHandler (
+                      proxyToWrap,
+                      AccessibilityRole::group,
+                      createActions (
+                          proxyToWrap)),
+                  proxy (proxyToWrap)
+            {
+            }
+
+            AccessibleState getCurrentState()
+                const override
+            {
+                auto state =
+                    AccessibilityHandler::
+                        getCurrentState();
+
+                if (! proxy
+                         .supportsContextMenu())
+                    return state;
+
+                state =
+                    state.withExpandable();
+                return proxy.isMenuOpen()
+                           ? state.withExpanded()
+                           : state.withCollapsed();
+            }
+
+        private:
+            static void runOnMessageThread (
+                std::function<void()>
+                    operation)
+            {
+                if (MessageManager::
+                        getInstance()
+                        ->isThisTheMessageThread())
+                {
+                    operation();
+                }
+                else
+                {
+                    MessageManager::
+                        callAsync (
+                            std::move (
+                                operation));
+                }
+            }
+
+            static AccessibilityActions
+            createActions (
+                ProcessorEditorAccessibilityProxy&
+                    proxy)
+            {
+                const auto safeProxy =
+                    Component::SafePointer<
+                        ProcessorEditorAccessibilityProxy> (
+                        &proxy);
+                AccessibilityActions actions;
+
+                if (proxy.canSelect())
+                {
+                    actions.addAction (
+                        AccessibilityActionType::
+                            press,
+                        [safeProxy]
+                        {
+                            runOnMessageThread (
+                                [safeProxy]
+                                {
+                                    if (safeProxy
+                                        == nullptr)
+                                        return;
+
+                                    if (auto* editor =
+                                            safeProxy
+                                                ->getEditor())
+                                    {
+                                        safeProxy
+                                            ->viewport
+                                            .selectProcessorForAccessibility (
+                                                *editor);
+                                    }
+                                });
+                        });
+                }
+
+                if (proxy
+                        .supportsContextMenu())
+                {
+                    actions.addAction (
+                        AccessibilityActionType::
+                            showMenu,
+                        [safeProxy]
+                        {
+                            runOnMessageThread (
+                                [safeProxy]
+                                {
+                                    if (safeProxy
+                                        == nullptr)
+                                        return;
+
+                                    if (auto* editor =
+                                            safeProxy
+                                                ->getEditor())
+                                    {
+                                        safeProxy
+                                            ->viewport
+                                            .showProcessorContextMenu (
+                                                *editor);
+                                    }
+                                });
+                        });
+                }
+
+                return actions;
+            }
+
+            ProcessorEditorAccessibilityProxy&
+                proxy;
+        };
+
+        return std::make_unique<Handler> (
+            *this);
+    }
+
+private:
+    void updateMetadata (
+        bool initialise)
+    {
+        auto* wrappedEditor =
+            getEditor();
+        if (wrappedEditor == nullptr)
+            return;
+
+        const auto nodeId =
+            wrappedEditor
+                ->getProcessor()
+                ->getNodeId();
+        const auto displayName =
+            wrappedEditor
+                ->getDisplayName();
+        const auto semanticId =
+            "oe.processor."
+            + String (nodeId)
+            + ".editor";
+        const auto title =
+            displayName
+            + " (node "
+            + String (nodeId)
+            + ")";
+        const auto description =
+            displayName
+            + " processor "
+            + String (nodeId)
+            + " in the signal chain.";
+        const auto actionsId =
+            semanticId
+            + ".actions";
+        const auto actionsTitle =
+            displayName
+            + " processor actions";
+        const auto actionsDescription =
+            "Select "
+            + displayName
+            + " processor "
+            + String (nodeId)
+            + " or open its existing processor menu.";
+
+        wrappedEditor->setComponentID (
+            semanticId);
+        wrappedEditor->setTitle (
+            title);
+        wrappedEditor->setDescription (
+            description);
+        wrappedEditor->setAccessible (
+            true);
+
+        if (initialise)
+        {
+            applySemanticMetadata (
+                *this,
+                actionsId,
+                actionsTitle,
+                actionsDescription);
+            return;
+        }
+
+        const auto idChanged =
+            getComponentID()
+            != actionsId;
+        const auto titleChanged =
+            getTitle()
+            != actionsTitle;
+
+        setComponentID (
+            actionsId);
+        setTitle (
+            actionsTitle);
+        setDescription (
+            actionsDescription);
+
+        if (auto* handler =
+                getAccessibilityHandler())
+        {
+            if (titleChanged)
+            {
+                handler
+                    ->notifyAccessibilityEvent (
+                        AccessibilityEvent::
+                            titleChanged);
+            }
+
+            if (idChanged)
+            {
+                handler
+                    ->notifyAccessibilityEvent (
+                        AccessibilityEvent::
+                            structureChanged);
+            }
+        }
+    }
+
+    EditorViewport& viewport;
+    Component::SafePointer<
+        GenericEditor>
+        editor;
+    std::atomic<bool> menuOpen {
+        false
+    };
+};
+
+std::unique_ptr<AccessibilityHandler>
+createProcessorAccessibilityHandlerForTesting (
+    Component& proxy)
+{
+    if (auto* processorProxy =
+            dynamic_cast<
+                ProcessorEditorAccessibilityProxy*> (
+                &proxy))
+    {
+        return processorProxy
+            ->createAccessibilityHandler();
+    }
+
+    return {};
+}
 
 EditorViewport::EditorViewport (SignalChainTabComponent* s_)
     : message ("Drag-and-drop some rows from the top-left box onto this component!"),
@@ -93,6 +572,8 @@ EditorViewport::EditorViewport (SignalChainTabComponent* s_)
 
 EditorViewport::~EditorViewport()
 {
+    processorAccessibilityProxies
+        .clear();
     copyBuffer.clear();
 }
 
@@ -381,6 +862,21 @@ void EditorViewport::highlightEditor (GenericEditor* editor)
 
 void EditorViewport::removeEditor (GenericEditor* editor)
 {
+    for (int index =
+             processorAccessibilityProxies
+                 .size();
+         --index >= 0;)
+    {
+        if (processorAccessibilityProxies[
+                index]
+                ->getEditor()
+            == editor)
+        {
+            processorAccessibilityProxies
+                .remove (index);
+        }
+    }
+
     int matchingIndex = -1;
 
     for (int i = 0; i < editorArray.size(); i++)
@@ -415,6 +911,7 @@ void EditorViewport::updateVisibleEditors (Array<GenericEditor*> visibleEditors,
         editor->refreshColours();
     }
 
+    syncProcessorAccessibilityProxies();
     refreshEditors();
     signalChainTabComponent->refreshTabs (numberOfTabs, selectedTab);
     repaint();
@@ -437,6 +934,8 @@ int EditorViewport::getDesiredWidth()
 
 void EditorViewport::refreshEditors()
 {
+    syncProcessorAccessibilityProxies();
+
     int lastBound = BORDER_SIZE;
 
     bool pastRightEdge = false;
@@ -477,12 +976,99 @@ void EditorViewport::refreshEditors()
 
         editor->setVisible (true);
         editor->setBounds (lastBound, BORDER_SIZE, componentWidth, getHeight() - BORDER_SIZE * 4);
+
+        if (auto* proxy =
+                dynamic_cast<
+                    ProcessorEditorAccessibilityProxy*> (
+                    getProcessorAccessibilityProxy (
+                        *editor)))
+        {
+            proxy->refresh();
+        }
+
         lastBound += (componentWidth + BORDER_SIZE);
     }
 
     signalChainTabComponent->resized();
 
     repaint();
+}
+
+void EditorViewport::
+    syncProcessorAccessibilityProxies()
+{
+    for (int index =
+             processorAccessibilityProxies
+                 .size();
+         --index >= 0;)
+    {
+        auto* proxy =
+            processorAccessibilityProxies[
+                index];
+        if (proxy->getEditor()
+                == nullptr
+            || ! editorArray.contains (
+                proxy->getEditor()))
+        {
+            processorAccessibilityProxies
+                .remove (index);
+        }
+    }
+
+    for (auto* editor :
+         editorArray)
+    {
+        if (editor == nullptr
+            || getProcessorAccessibilityProxy (
+                   *editor)
+                   != nullptr)
+            continue;
+
+        processorAccessibilityProxies
+            .add (
+                new ProcessorEditorAccessibilityProxy (
+                    *this,
+                    *editor));
+    }
+}
+
+Component* EditorViewport::
+    getProcessorAccessibilityProxy (
+        GenericEditor& editor) const
+{
+    for (auto* proxy :
+         processorAccessibilityProxies)
+    {
+        if (proxy->getEditor()
+            == &editor)
+            return proxy;
+    }
+
+    return nullptr;
+}
+
+void EditorViewport::
+    selectProcessorForAccessibility (
+        GenericEditor& editor)
+{
+    if (! editorArray.contains (
+            &editor)
+        || editor.getProcessor()
+               ->isEmpty())
+        return;
+
+    for (auto* candidate :
+         editorArray)
+    {
+        if (candidate == &editor)
+            candidate->select();
+        else
+            candidate->deselect();
+    }
+
+    lastEditorClicked =
+        &editor;
+    selectionIndex = -1;
 }
 
 void EditorViewport::moveSelection (const KeyPress& key)
@@ -818,6 +1404,245 @@ void EditorViewport::labelTextChanged (Label* label)
     }
 }
 
+void EditorViewport::showProcessorContextMenu (
+    GenericEditor& editor)
+{
+    auto* proxy =
+        dynamic_cast<
+            ProcessorEditorAccessibilityProxy*> (
+            getProcessorAccessibilityProxy (
+                editor));
+
+    if (proxy == nullptr
+        || ! proxy
+                ->supportsContextMenu())
+        return;
+
+    if (proxy->isMenuOpen())
+    {
+        proxy->setMenuOpen (
+            false);
+        PopupMenu::dismissAllActiveMenus();
+        return;
+    }
+
+    auto* controlPanel =
+        AccessClass::getControlPanel();
+    auto menu =
+        createProcessorContextMenu (
+            editor,
+            controlPanel != nullptr
+                && controlPanel
+                       ->getAcquisitionState(),
+            signalChainIsLocked);
+    menu.setLookAndFeel (
+        &getLookAndFeel());
+    proxy->setMenuOpen (
+            true);
+
+    const auto safeViewport =
+        Component::SafePointer<
+            EditorViewport> (this);
+    const auto safeEditor =
+        Component::SafePointer<
+            GenericEditor> (&editor);
+    const auto safeProxy =
+        Component::SafePointer<
+            ProcessorEditorAccessibilityProxy> (
+                proxy);
+
+    menu.showMenuAsync (
+        PopupMenu::Options()
+            .withTargetComponent (
+                &editor)
+            .withStandardItemHeight (20),
+        ModalCallbackFunction::create (
+            [safeViewport,
+             safeEditor,
+             safeProxy] (
+                int result)
+            {
+                if (safeProxy
+                    != nullptr)
+                {
+                    safeProxy
+                        ->setMenuOpen (
+                            false);
+                }
+
+                if (result == 0
+                    || safeViewport
+                           == nullptr
+                    || safeEditor
+                           == nullptr)
+                    return;
+
+                safeViewport
+                    ->performProcessorContextMenuAction (
+                        *safeEditor,
+                        result);
+            }));
+}
+
+void EditorViewport::
+    performProcessorContextMenuAction (
+        GenericEditor& editor,
+        int menuItemId)
+{
+    if (menuItemId == 1)
+    {
+        editorToUpdate = &editor;
+        editorNamingLabel.setText (
+            editorToUpdate
+                ->getDisplayName(),
+            dontSendNotification);
+
+        const auto nameWidth =
+            GlyphArrangement::
+                getStringWidthInt (
+                    editorNamingLabel
+                        .getFont(),
+                    editorNamingLabel
+                        .getText())
+            + 10;
+        editorNamingLabel.setSize (
+            nameWidth > 100
+                ? nameWidth
+                : 100,
+            20);
+        editorNamingLabel.setColour (
+            Label::backgroundColourId,
+            findColour (
+                ThemeColours::
+                    widgetBackground));
+        editorNamingLabel.showEditor();
+
+        const Rectangle<int> target (
+            editorToUpdate->getScreenX()
+                + 40,
+            editorToUpdate->getScreenY()
+                + 18,
+            1,
+            1);
+        CallOutBox callOut (
+            editorNamingLabel,
+            target,
+            nullptr);
+        callOut.runModalLoop();
+        callOut
+            .setDismissalMouseClicksAreAlwaysConsumed (
+                true);
+        return;
+    }
+
+    if (menuItemId == 2)
+    {
+        deleteSelectedProcessors();
+        return;
+    }
+
+    if (menuItemId == 3)
+    {
+        editor.switchCollapsedState();
+        refreshEditors();
+        return;
+    }
+
+    if (menuItemId == 4)
+    {
+        FileChooser chooser (
+            "Choose the file name...",
+            CoreServices::
+                getDefaultUserSaveDirectory(),
+            "*",
+            true);
+
+        if (chooser
+                .browseForFileToSave (
+                    true))
+        {
+            savePluginState (
+                chooser.getResult(),
+                &editor);
+        }
+        else
+        {
+            CoreServices::
+                sendStatusMessage (
+                    "No file chosen.");
+        }
+        return;
+    }
+
+    if (menuItemId == 5)
+    {
+        FileChooser chooser (
+            "Choose a settings file to load...",
+            CoreServices::
+                getDefaultUserSaveDirectory(),
+            "*",
+            true);
+
+        if (chooser
+                .browseForFileToOpen())
+        {
+            currentFile =
+                chooser.getResult();
+            loadPluginState (
+                currentFile,
+                &editor);
+        }
+        else
+        {
+            CoreServices::
+                sendStatusMessage (
+                    "No file selected.");
+        }
+        return;
+    }
+
+    if (menuItemId == 6)
+    {
+        editor.deselect();
+
+        const auto picturesDirectory =
+            File::getSpecialLocation (
+                File::
+                    SpecialLocationType::
+                        userPicturesDirectory);
+        const auto editorName =
+            editor.getName()
+            + "_"
+            + String (
+                editor
+                    .getProcessor()
+                    ->getNodeId());
+        const auto outputFile =
+            picturesDirectory
+                .getNonexistentChildFile (
+                    editorName,
+                    ".png");
+        const auto componentImage =
+            editor.createComponentSnapshot (
+                editor.getLocalBounds(),
+                true,
+                2.0f);
+
+        FileOutputStream stream (
+            outputFile);
+        PNGImageFormat pngWriter;
+        pngWriter.writeImageToStream (
+            componentImage,
+            stream);
+
+        CoreServices::
+            sendStatusMessage (
+                "Saved image to "
+                + outputFile
+                      .getFullPathName());
+    }
+}
+
 void EditorViewport::mouseDown (const MouseEvent& e)
 {
     bool clickInEditor = false;
@@ -854,130 +1679,63 @@ void EditorViewport::mouseDown (const MouseEvent& e)
                     return;
 
                 editorArray[i]->highlight();
+                auto* controlPanel =
+                    AccessClass::
+                        getControlPanel();
+                auto menu =
+                    createProcessorContextMenu (
+                        *editorArray[i],
+                        controlPanel
+                            != nullptr
+                            && controlPanel
+                                   ->getAcquisitionState(),
+                        signalChainIsLocked);
+                menu.setLookAndFeel (
+                    &getLookAndFeel());
+                auto* proxy =
+                    dynamic_cast<
+                        ProcessorEditorAccessibilityProxy*> (
+                        getProcessorAccessibilityProxy (
+                            *editorArray[i]));
+                const auto safeProxy =
+                    Component::SafePointer<
+                        ProcessorEditorAccessibilityProxy> (
+                            proxy);
+                const auto safeEditor =
+                    Component::SafePointer<
+                        GenericEditor> (
+                            editorArray[i]);
+                if (safeProxy != nullptr)
+                    safeProxy->setMenuOpen (
+                        true);
 
-                PopupMenu m;
-                m.setLookAndFeel (&getLookAndFeel());
+                const auto result =
+                    menu.showMenu (
+                        PopupMenu::Options()
+                            .withStandardItemHeight (
+                                20));
+                if (safeProxy != nullptr)
+                    safeProxy->setMenuOpen (
+                        false);
 
-                if (editorArray[i]->getCollapsedState())
-                    m.addItem (3, "Uncollapse", true);
-                else
-                    m.addItem (3, "Collapse", true);
-
-                if (! CoreServices::getAcquisitionStatus() && ! signalChainIsLocked)
-                    m.addItem (2, "Delete", true);
-                else
-                    m.addItem (2, "Delete", false);
-
-                m.addItem (1, "Rename", ! signalChainIsLocked);
-
-                m.addSeparator();
-
-                m.addItem (4, "Save settings...", true);
-
-                if (! CoreServices::getAcquisitionStatus() && ! signalChainIsLocked)
-                    m.addItem (5, "Load settings...", true);
-                else
-                    m.addItem (5, "Load settings...", false);
-
-                m.addSeparator();
-
-                m.addItem (6, "Save image...", true);
-
-                Plugin::Type type = editorArray[i]->getProcessor()->getPluginType();
-                if (type != Plugin::Type::BUILT_IN && type != Plugin::Type::INVALID)
-                {
-                    m.addSeparator();
-                    String pluginVer = editorArray[i]->getProcessor()->getLibVersion();
-                    m.addItem (7, "Plugin v" + pluginVer, false);
-                }
-
-                const int result = m.showMenu (PopupMenu::Options {}.withStandardItemHeight (20));
-
-                if (result == 1)
-                {
-                    editorToUpdate = editorArray[i];
-                    editorNamingLabel.setText (editorToUpdate->getDisplayName(), dontSendNotification);
-
-                    int nameWidth = GlyphArrangement::getStringWidthInt (editorNamingLabel.getFont(), editorNamingLabel.getText()) + 10;
-                    editorNamingLabel.setSize (nameWidth > 100 ? nameWidth : 100, 20);
-                    editorNamingLabel.setColour (Label::backgroundColourId, findColour (ThemeColours::widgetBackground));
-                    editorNamingLabel.showEditor();
-
-                    juce::Rectangle<int> rect1 = juce::Rectangle<int> (editorToUpdate->getScreenX() + 40, editorToUpdate->getScreenY() + 18, 1, 1);
-
-                    CallOutBox callOut (editorNamingLabel, rect1, nullptr);
-                    callOut.runModalLoop();
-                    callOut.setDismissalMouseClicksAreAlwaysConsumed (true);
-
+                if (safeEditor
+                        == nullptr
+                    || i
+                           >= editorArray
+                                  .size()
+                    || editorArray[i]
+                           != safeEditor
+                                  .getComponent())
                     return;
-                }
-                else if (result == 2)
-                {
-                    deleteSelectedProcessors();
 
+                const auto consumesClick =
+                    processorContextMenuConsumesTitleClick (
+                        result);
+                performProcessorContextMenuAction (
+                    *editorArray[i],
+                    result);
+                if (consumesClick)
                     return;
-                }
-                else if (result == 3)
-                {
-                    editorArray[i]->switchCollapsedState();
-                    refreshEditors();
-                    return;
-                }
-                else if (result == 4)
-                {
-                    FileChooser fc ("Choose the file name...",
-                                    CoreServices::getDefaultUserSaveDirectory(),
-                                    "*",
-                                    true);
-
-                    if (fc.browseForFileToSave (true))
-                    {
-                        savePluginState (fc.getResult(), editorArray[i]);
-                    }
-                    else
-                    {
-                        CoreServices::sendStatusMessage ("No file chosen.");
-                    }
-                }
-                else if (result == 5)
-                {
-                    FileChooser fc ("Choose a settings file to load...",
-                                    CoreServices::getDefaultUserSaveDirectory(),
-                                    "*",
-                                    true);
-
-                    if (fc.browseForFileToOpen())
-                    {
-                        currentFile = fc.getResult();
-                        loadPluginState (currentFile, editorArray[i]);
-                    }
-                    else
-                    {
-                        CoreServices::sendStatusMessage ("No file selected.");
-                    }
-                }
-                else if (result == 6)
-                {
-                    editorArray[i]->deselect();
-
-                    File picturesDirectory = File::getSpecialLocation (File::SpecialLocationType::userPicturesDirectory);
-
-                    String editorName = editorArray[i]->getName() + "_" + String (editorArray[i]->getProcessor()->getNodeId());
-                    File outputFile = picturesDirectory.getNonexistentChildFile (editorName, ".png");
-
-                    Image componentImage = editorArray[i]->createComponentSnapshot (
-                        editorArray[i]->getLocalBounds(),
-                        true,
-                        2.0f);
-
-                    FileOutputStream stream (outputFile);
-                    PNGImageFormat pngWriter;
-                    pngWriter.writeImageToStream (componentImage, stream);
-
-                    CoreServices::sendStatusMessage ("Saved image to " + outputFile.getFullPathName());
-
-                    return;
-                }
             }
 
             // make sure uncollapsed editors don't accept clicks outside their title bar

@@ -38,6 +38,7 @@
 #include "UIComponent.h"
 
 class GenericEditor;
+class ProcessorEditorAccessibilityProxy;
 class SignalChainTabButton;
 class SignalChainTabComponent;
 class SignalChainScrollButton;
@@ -49,6 +50,21 @@ class AddProcessor;
 TESTABLE int resolveProcessorInsertionPoint (
     int requestedInsertionPoint,
     int editorCount);
+
+/** Builds the existing processor context menu with stable accessibility metadata. */
+TESTABLE PopupMenu createProcessorContextMenu (
+    GenericEditor& editor,
+    bool acquisitionIsActive,
+    bool signalChainIsLocked);
+
+/** Returns whether the old mouse path stops after a processor menu action. */
+TESTABLE bool processorContextMenuConsumesTitleClick (
+    int menuItemId);
+
+/** Creates the handler for a host-owned processor accessibility proxy in tests. */
+TESTABLE std::unique_ptr<AccessibilityHandler>
+createProcessorAccessibilityHandlerForTesting (
+    Component& proxy);
 
 /**
 
@@ -189,6 +205,20 @@ public:
     /** Deletes all processors that are currently selected */
     void deleteSelectedProcessors();
 
+    /** Opens or closes the existing context menu for a processor editor. */
+    void showProcessorContextMenu (GenericEditor& editor);
+
+    /** Selects one processor using the existing single-click semantics. */
+    void selectProcessorForAccessibility (GenericEditor& editor);
+
+    /** Performs an action selected from the existing processor context menu. */
+    void performProcessorContextMenuAction (GenericEditor& editor,
+                                            int menuItemId);
+
+    /** Returns the host-owned accessibility proxy for a processor editor. */
+    Component* getProcessorAccessibilityProxy (
+        GenericEditor& editor) const;
+
     /** Adds the parameters for the selected editors to the copy buffer */
     void copySelectedEditors();
 
@@ -226,6 +256,8 @@ public:
     bool somethingIsBeingDraggedOver;
 
 private:
+    void syncProcessorAccessibilityProxies();
+
     String message;
 
     GenericEditor* lastEditor;
@@ -249,6 +281,9 @@ private:
     bool shiftDown;
 
     OwnedArray<XmlElement> copyBuffer;
+
+    OwnedArray<ProcessorEditorAccessibilityProxy>
+        processorAccessibilityProxies;
 
     Label editorNamingLabel;
 
