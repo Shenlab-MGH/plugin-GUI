@@ -26,6 +26,7 @@
 #include "../../CoreServices.h"
 #include "RecordNode.h"
 #include <atomic>
+#include <mutex>
 #include <stdio.h>
 
 struct RecordToggleButtonAccessibilityState
@@ -76,8 +77,140 @@ private:
     Button* button = nullptr;
 };
 
+struct DiskMonitorAccessibilityState
+{
+    void setFill (double newFill)
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        fill = newFill;
+    }
+
+    void setStatus (String newStatus)
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        status = std::move (newStatus);
+    }
+
+    void setFillAndStatus (double newFill, String newStatus)
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        fill = newFill;
+        status = std::move (newStatus);
+    }
+
+    double getFill() const
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        return fill;
+    }
+
+    String getStatus() const
+    {
+        const std::lock_guard<std::mutex> lock (mutex);
+        return status;
+    }
+
+private:
+    mutable std::mutex mutex;
+    double fill = 0.0;
+    String status = "Status: idle; Available: 0.00 GB";
+};
+
 namespace
 {
+class DiskMonitorAccessibilityValue final
+    : public AccessibilityRangedNumericValueInterface
+{
+public:
+    explicit DiskMonitorAccessibilityValue (
+        std::shared_ptr<DiskMonitorAccessibilityState> stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValue (double) override { jassertfalse; }
+    double getCurrentValue() const override
+    {
+        return jlimit (0.0, 1.0, state->getFill());
+    }
+    AccessibleValueRange getRange() const override
+    {
+        return { { 0.0, 1.0 }, 0.001 };
+    }
+
+private:
+    std::shared_ptr<DiskMonitorAccessibilityState> state;
+};
+
+class DiskMonitorAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    DiskMonitorAccessibilityHandler (
+        DiskMonitor& monitor,
+        std::shared_ptr<DiskMonitorAccessibilityState> stateToUse)
+        : AccessibilityHandler (
+              monitor,
+              AccessibilityRole::progressBar,
+              AccessibilityActions {},
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<DiskMonitorAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    String getHelp() const override
+    {
+        return state->getStatus();
+    }
+
+private:
+    std::shared_ptr<DiskMonitorAccessibilityState> state;
+};
+
+String createDiskMonitorStatus (
+    float bytesPerMillisecond,
+    int64 bytesFree,
+    float timeLeftInSeconds)
+{
+    constexpr double bytesPerGigabyte =
+        static_cast<double> (int64 (1) << 30);
+    constexpr double bytesPerMegabyte =
+        static_cast<double> (int64 (1) << 20);
+
+    String status = bytesPerMillisecond > 0.0f
+                        ? "Status: recording"
+                        : "Status: idle";
+    status += "; Available: "
+              + String (
+                  static_cast<double> (bytesFree)
+                      / bytesPerGigabyte,
+                  2)
+              + " GB";
+
+    if (bytesPerMillisecond > 0.0f)
+    {
+        status += "; Remaining: "
+                  + String (jmax (
+                      0,
+                      static_cast<int> (
+                          timeLeftInSeconds / 60.0f)))
+                  + " min";
+        status += "; Data rate: "
+                  + String (
+                      static_cast<double> (
+                          bytesPerMillisecond)
+                          * 1000.0
+                          / bytesPerMegabyte,
+                      2)
+                  + " MB/s";
+    }
+
+    return status;
+}
+
 class RecordToggleButtonAccessibilityValue final
     : public AccessibilityTextValueInterface
 {
@@ -458,7 +591,9 @@ DiskMonitor::DiskMonitor (RecordNode* rn)
     : LevelMonitor (rn),
       lastFreeSpace (0.0),
       recordingTimeLeftInSeconds (0),
-      dataRate (0.0)
+      dataRate (0.0),
+      accessibilityState (
+          std::make_shared<DiskMonitorAccessibilityState>())
 {
     rn->getDiskSpaceChecker()->addListener (this);
     startTimerHz (1);
@@ -466,9 +601,9 @@ DiskMonitor::DiskMonitor (RecordNode* rn)
 
 std::unique_ptr<AccessibilityHandler> DiskMonitor::createAccessibilityHandler()
 {
-    return createReadOnlyProgressAccessibilityHandler (
+    return std::make_unique<DiskMonitorAccessibilityHandler> (
         *this,
-        [this] { return static_cast<double> (fillPercentage); });
+        accessibilityState);
 }
 
 DiskMonitor::~DiskMonitor()
@@ -479,28 +614,47 @@ DiskMonitor::~DiskMonitor()
 
 void DiskMonitor::update (float dataRate, int64 bytesFree, float timeLeft)
 {
-    if (((RecordNode*) processor)->recordThread->isThreadRunning())
+    this->dataRate = dataRate;
+    lastFreeSpace = bytesFree;
+    recordingTimeLeftInSeconds = timeLeft;
+
+    if (lowDiskSpaceStatusActive
+        && ! ((RecordNode*) processor)->getRecordingStatus())
     {
-        String msg = String (bytesFree / pow (2, 30)) + " GB available\n";
-        msg += String (int (timeLeft / 60.0f)) + " minutes remaining\n";
-        msg += "Data rate: " + String (dataRate * 1000 / pow (2, 20), 2) + " MB/s";
-        setTooltip (msg);
+        return;
     }
-    else
-    {
-        setTooltip (String (bytesFree / pow (2, 30)) + " GB available");
-    }
+
+    lowDiskSpaceStatusActive = false;
+
+    const auto status =
+        createDiskMonitorStatus (
+            dataRate,
+            bytesFree,
+            timeLeft);
+    accessibilityState->setStatus (status);
+    setTooltip (status);
 }
 
 void DiskMonitor::updateDiskSpace (float percentage)
 {
-    setFillPercentage (1.0f - percentage);
+    const auto usedPercentage =
+        1.0f - percentage;
+    accessibilityState->setFill (
+        usedPercentage);
+    setFillPercentage (usedPercentage);
 }
 
 void DiskMonitor::directoryInvalid (bool recordingStopped)
 {
+    lowDiskSpaceStatusActive = false;
+
+    const String status =
+        "Status: invalid directory";
+    accessibilityState->setFillAndStatus (
+        1.0,
+        status);
+    setTooltip (status);
     setFillPercentage (1.0);
-    setTooltip ("Invalid directory");
 
     if (recordingStopped)
     {
@@ -512,8 +666,16 @@ void DiskMonitor::directoryInvalid (bool recordingStopped)
 
 void DiskMonitor::lowDiskSpace()
 {
+    lowDiskSpaceStatusActive = true;
+
+    const String status =
+        "Status: recording stopped; Reason: less than 5 minutes of disk space remaining";
+    accessibilityState->setStatus (status);
+    setTooltip (status);
+
     String msg = "Recording stopped. Less than 5 minutes of disk space remaining.";
-    AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "WARNING", msg);
+    if (JUCEApplicationBase::getInstance() != nullptr)
+        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "WARNING", msg);
 }
 
 void DiskMonitor::timerCallback()

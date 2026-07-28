@@ -33,6 +33,7 @@
 class RecordThread;
 class RecordNode;
 struct RecordToggleButtonAccessibilityState;
+struct DiskMonitorAccessibilityState;
 
 /** 
 * 
@@ -169,7 +170,7 @@ private:
     int totalChannels;
 };
 
-class DiskMonitor : public LevelMonitor, public DiskSpaceListener
+class TESTABLE DiskMonitor : public LevelMonitor, public DiskSpaceListener
 {
 public:
     /** Constructor */
@@ -199,6 +200,8 @@ private:
     int64 lastFreeSpace;
     float recordingTimeLeftInSeconds;
     float dataRate;
+    bool lowDiskSpaceStatusActive = false;
+    std::shared_ptr<DiskMonitorAccessibilityState> accessibilityState;
 };
 
 class RecordChannelsParameterEditor : public ParameterEditor,

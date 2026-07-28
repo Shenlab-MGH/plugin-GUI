@@ -6,6 +6,7 @@
 #include "../../Source/Processors/Settings/DataStream.h"
 #include "../../Source/Audio/AudioComponent.h"
 #include "../../Source/UI/ControlPanel.h"
+#include "../../Source/UI/SemanticComponent.h"
 #include "../../Source/AccessClass.h"
 #include "gtest/gtest.h"
 #include <atomic>
@@ -516,4 +517,159 @@ TEST_F (RecordNodeEditorAccessibilityTests,
         handler->getValueInterface()
             ->getCurrentValueAsString(),
         "8 of 8 channels selected; FIFO 88%");
+}
+
+TEST_F (RecordNodeEditorAccessibilityTests,
+        ExposesStructuredDiskMonitorState)
+{
+    auto audioComponent =
+        std::make_unique<AudioComponent>();
+    auto controlPanel =
+        std::make_unique<ControlPanel> (
+            processorGraph.get(),
+            audioComponent.get(),
+            true);
+    controlPanel->updateRecordEngineList();
+
+    TestRecordNode recordNode;
+    recordNode.setNodeId (100);
+    DiskMonitor monitor (
+        &recordNode);
+    applySemanticMetadata (
+        monitor,
+        "oe.processor.100.disk_usage",
+        "Record node disk usage",
+        "Recording-volume usage and capacity status.");
+    auto handler =
+        monitor.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::progressBar);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        handler->getValueInterface()
+            ->isReadOnly());
+
+    monitor.updateDiskSpace (
+        0.75f);
+    EXPECT_DOUBLE_EQ (
+        handler->getValueInterface()
+            ->getCurrentValue(),
+        0.25);
+
+    constexpr int64 gibibyte =
+        int64 (1) << 30;
+    monitor.update (
+        0.0f,
+        12 * gibibyte,
+        0.0f);
+    EXPECT_EQ (
+        handler->getHelp(),
+        "Status: idle; Available: 12.00 GB");
+    EXPECT_EQ (
+        monitor.getTooltip(),
+        handler->getHelp());
+
+    constexpr float megabytesPerSecond =
+        2.5f;
+    const auto bytesPerMillisecond =
+        megabytesPerSecond
+        * float (int64 (1) << 20)
+        / 1000.0f;
+    monitor.update (
+        bytesPerMillisecond,
+        10 * gibibyte,
+        10.0f * 60.0f);
+    EXPECT_EQ (
+        handler->getHelp(),
+        "Status: recording; Available: 10.00 GB; Remaining: 10 min; Data rate: 2.50 MB/s");
+    EXPECT_EQ (
+        monitor.getTooltip(),
+        handler->getHelp());
+
+    monitor.directoryInvalid (
+        false);
+    EXPECT_DOUBLE_EQ (
+        handler->getValueInterface()
+            ->getCurrentValue(),
+        1.0);
+    EXPECT_EQ (
+        handler->getHelp(),
+        "Status: invalid directory");
+    EXPECT_EQ (
+        monitor.getTooltip(),
+        handler->getHelp());
+
+    monitor.lowDiskSpace();
+    EXPECT_EQ (
+        handler->getHelp(),
+        "Status: recording stopped; Reason: less than 5 minutes of disk space remaining");
+    EXPECT_EQ (
+        monitor.getTooltip(),
+        handler->getHelp());
+
+    monitor.update (
+        bytesPerMillisecond,
+        9 * gibibyte,
+        9.0f * 60.0f);
+    EXPECT_EQ (
+        handler->getHelp(),
+        "Status: recording stopped; Reason: less than 5 minutes of disk space remaining");
+    monitor.update (
+        0.0f,
+        9 * gibibyte,
+        0.0f);
+    EXPECT_EQ (
+        handler->getHelp(),
+        "Status: recording stopped; Reason: less than 5 minutes of disk space remaining");
+}
+
+TEST_F (RecordNodeEditorAccessibilityTests,
+        ReadsDiskMonitorAccessibilitySnapshotFromWorkerThread)
+{
+    auto audioComponent =
+        std::make_unique<AudioComponent>();
+    auto controlPanel =
+        std::make_unique<ControlPanel> (
+            processorGraph.get(),
+            audioComponent.get(),
+            true);
+    controlPanel->updateRecordEngineList();
+
+    TestRecordNode recordNode;
+    recordNode.setNodeId (100);
+    DiskMonitor monitor (
+        &recordNode);
+    auto handler =
+        monitor.createAccessibilityHandler();
+
+    monitor.updateDiskSpace (
+        0.5f);
+    monitor.update (
+        0.0f,
+        int64 (3) << 30,
+        0.0f);
+
+    double publishedValue = 0.0;
+    String publishedHelp;
+    std::thread reader (
+        [&]
+        {
+            publishedValue =
+                handler->getValueInterface()
+                    ->getCurrentValue();
+            publishedHelp =
+                handler->getHelp();
+        });
+    reader.join();
+
+    EXPECT_DOUBLE_EQ (
+        publishedValue,
+        0.5);
+    EXPECT_EQ (
+        publishedHelp,
+        "Status: idle; Available: 3.00 GB");
 }
