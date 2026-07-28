@@ -102,6 +102,7 @@ endif()
 if(BUILD_TESTS)
   add_dependencies(${PLUGIN_NAME}_tests ${PLUGIN_NAME} gui_testable_source
                    test_helpers)
+  target_compile_definitions(${PLUGIN_NAME}_tests PRIVATE TEST_RUNNER)
   target_link_libraries(
     ${PLUGIN_NAME}_tests
     PRIVATE ${PLUGIN_NAME} gtest_main test_helpers
