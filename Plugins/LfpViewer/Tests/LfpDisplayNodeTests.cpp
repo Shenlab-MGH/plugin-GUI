@@ -4784,6 +4784,84 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        SpikeRasterPersistsOffsetOwnershipAcrossXmlAndCustomThresholds)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->resized();
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    processor->startAcquisition();
+    canvas->beginAnimation();
+    auto input = createBuffer (0.0f, 1.0f, numChannels, 128);
+    writeBlock (input);
+    canvas->refreshState();
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id = "oe.processor." + String (processor->getNodeId())
+                    + ".lfp.display_1.subtract_offset";
+    auto* button = dynamic_cast<Button*> (findLfpDescendantById (*canvas, id));
+    auto* display = findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (button, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+    ASSERT_NE (options, nullptr);
+    std::vector<ComboBox*> comboBoxes;
+    collectLfpDescendants (*options, comboBoxes);
+    const auto spikeRaster = std::find_if (
+        comboBoxes.begin(), comboBoxes.end(), [] (const ComboBox* candidate)
+        { return candidate->getName() == "spikeRasterSelection"; });
+    ASSERT_NE (spikeRaster, comboBoxes.end());
+
+    options->setMedianOffset (false);
+    (*spikeRaster)->setSelectedId (2, sendNotificationSync);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    XmlElement autoOwnedRoot ("ROOT");
+    options->saveParameters (&autoOwnedRoot);
+    auto* autoOwnedPane = autoOwnedRoot.getFirstChildElement();
+    ASSERT_NE (autoOwnedPane, nullptr);
+    EXPECT_FALSE (autoOwnedPane->getBoolAttribute ("subtractOffset", true));
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_FALSE (display->getMedianOffsetPlotting());
+    options->loadParameters (&autoOwnedRoot);
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_FALSE (display->getMedianOffsetPlotting());
+
+    options->setMedianOffset (true);
+    (*spikeRaster)->setSelectedId (2, sendNotificationSync);
+    XmlElement userOwnedRoot ("ROOT");
+    options->saveParameters (&userOwnedRoot);
+    auto* userOwnedPane = userOwnedRoot.getFirstChildElement();
+    ASSERT_NE (userOwnedPane, nullptr);
+    EXPECT_TRUE (userOwnedPane->getBoolAttribute ("subtractOffset", false));
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    options->loadParameters (&userOwnedRoot);
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+
+    options->setMedianOffset (false);
+    (*spikeRaster)->setSelectedId (2, sendNotificationSync);
+    (*spikeRaster)->setText ("-123", sendNotificationSync);
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -123.0f);
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_FALSE (display->getMedianOffsetPlotting());
+
+    options->setMedianOffset (true);
+    (*spikeRaster)->setSelectedId (2, sendNotificationSync);
+    (*spikeRaster)->setText ("-234", sendNotificationSync);
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -234.0f);
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+
+    processor->stopAcquisition();
+}
+
+TEST_F (LfpDisplayNodeTests,
         ShowChannelNumbersChangesTheRealChannelInfoTooltipConsumer)
 {
     auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (

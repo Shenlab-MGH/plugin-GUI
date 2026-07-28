@@ -2635,7 +2635,8 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
             }
             else
             {
-                medianOffsetOnForSpikeRaster = false;
+                if (! lfpDisplay->getSpikeRasterPlotting())
+                    medianOffsetOnForSpikeRaster = false;
             }
 
             lfpDisplay->setSpikeRasterPlotting (true);
@@ -3079,7 +3080,10 @@ void LfpDisplayOptions::saveParameters (XmlElement* xml)
     xmlNode->setAttribute ("sortByDepth", sortByDepthButton->getToggleState());
     xmlNode->setAttribute ("channelSkip", channelDisplaySkipSelection->getSelectedId());
     xmlNode->setAttribute ("showChannelNum", showChannelNumberButton->getToggleState());
-    xmlNode->setAttribute ("subtractOffset", medianOffsetPlottingButton->getToggleState());
+    xmlNode->setAttribute (
+        "subtractOffset",
+        medianOffsetPlottingButton->getToggleState()
+            && ! medianOffsetOnForSpikeRaster);
 
     xmlNode->setAttribute ("isInverted", invertInputButton->getToggleState());
 
