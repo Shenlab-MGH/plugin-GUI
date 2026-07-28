@@ -34,6 +34,7 @@
 #include "TTLMonitor.h"
 
 class GenericProcessor;
+struct DrawerButtonAccessibilityState;
 class DrawerButton;
 class TriangleButton;
 class UtilityButton;
@@ -388,11 +389,21 @@ public:
                   const String& semanticDescription = {});
 
     /** Destructor */
-    ~DrawerButton();
+    ~DrawerButton() override;
+
+    /** Exposes the drawer as a message-thread-safe UI Automation toggle. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
+protected:
+    void buttonStateChanged() override;
 
 private:
     /** Render the button */
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
+
+    std::shared_ptr<
+        DrawerButtonAccessibilityState>
+        accessibilityState;
 };
 
 /**

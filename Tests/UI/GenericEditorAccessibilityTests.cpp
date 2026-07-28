@@ -85,6 +85,23 @@ private:
     bool initialised = false;
 };
 
+class ThreadTrackingButtonListener final
+    : public Button::Listener
+{
+public:
+    void buttonClicked (Button*) override
+    {
+        callbackCount.fetch_add (1);
+        callbackUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+    }
+
+    std::atomic<int> callbackCount { 0 };
+    std::atomic<bool>
+        callbackUsedMessageThread { false };
+};
+
 class TestStreamProcessor final : public GenericProcessor
 {
 public:
@@ -1142,16 +1159,172 @@ TEST (GenericEditorAccessibilityTests, RefreshesUtilityButtonFallbackName)
 
 TEST (GenericEditorAccessibilityTests, ExposesProcessorDrawerAsStableToggle)
 {
-    DrawerButton drawer ("File Reader (100) Drawer Button",
-                         "oe.processor.100.drawer",
-                         "File Reader controls",
-                         "Show or hide controls for File Reader processor 100.");
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    auto drawer = std::make_unique<DrawerButton> (
+        "File Reader (100) Drawer Button",
+        "oe.processor.100.drawer",
+        "File Reader controls",
+        "Show or hide controls for File Reader processor 100.");
+    ThreadTrackingButtonListener listener;
+    drawer->addListener (&listener);
 
-    EXPECT_EQ (drawer.getComponentID(), "oe.processor.100.drawer");
-    EXPECT_EQ (drawer.getTitle(), "File Reader controls");
-    EXPECT_EQ (drawer.getDescription(), "Show or hide controls for File Reader processor 100.");
-    EXPECT_TRUE (drawer.isAccessible());
-    EXPECT_TRUE (drawer.getClickingTogglesState());
+    EXPECT_EQ (
+        drawer->getComponentID(),
+        "oe.processor.100.drawer");
+    EXPECT_EQ (
+        drawer->getTitle(),
+        "File Reader controls");
+    EXPECT_EQ (
+        drawer->getDescription(),
+        "Show or hide controls for File Reader processor 100.");
+    EXPECT_TRUE (drawer->isAccessible());
+    EXPECT_TRUE (
+        drawer->getClickingTogglesState());
+
+    auto handler =
+        drawer->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::toggleButton);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::showMenu));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        handler->getValueInterface()
+            ->isReadOnly());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpandable());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isCollapsed());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isExpanded());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    std::atomic<bool> workerEntered {
+        false
+    };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::
+                        toggle));
+        });
+    while (! workerEntered.load())
+        std::this_thread::yield();
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_TRUE (
+        drawer->getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpandable());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpanded());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isCollapsed());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+
+    listener.callbackCount.store (0);
+    listener
+        .callbackUsedMessageThread
+        .store (false);
+    drawer->setEnabled (false);
+    workerEntered.store (false);
+    invoked.store (false);
+    std::thread disabledWorker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::
+                        toggle));
+        });
+    while (! workerEntered.load())
+        std::this_thread::yield();
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                10);
+    }
+    disabledWorker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+    EXPECT_TRUE (
+        drawer->getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+
+    const auto staleActions =
+        handler->getActions();
+    handler.reset();
+    drawer.reset();
+    EXPECT_TRUE (
+        staleActions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
 }
 
 TEST (GenericEditorAccessibilityTests, ExposesStreamSelectorNavigationControls)

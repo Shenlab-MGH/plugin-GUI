@@ -38,11 +38,189 @@
 #include "../../UI/LookAndFeel/CustomLookAndFeel.h"
 #include "../../UI/SemanticComponent.h"
 
+#include <atomic>
 #include <math.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265359
 #endif
+
+struct DrawerButtonAccessibilityState
+{
+    explicit DrawerButtonAccessibilityState (
+        bool initialState)
+        : publishedState (initialState)
+    {
+    }
+
+    void synchronise (
+        bool actualState)
+    {
+        publishedState.store (
+            actualState);
+    }
+
+    bool getPublishedState() const
+    {
+        return publishedState.load();
+    }
+
+    void attach (
+        Button* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+    }
+
+    Button* getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+private:
+    std::atomic<bool> publishedState;
+    Button* button = nullptr;
+};
+
+namespace
+{
+class DrawerButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit DrawerButtonAccessibilityValue (
+        std::shared_ptr<
+            DrawerButtonAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getPublishedState()
+                   ? String ("On")
+                   : String ("Off");
+    }
+
+private:
+    std::shared_ptr<
+        DrawerButtonAccessibilityState>
+        state;
+};
+
+class DrawerButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    DrawerButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            DrawerButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::toggleButton,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      DrawerButtonAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto accessibleState =
+            AccessibilityHandler::getCurrentState()
+                .withCheckable()
+                .withExpandable();
+        return state->getPublishedState()
+                   ? accessibleState
+                         .withChecked()
+                         .withExpanded()
+                   : accessibleState
+                         .withCollapsed();
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            DrawerButtonAccessibilityState>&
+            state)
+    {
+        const auto toggle =
+            [state]
+            {
+                MessageManager::callSync (
+                    [state]
+                    {
+                        auto* button =
+                            state
+                                ->getButtonOnMessageThread();
+                        if (button == nullptr
+                            || ! button->isEnabled())
+                        {
+                            return;
+                        }
+
+                        button->setToggleState (
+                            ! button->getToggleState(),
+                            sendNotification);
+
+                        if (auto* survivingButton =
+                                state
+                                    ->getButtonOnMessageThread())
+                        {
+                            state->synchronise (
+                                survivingButton
+                                    ->getToggleState());
+                        }
+                    });
+            };
+
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::toggle,
+                toggle)
+            .addAction (
+                AccessibilityActionType::showMenu,
+                toggle);
+    }
+
+    std::shared_ptr<
+        DrawerButtonAccessibilityState>
+        state;
+};
+} // namespace
+
 GenericEditor::GenericEditor (GenericProcessor* owner) : AudioProcessorEditor (owner),
                                                          desiredWidth (150),
                                                          acquisitionIsActive (false),
@@ -813,14 +991,38 @@ DrawerButton::DrawerButton (const String& name,
                             const String& semanticId,
                             const String& semanticTitle,
                             const String& semanticDescription)
-    : Button (name)
+    : Button (name),
+      accessibilityState (
+          std::make_shared<
+              DrawerButtonAccessibilityState> (
+              false))
 {
+    accessibilityState->attach (
+        this);
     setClickingTogglesState (true);
     applySemanticMetadata (*this, semanticId, semanticTitle, semanticDescription);
 }
 
 DrawerButton::~DrawerButton()
 {
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+DrawerButton::createAccessibilityHandler()
+{
+    return std::make_unique<
+        DrawerButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void DrawerButton::buttonStateChanged()
+{
+    Button::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
 }
 
 void DrawerButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
