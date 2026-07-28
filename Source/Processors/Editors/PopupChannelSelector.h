@@ -37,6 +37,7 @@ enum Select
 };
 
 class PopupChannelSelector;
+struct ChannelButtonAccessibilityState;
 
 /**
 *
@@ -50,13 +51,16 @@ public:
     ChannelButton (int id, PopupChannelSelector* parent);
 
     /** Destructor */
-    ~ChannelButton() {}
+    ~ChannelButton() override;
 
     /** Returns the channel id */
     int getId() { return id; };
 
     /** Creates the toggle-button accessibility handler */
     std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
+protected:
+    void buttonStateChanged() override;
 
 private:
     /** Mouse-related callbacks*/
@@ -69,6 +73,10 @@ private:
     int width;
     int height;
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
+
+    std::shared_ptr<
+        ChannelButtonAccessibilityState>
+        accessibilityState;
 };
 
 /**

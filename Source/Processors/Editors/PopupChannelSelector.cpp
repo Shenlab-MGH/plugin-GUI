@@ -22,6 +22,7 @@
 */
 
 #include "PopupChannelSelector.h"
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -29,16 +30,205 @@
 #include "../../UI/SemanticComponent.h"
 #include "../../Utils/Utils.h"
 
+struct ChannelButtonAccessibilityState
+{
+    explicit ChannelButtonAccessibilityState (
+        bool initialState)
+        : publishedState (initialState)
+    {
+    }
+
+    void synchronise (
+        bool actualState)
+    {
+        publishedState.store (
+            actualState);
+    }
+
+    bool getPublishedState() const
+    {
+        return publishedState.load();
+    }
+
+    void attach (
+        Button* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+    }
+
+    Button* getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+private:
+    std::atomic<bool> publishedState;
+    Button* button = nullptr;
+};
+
+namespace
+{
+class ChannelButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit ChannelButtonAccessibilityValue (
+        std::shared_ptr<
+            ChannelButtonAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getPublishedState()
+                   ? String ("On")
+                   : String ("Off");
+    }
+
+private:
+    std::shared_ptr<
+        ChannelButtonAccessibilityState>
+        state;
+};
+
+class ChannelButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    ChannelButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            ChannelButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::toggleButton,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      ChannelButtonAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto accessibleState =
+            AccessibilityHandler::getCurrentState()
+                .withCheckable();
+        return state->getPublishedState()
+                   ? accessibleState.withChecked()
+                   : accessibleState;
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            ChannelButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::toggle,
+                [state]
+                {
+                    MessageManager::callSync (
+                        [state]
+                        {
+                            auto* button =
+                                state
+                                    ->getButtonOnMessageThread();
+                            if (button == nullptr
+                                || ! button->isEnabled())
+                            {
+                                return;
+                            }
+
+                            button->setToggleState (
+                                ! button->getToggleState(),
+                                sendNotification);
+
+                            if (auto* survivingButton =
+                                    state
+                                        ->getButtonOnMessageThread())
+                            {
+                                state->synchronise (
+                                    survivingButton
+                                        ->getToggleState());
+                            }
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        ChannelButtonAccessibilityState>
+        state;
+};
+} // namespace
+
 ChannelButton::ChannelButton (int _id, PopupChannelSelector* _parent) : Button (String (_id)),
                                                                         id (_id),
-                                                                        parent (_parent)
+                                                                        parent (_parent),
+                                                                        accessibilityState (
+                                                                            std::make_shared<
+                                                                                ChannelButtonAccessibilityState> (
+                                                                                false))
 {
+    accessibilityState->attach (
+        this);
     setClickingTogglesState (true);
 }
 
-std::unique_ptr<AccessibilityHandler> ChannelButton::createAccessibilityHandler()
+ChannelButton::~ChannelButton()
 {
-    return Button::createAccessibilityHandler();
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+ChannelButton::createAccessibilityHandler()
+{
+    return std::make_unique<
+        ChannelButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void ChannelButton::buttonStateChanged()
+{
+    Button::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
 }
 
 void ChannelButton::mouseDown (const MouseEvent& event)

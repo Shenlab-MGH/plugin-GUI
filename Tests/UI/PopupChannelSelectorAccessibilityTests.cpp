@@ -3,6 +3,8 @@
 #include "../../Source/Processors/ProcessorGraph/ProcessorGraph.h"
 #include "../../Source/UI/SemanticComponent.h"
 #include "gtest/gtest.h"
+#include <atomic>
+#include <thread>
 
 namespace
 {
@@ -13,8 +15,13 @@ public:
 
     void channelStateChanged (Array<int> selected) override
     {
+        changeUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
         selectedChannels = std::move (selected);
         ++changeCount;
+        if (onChange)
+            onChange();
     }
 
     int getChannelCount() override { return channelCount; }
@@ -22,6 +29,9 @@ public:
     int channelCount = 10;
     Array<int> selectedChannels { 0 };
     int changeCount = 0;
+    std::atomic<bool>
+        changeUsedMessageThread { false };
+    std::function<void()> onChange;
 };
 
 Component* findDescendantById (Component& parent, const String& id)
@@ -36,6 +46,48 @@ Component* findDescendantById (Component& parent, const String& id)
     }
 
     return nullptr;
+}
+
+bool invokeFromWorker (
+    const AccessibilityActions& actions,
+    AccessibilityActionType action)
+{
+    std::atomic<bool> workerEntered {
+        false
+    };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                actions.invoke (action));
+        });
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    auto* messageManager =
+        MessageManager::getInstance();
+    const auto timeoutAt =
+        Time::getMillisecondCounterHiRes()
+        + 5000.0;
+    bool timedOut = false;
+    while (! invoked.load())
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                10);
+        if (! timedOut
+            && Time::getMillisecondCounterHiRes()
+                   >= timeoutAt)
+        {
+            ADD_FAILURE()
+                << "Worker UIA action exceeded five seconds";
+            timedOut = true;
+        }
+    }
+    worker.join();
+    return invoked.load();
 }
 
 class PopupChannelSelectorAccessibilityTests : public ::testing::Test
@@ -113,10 +165,27 @@ TEST_F (PopupChannelSelectorAccessibilityTests, PublishesEverySelectionControl)
                "Select or deselect channel 2 (AP2).");
     auto secondHandler = secondChannel->createAccessibilityHandler();
     ASSERT_NE (secondHandler, nullptr);
-    EXPECT_TRUE (
-        secondHandler->getActions().contains (AccessibilityActionType::press));
+    EXPECT_EQ (
+        secondHandler->getRole(),
+        AccessibilityRole::toggleButton);
+    EXPECT_FALSE (
+        secondHandler->getActions().contains (
+            AccessibilityActionType::press));
     EXPECT_TRUE (
         secondHandler->getActions().contains (AccessibilityActionType::toggle));
+    ASSERT_NE (
+        secondHandler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        secondHandler->getValueInterface()
+            ->isReadOnly());
+    EXPECT_FALSE (
+        secondHandler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        secondHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
 
     auto* selectAll = findDescendantById (selector, prefix + ".select_all");
     ASSERT_NE (selectAll, nullptr);
@@ -139,7 +208,7 @@ TEST_F (PopupChannelSelectorAccessibilityTests, PublishesEverySelectionControl)
     EXPECT_FALSE (rangeHandler->getValueInterface()->isReadOnly());
 }
 
-TEST_F (PopupChannelSelectorAccessibilityTests, AccessibilityPressUpdatesSelection)
+TEST_F (PopupChannelSelectorAccessibilityTests, WorkerToggleUpdatesSelectionOnMessageThread)
 {
     TextButton anchor ("Channels");
     applySemanticMetadata (
@@ -159,24 +228,44 @@ TEST_F (PopupChannelSelectorAccessibilityTests, AccessibilityPressUpdatesSelecti
     auto secondHandler = secondChannel->createAccessibilityHandler();
     ASSERT_NE (secondHandler, nullptr);
     ASSERT_TRUE (
-        secondHandler->getActions().invoke (AccessibilityActionType::press));
-    MessageManager::getInstance()->runDispatchLoopUntil (50);
+        invokeFromWorker (
+            secondHandler->getActions(),
+            AccessibilityActionType::toggle));
 
     EXPECT_EQ (listener.changeCount, 1);
+    EXPECT_TRUE (
+        listener
+            .changeUsedMessageThread
+            .load());
     EXPECT_EQ (listener.selectedChannels, Array<int> ({ 0, 1 }));
+    EXPECT_TRUE (
+        secondHandler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        secondHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
 
     auto* firstChannel = selector.getButtonForId (0);
     auto firstHandler = firstChannel->createAccessibilityHandler();
     ASSERT_NE (firstHandler, nullptr);
     ASSERT_TRUE (
-        firstHandler->getActions().invoke (AccessibilityActionType::press));
-    MessageManager::getInstance()->runDispatchLoopUntil (50);
+        invokeFromWorker (
+            firstHandler->getActions(),
+            AccessibilityActionType::toggle));
 
     EXPECT_EQ (listener.changeCount, 2);
     EXPECT_EQ (listener.selectedChannels, Array<int> ({ 1 }));
+    EXPECT_FALSE (
+        firstHandler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        firstHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
 }
 
-TEST_F (PopupChannelSelectorAccessibilityTests, RefreshedSelectionFeedsTheNextAccessibilityPress)
+TEST_F (PopupChannelSelectorAccessibilityTests, RefreshedSelectionFeedsTheNextAccessibilityToggle)
 {
     TextButton anchor ("Channels");
     applySemanticMetadata (
@@ -198,19 +287,30 @@ TEST_F (PopupChannelSelectorAccessibilityTests, RefreshedSelectionFeedsTheNextAc
     EXPECT_EQ (listener.changeCount, 0);
     EXPECT_FALSE (selector.getButtonForId (0)->getToggleState());
     EXPECT_TRUE (selector.getButtonForId (2)->getToggleState());
+    auto thirdHandler =
+        selector.getButtonForId (2)->createAccessibilityHandler();
+    ASSERT_NE (thirdHandler, nullptr);
+    EXPECT_TRUE (
+        thirdHandler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        thirdHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
 
     auto fourthHandler =
         selector.getButtonForId (3)->createAccessibilityHandler();
     ASSERT_NE (fourthHandler, nullptr);
     ASSERT_TRUE (
-        fourthHandler->getActions().invoke (AccessibilityActionType::press));
-    MessageManager::getInstance()->runDispatchLoopUntil (50);
+        invokeFromWorker (
+            fourthHandler->getActions(),
+            AccessibilityActionType::toggle));
 
     EXPECT_EQ (listener.changeCount, 1);
     EXPECT_EQ (listener.selectedChannels, Array<int> ({ 2, 3 }));
 }
 
-TEST_F (PopupChannelSelectorAccessibilityTests, AccessibilityPressHonoursSelectionLimit)
+TEST_F (PopupChannelSelectorAccessibilityTests, AccessibilityToggleHonoursSelectionLimit)
 {
     TextButton anchor ("Channels");
     applySemanticMetadata (
@@ -227,17 +327,133 @@ TEST_F (PopupChannelSelectorAccessibilityTests, AccessibilityPressHonoursSelecti
         "Recorded channels");
     selector.setMaximumSelectableChannels (1);
 
+    auto firstHandler =
+        selector.getButtonForId (0)->createAccessibilityHandler();
     auto secondHandler =
         selector.getButtonForId (1)->createAccessibilityHandler();
+    ASSERT_NE (firstHandler, nullptr);
     ASSERT_NE (secondHandler, nullptr);
     ASSERT_TRUE (
-        secondHandler->getActions().invoke (AccessibilityActionType::press));
-    MessageManager::getInstance()->runDispatchLoopUntil (50);
+        invokeFromWorker (
+            secondHandler->getActions(),
+            AccessibilityActionType::toggle));
 
     EXPECT_EQ (listener.changeCount, 1);
     EXPECT_EQ (listener.selectedChannels, Array<int> ({ 1 }));
     EXPECT_FALSE (selector.getButtonForId (0)->getToggleState());
     EXPECT_TRUE (selector.getButtonForId (1)->getToggleState());
+    EXPECT_FALSE (
+        firstHandler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        firstHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+    EXPECT_TRUE (
+        secondHandler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        secondHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+}
+
+TEST_F (PopupChannelSelectorAccessibilityTests, DisabledAndStaleChannelActionsAreNoOps)
+{
+    TextButton anchor ("Channels");
+    applySemanticMetadata (
+        anchor,
+        "oe.processor.100.parameter.channels",
+        "Recorded channels",
+        "Choose channels to record.");
+    TestChannelListener listener;
+    auto selector =
+        std::make_unique<
+            PopupChannelSelector> (
+            &anchor,
+            &listener,
+            initialStates(),
+            channelNames(),
+            "Recorded channels");
+    auto* secondChannel =
+        selector->getButtonForId (1);
+    ASSERT_NE (secondChannel, nullptr);
+    auto secondHandler =
+        secondChannel
+            ->createAccessibilityHandler();
+    ASSERT_NE (secondHandler, nullptr);
+
+    secondChannel->setEnabled (false);
+    EXPECT_TRUE (
+        invokeFromWorker (
+            secondHandler->getActions(),
+            AccessibilityActionType::toggle));
+    EXPECT_EQ (listener.changeCount, 0);
+    EXPECT_EQ (
+        listener.selectedChannels,
+        Array<int> ({ 0 }));
+    EXPECT_FALSE (
+        secondHandler->getCurrentState()
+            .isChecked());
+
+    const auto staleActions =
+        secondHandler->getActions();
+    secondHandler.reset();
+    selector.reset();
+    EXPECT_TRUE (
+        invokeFromWorker (
+            staleActions,
+            AccessibilityActionType::toggle));
+    EXPECT_EQ (listener.changeCount, 0);
+}
+
+TEST_F (PopupChannelSelectorAccessibilityTests, ListenerCanDestroyPopupDuringWorkerToggle)
+{
+    TextButton anchor ("Channels");
+    applySemanticMetadata (
+        anchor,
+        "oe.processor.100.parameter.channels",
+        "Recorded channels",
+        "Choose channels to record.");
+    TestChannelListener listener;
+    auto selector =
+        std::make_unique<
+            PopupChannelSelector> (
+            &anchor,
+            &listener,
+            initialStates(),
+            channelNames(),
+            "Recorded channels");
+    auto handler =
+        selector->getButtonForId (1)
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
+    handler.reset();
+    listener.onChange =
+        [&selector]
+        {
+            selector.reset();
+        };
+
+    EXPECT_TRUE (
+        invokeFromWorker (
+            actions,
+            AccessibilityActionType::toggle));
+    EXPECT_EQ (selector, nullptr);
+    EXPECT_EQ (listener.changeCount, 1);
+    EXPECT_TRUE (
+        listener
+            .changeUsedMessageThread
+            .load());
+
+    listener.onChange = {};
+    EXPECT_TRUE (
+        invokeFromWorker (
+            actions,
+            AccessibilityActionType::toggle));
+    EXPECT_EQ (listener.changeCount, 1);
 }
 
 TEST_F (PopupChannelSelectorAccessibilityTests, MouseSelectionNotifiesOnlyOnce)
