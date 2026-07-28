@@ -61,6 +61,10 @@ public:
             param->removeListener (this);
     }
 
+    /** Flattens this layout wrapper while preserving its value control. */
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
     /** Used to specify layout */
     enum Layout
     {

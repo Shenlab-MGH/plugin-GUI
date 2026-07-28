@@ -43,6 +43,14 @@ void applyParameterSemanticMetadata (Component& component, Parameter& parameter)
 }
 } // namespace
 
+std::unique_ptr<AccessibilityHandler>
+ParameterEditor::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::ignored);
+}
+
 void ParameterEditor::setParameter (Parameter* newParam)
 {
     if (param != nullptr)

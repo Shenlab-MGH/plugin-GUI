@@ -37,6 +37,13 @@ protected:
                                             const String& expectedTitle,
                                             const String& expectedDescription)
     {
+        auto wrapperHandler =
+            editor.createAccessibilityHandler();
+        ASSERT_NE (wrapperHandler, nullptr);
+        EXPECT_EQ (
+            wrapperHandler->getRole(),
+            AccessibilityRole::ignored);
+
         auto* valueControl = editor.getEditor();
         ASSERT_NE (valueControl, nullptr);
         EXPECT_EQ (valueControl->getComponentID(), expectedId);
