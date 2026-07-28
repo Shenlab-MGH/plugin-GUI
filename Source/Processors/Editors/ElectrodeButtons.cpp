@@ -23,112 +23,429 @@
 
 #include "ElectrodeButtons.h"
 #include "../../UI/LookAndFeel/CustomLookAndFeel.h"
-
-ElectrodeButton::ElectrodeButton (int chan_, Colour defaultColour_) : Button ("Electrode"),
-                                                                      chan (chan_),
-                                                                      defaultColour (defaultColour_)
-
-{
-    setClickingTogglesState (true);
-    setToggleState (true, dontSendNotification);
-    setButtonText (String (chan_));
-}
-
-ElectrodeButton::~ElectrodeButton() {}
+#include <atomic>
+#include <mutex>
+#include <unordered_map>
 
 namespace
 {
+struct ElectrodeButtonAccessibilityState
+{
+    void attach (
+        ElectrodeButton* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+        enabled.store (false);
+        focused.store (false);
+    }
+
+    ElectrodeButton*
+    getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+    void synchronise (
+        String valueToUse,
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isToggleable,
+        bool isChecked,
+        bool isEnabled,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            value = std::move (valueToUse);
+            title = std::move (titleToUse);
+            description =
+                std::move (descriptionToUse);
+            help = std::move (helpToUse);
+        }
+
+        toggleable.store (isToggleable);
+        checked.store (isChecked);
+        enabled.store (isEnabled);
+        focused.store (isFocused);
+    }
+
+    String getValue() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return value;
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isToggleable() const
+    {
+        return toggleable.load();
+    }
+
+    bool isChecked() const
+    {
+        return checked.load();
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String value;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> toggleable { true };
+    std::atomic<bool> checked { true };
+    std::atomic<bool> enabled { true };
+    std::atomic<bool> focused { false };
+    ElectrodeButton* button = nullptr;
+};
+
+struct ElectrodeButtonAccessibilityRegistry
+{
+    std::mutex mutex;
+    std::unordered_map<
+        ElectrodeButton*,
+        std::shared_ptr<
+            ElectrodeButtonAccessibilityState>>
+        states;
+};
+
+ElectrodeButtonAccessibilityRegistry&
+getElectrodeButtonAccessibilityRegistry()
+{
+    static auto* registry =
+        new ElectrodeButtonAccessibilityRegistry();
+    return *registry;
+}
+
+std::shared_ptr<
+    ElectrodeButtonAccessibilityState>
+registerElectrodeButton (
+    ElectrodeButton* button)
+{
+    auto state =
+        std::make_shared<
+            ElectrodeButtonAccessibilityState>();
+    state->attach (button);
+
+    auto& registry =
+        getElectrodeButtonAccessibilityRegistry();
+    const std::lock_guard<std::mutex>
+        lock (registry.mutex);
+    registry.states[button] = state;
+    return state;
+}
+
+std::shared_ptr<
+    ElectrodeButtonAccessibilityState>
+getElectrodeButtonState (
+    ElectrodeButton* button)
+{
+    auto& registry =
+        getElectrodeButtonAccessibilityRegistry();
+    const std::lock_guard<std::mutex>
+        lock (registry.mutex);
+    const auto found =
+        registry.states.find (button);
+    return found != registry.states.end()
+               ? found->second
+               : nullptr;
+}
+
+void unregisterElectrodeButton (
+    ElectrodeButton* button)
+{
+    std::shared_ptr<
+        ElectrodeButtonAccessibilityState>
+        state;
+    {
+        auto& registry =
+            getElectrodeButtonAccessibilityRegistry();
+        const std::lock_guard<std::mutex>
+            lock (registry.mutex);
+        const auto found =
+            registry.states.find (button);
+        if (found == registry.states.end())
+            return;
+
+        state = found->second;
+        registry.states.erase (found);
+    }
+
+    state->detach();
+}
+
+class ElectrodeButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit ElectrodeButtonAccessibilityValue (
+        std::shared_ptr<
+            ElectrodeButtonAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getValue();
+    }
+
+private:
+    std::shared_ptr<
+        ElectrodeButtonAccessibilityState>
+        state;
+};
+
 class ElectrodeButtonAccessibilityHandler final
     : public AccessibilityHandler
 {
 public:
-    explicit ElectrodeButtonAccessibilityHandler (
-        ElectrodeButton& buttonToWrap)
+    ElectrodeButtonAccessibilityHandler (
+        ElectrodeButton& button,
+        std::shared_ptr<
+            ElectrodeButtonAccessibilityState>
+            stateToUse)
         : AccessibilityHandler (
-              buttonToWrap,
-              buttonToWrap.getRadioGroupId() != 0
+              button,
+              button.getRadioGroupId() != 0
                   ? AccessibilityRole::radioButton
                   : AccessibilityRole::button,
-              getActions (buttonToWrap),
+              createActions (
+                  stateToUse,
+                  button
+                          .getRadioGroupId()
+                      != 0),
               AccessibilityHandler::Interfaces {
-                  std::make_unique<ChannelValue> (buttonToWrap) }),
-          button (buttonToWrap)
+                  std::make_unique<
+                      ElectrodeButtonAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
     {
     }
 
-    AccessibleState getCurrentState() const override
+    AccessibleState
+    getCurrentState() const override
     {
-        auto state = AccessibilityHandler::getCurrentState();
+        auto current =
+            AccessibleState().withFocusable();
 
-        if (button.isToggleable())
+        if (state->isToggleable())
         {
-            state = state.withCheckable();
-
-            if (button.getToggleState())
-                state = state.withChecked();
+            current =
+                current.withCheckable();
+            if (state->isChecked())
+                current =
+                    current.withChecked();
         }
 
-        return state;
+        return state->isFocused()
+                   ? current.withFocused()
+                   : current;
     }
 
     String getTitle() const override
     {
-        const auto title = AccessibilityHandler::getTitle();
-        return title.isNotEmpty() ? title : button.getButtonText();
+        return state->getTitle();
     }
 
-    String getHelp() const override { return button.getTooltip(); }
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
 
 private:
-    class ChannelValue final : public AccessibilityTextValueInterface
+    static void runOnMessageThread (
+        const std::shared_ptr<
+            ElectrodeButtonAccessibilityState>&
+            state,
+        bool toggle)
     {
-    public:
-        explicit ChannelValue (ElectrodeButton& buttonToWrap)
-            : button (buttonToWrap)
-        {
-        }
+        auto* messageManager =
+            MessageManager::
+                getInstanceWithoutCreating();
+        if (messageManager == nullptr)
+            return;
 
-        bool isReadOnly() const override { return true; }
-        void setValueAsString (const String&) override {}
-        String getCurrentValueAsString() const override
-        {
-            const int channel = button.getChannelNum();
-            return channel >= 0 ? String (channel) : "None";
-        }
+        messageManager->callSync (
+            [state, toggle]
+            {
+                auto* button =
+                    state
+                        ->getButtonOnMessageThread();
+                if (button == nullptr
+                    || ! button->isEnabled()
+                    || (toggle
+                        && ! button
+                                ->isToggleable())
+                    || (toggle
+                        && button
+                               ->getRadioGroupId()
+                           != 0))
+                {
+                    return;
+                }
 
-    private:
-        ElectrodeButton& button;
-    };
+                if (toggle)
+                {
+                    button->setToggleState (
+                        ! button
+                               ->getToggleState(),
+                        sendNotification);
+                }
+                else
+                {
+                    button->triggerClick();
+                }
+            });
+    }
 
-    static AccessibilityActions getActions (ElectrodeButton& button)
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            ElectrodeButtonAccessibilityState>&
+            state,
+        bool isRadioButton)
     {
-        auto actions = AccessibilityActions().addAction (
-            AccessibilityActionType::press,
-            [&button] { button.triggerClick(); });
+        auto actions =
+            AccessibilityActions()
+                .addAction (
+                    AccessibilityActionType::
+                        press,
+                    [state]
+                    {
+                        runOnMessageThread (
+                            state,
+                            false);
+                    });
 
-        if (button.isToggleable())
+        if (state->isToggleable()
+            && ! isRadioButton)
         {
             actions = actions.addAction (
-                AccessibilityActionType::toggle,
-                [&button]
+                AccessibilityActionType::
+                    toggle,
+                [state]
                 {
-                    button.setToggleState (
-                        ! button.getToggleState(),
-                        sendNotification);
+                    runOnMessageThread (
+                        state,
+                        true);
                 });
         }
 
         return actions;
     }
 
-    ElectrodeButton& button;
+    std::shared_ptr<
+        ElectrodeButtonAccessibilityState>
+        state;
 };
+} // namespace
+
+ElectrodeButton::ElectrodeButton (
+    int chan_,
+    Colour defaultColour_)
+    : Button ("Electrode"),
+      chan (chan_),
+      defaultColour (defaultColour_)
+{
+    registerElectrodeButton (this);
+    setClickingTogglesState (true);
+    setToggleState (
+        true,
+        dontSendNotification);
+    setButtonText (String (chan_));
+    refreshAccessibilityState();
+}
+
+ElectrodeButton::~ElectrodeButton()
+{
+    unregisterElectrodeButton (this);
 }
 
 std::unique_ptr<AccessibilityHandler>
 ElectrodeButton::createAccessibilityHandler()
 {
-    return std::make_unique<ElectrodeButtonAccessibilityHandler> (*this);
+    auto state =
+        getElectrodeButtonState (this);
+    if (state == nullptr)
+        state =
+            registerElectrodeButton (this);
+
+    refreshAccessibilityState();
+    return std::make_unique<
+        ElectrodeButtonAccessibilityHandler> (
+        *this,
+        std::move (state));
 }
 
 int ElectrodeButton::getChannelNum()
@@ -176,6 +493,7 @@ void ElectrodeButton::setChannelNum (int i)
     chan = i;
 
     setButtonText (String (chan));
+    refreshAccessibilityState();
 
     if (auto* handler = getAccessibilityHandler())
     {
@@ -184,6 +502,65 @@ void ElectrodeButton::setChannelNum (int i)
         handler->notifyAccessibilityEvent (
             AccessibilityEvent::titleChanged);
     }
+}
+
+void ElectrodeButton::
+    refreshAccessibilityState()
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+    auto state =
+        getElectrodeButtonState (this);
+    if (state == nullptr)
+        return;
+
+    const auto value =
+        chan >= 0 ? String (chan) : "None";
+    auto title = getTitle();
+    if (title.isEmpty())
+        title = getButtonText();
+    auto help = getTooltip();
+    if (help.isEmpty())
+        help = getHelpText();
+    if (help.isEmpty())
+        help = getDescription();
+
+    state->synchronise (
+        value,
+        std::move (title),
+        getDescription(),
+        std::move (help),
+        isToggleable(),
+        getToggleState(),
+        Component::isEnabled(),
+        hasKeyboardFocus (false));
+}
+
+void ElectrodeButton::buttonStateChanged()
+{
+    Button::buttonStateChanged();
+    refreshAccessibilityState();
+}
+
+void ElectrodeButton::enablementChanged()
+{
+    Button::enablementChanged();
+    refreshAccessibilityState();
+}
+
+void ElectrodeButton::focusGained (
+    FocusChangeType cause)
+{
+    Button::focusGained (cause);
+    refreshAccessibilityState();
+}
+
+void ElectrodeButton::focusLost (
+    FocusChangeType cause)
+{
+    Button::focusLost (cause);
+    refreshAccessibilityState();
 }
 
 ElectrodeEditorButton::ElectrodeEditorButton (const String& name_) : Button ("Electrode Editor"),

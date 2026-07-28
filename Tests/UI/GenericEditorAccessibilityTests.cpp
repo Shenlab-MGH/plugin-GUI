@@ -1091,6 +1091,347 @@ TEST (GenericEditorAccessibilityTests, PublishesElectrodeChannelAsValue)
         "12");
 }
 
+TEST (GenericEditorAccessibilityTests,
+      ElectrodeProvidersAndActionsAreWorkerSafe)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    auto button =
+        std::make_unique<
+            InspectableElectrodeButton> (
+            4);
+    button->setTitle (
+        "Probe electrode 4");
+    button->setDescription (
+        "Enable or disable electrode 4 for acquisition.");
+    ThreadTrackingButtonListener listener;
+    button->addListener (&listener);
+
+    auto handler =
+        button->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+
+    String workerTitle;
+    String workerDescription;
+    String workerHelp;
+    String workerValue;
+    bool workerEnabled = false;
+    AccessibleState workerState;
+    std::thread reader (
+        [&]
+        {
+            workerTitle = handler->getTitle();
+            workerDescription =
+                handler->getDescription();
+            workerHelp = handler->getHelp();
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+            workerEnabled = handler->isEnabled();
+            workerState =
+                handler->getCurrentState();
+        });
+    reader.join();
+
+    EXPECT_EQ (
+        workerTitle,
+        "Probe electrode 4");
+    EXPECT_EQ (
+        workerDescription,
+        "Enable or disable electrode 4 for acquisition.");
+    ASSERT_EQ (
+        workerHelp,
+        workerDescription);
+    EXPECT_EQ (workerValue, "4");
+    EXPECT_TRUE (workerEnabled);
+    EXPECT_TRUE (workerState.isFocusable());
+    EXPECT_TRUE (workerState.isCheckable());
+    EXPECT_TRUE (workerState.isChecked());
+
+    const auto actions =
+        handler->getActions();
+    const auto invokeFromWorker =
+        [&] (
+            AccessibilityActionType action)
+        {
+            std::atomic<bool> completed {
+                false
+            };
+            bool invoked = false;
+            std::thread worker (
+                [&]
+                {
+                    invoked = actions.invoke (
+                        action);
+                    completed.store (true);
+                });
+            while (! completed.load())
+            {
+                messageManager
+                    ->runDispatchLoopUntil (
+                        10);
+            }
+            worker.join();
+            return invoked;
+        };
+
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_FALSE (
+        button->getToggleState());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+
+    button->setClickingTogglesState (
+        false);
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_FALSE (
+        button->getToggleState());
+    auto nonToggleHandler =
+        button->createAccessibilityHandler();
+    ASSERT_NE (nonToggleHandler, nullptr);
+    EXPECT_TRUE (
+        nonToggleHandler->getActions()
+            .contains (
+                AccessibilityActionType::
+                    press));
+    EXPECT_FALSE (
+        nonToggleHandler->getActions()
+            .contains (
+                AccessibilityActionType::
+                    toggle));
+    EXPECT_FALSE (
+        nonToggleHandler->getCurrentState()
+            .isCheckable());
+    nonToggleHandler.reset();
+    button->setClickingTogglesState (
+        true);
+    button->refreshAccessibilityState();
+
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                press));
+    for (int attempt = 0;
+         attempt < 20
+             && listener
+                    .callbackCount
+                    .load()
+                 == 1;
+         ++attempt)
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                10);
+    }
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        2);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_TRUE (
+        button->getToggleState());
+
+    button->setRadioGroupId (
+        42,
+        dontSendNotification);
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        2);
+    EXPECT_TRUE (
+        button->getToggleState());
+    button->setRadioGroupId (
+        0,
+        dontSendNotification);
+    button->refreshAccessibilityState();
+
+    button->setChannelNum (12);
+    std::thread updatedReader (
+        [&]
+        {
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+            workerTitle =
+                handler->getTitle();
+        });
+    updatedReader.join();
+    EXPECT_EQ (workerValue, "12");
+    EXPECT_EQ (
+        workerTitle,
+        "Probe electrode 4");
+
+    button->setEnabled (false);
+    EXPECT_FALSE (handler->isEnabled());
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                press));
+    messageManager->runDispatchLoopUntil (
+        20);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        2);
+    EXPECT_TRUE (
+        button->getToggleState());
+
+    handler.reset();
+    button.reset();
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_TRUE (
+        invokeFromWorker (
+            AccessibilityActionType::
+                press));
+    messageManager->runDispatchLoopUntil (
+        20);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        2);
+}
+
+TEST (GenericEditorAccessibilityTests,
+      ElectrodeRadioButtonsUsePressSelection)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    Component parent;
+    auto first =
+        std::make_unique<
+            InspectableElectrodeButton> (
+            1);
+    auto second =
+        std::make_unique<
+            InspectableElectrodeButton> (
+            2);
+    parent.addAndMakeVisible (first.get());
+    parent.addAndMakeVisible (
+        second.get());
+    first->setRadioGroupId (
+        42,
+        dontSendNotification);
+    second->setRadioGroupId (
+        42,
+        dontSendNotification);
+    second->setToggleState (
+        false,
+        dontSendNotification);
+    first->setToggleState (
+        true,
+        dontSendNotification);
+    ThreadTrackingButtonListener listener;
+    second->addListener (&listener);
+
+    auto firstHandler =
+        first->createAccessibilityHandler();
+    auto secondHandler =
+        second->createAccessibilityHandler();
+    ASSERT_NE (firstHandler, nullptr);
+    ASSERT_NE (secondHandler, nullptr);
+    EXPECT_EQ (
+        firstHandler->getRole(),
+        AccessibilityRole::radioButton);
+    EXPECT_EQ (
+        secondHandler->getRole(),
+        AccessibilityRole::radioButton);
+    EXPECT_TRUE (
+        secondHandler->getActions()
+            .contains (
+                AccessibilityActionType::
+                    press));
+    EXPECT_FALSE (
+        secondHandler->getActions()
+            .contains (
+                AccessibilityActionType::
+                    toggle));
+
+    const auto actions =
+        secondHandler->getActions();
+    std::atomic<bool> completed { false };
+    bool invoked = false;
+    std::thread worker (
+        [&]
+        {
+            invoked = actions.invoke (
+                AccessibilityActionType::
+                    press);
+            completed.store (true);
+        });
+    while (! completed.load())
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    worker.join();
+    EXPECT_TRUE (invoked);
+    for (int attempt = 0;
+         attempt < 20
+             && listener
+                    .callbackCount
+                    .load()
+                 == 0;
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_FALSE (
+        first->getToggleState());
+    EXPECT_TRUE (
+        second->getToggleState());
+    EXPECT_FALSE (
+        firstHandler->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        secondHandler->getCurrentState()
+            .isChecked());
+}
+
 TEST (GenericEditorAccessibilityTests, PublishesUtilityButtonLabelAsValue)
 {
     InspectableUtilityButton button ("16");
