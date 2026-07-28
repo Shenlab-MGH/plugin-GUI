@@ -35,6 +35,7 @@ namespace LfpViewer
 
 class LfpDisplayNode;
 class LfpDisplayCanvas;
+struct LfpEditorButtonAccessibilityState;
 
 class LayoutButton : public Button
 {
@@ -42,8 +43,49 @@ public:
     LayoutButton (const String& buttonName);
     ~LayoutButton();
 
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
 private:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (FocusChangeType cause) override;
+    void focusLost (FocusChangeType cause) override;
     void paintButton (Graphics&, bool isMouseOverButton, bool isButtonDown) override;
+
+    std::shared_ptr<
+        LfpEditorButtonAccessibilityState>
+        accessibilityState;
+};
+
+class LfpSyncButton : public UtilityButton
+{
+public:
+    explicit LfpSyncButton (String label);
+    ~LfpSyncButton() override;
+
+    void setAccessibilityActionAvailable (
+        bool isAvailable);
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+private:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (FocusChangeType cause) override;
+    void focusLost (FocusChangeType cause) override;
+
+    bool accessibilityActionAvailable =
+        false;
+    std::shared_ptr<
+        LfpEditorButtonAccessibilityState>
+        accessibilityState;
 };
 
 /**
@@ -92,7 +134,7 @@ public:
 private:
     LfpDisplayNode* lfpProcessor;
 
-    std::unique_ptr<UtilityButton> syncButton;
+    std::unique_ptr<LfpSyncButton> syncButton;
 
     bool hasNoInputs;
 
