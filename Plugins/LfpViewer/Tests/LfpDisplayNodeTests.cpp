@@ -4608,6 +4608,73 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        SpikeRasterOwnsAndRestoresSubtractOffsetThroughItsComboBox)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->resized();
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    processor->startAcquisition();
+    canvas->beginAnimation();
+    auto input = createBuffer (0.0f, 1.0f, numChannels, 128);
+    writeBlock (input);
+    canvas->refreshState();
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id = "oe.processor." + String (processor->getNodeId())
+                    + ".lfp.display_1.subtract_offset";
+    auto* button = dynamic_cast<Button*> (findLfpDescendantById (*canvas, id));
+    auto* display = findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (button, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+    ASSERT_NE (options, nullptr);
+    std::vector<ComboBox*> comboBoxes;
+    collectLfpDescendants (*options, comboBoxes);
+    const auto spikeRaster = std::find_if (
+        comboBoxes.begin(), comboBoxes.end(), [] (const ComboBox* candidate)
+        { return candidate->getName() == "spikeRasterSelection"; });
+    ASSERT_NE (spikeRaster, comboBoxes.end());
+    auto* handler = button->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    auto* value = handler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    LfpThreadTrackingButtonListener listener;
+    button->addListener (&listener);
+    (*spikeRaster)->setSelectedId (2, sendNotification);
+    options->comboBoxChanged (*spikeRaster);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_EQ (value->getCurrentValueAsString(), "On");
+    const auto actions = handler->getActions();
+    EXPECT_TRUE (actions.invoke (AccessibilityActionType::toggle));
+    EXPECT_EQ (listener.callbackCount.load(), 2);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_EQ (value->getCurrentValueAsString(), "On");
+    (*spikeRaster)->setSelectedId (1, sendNotification);
+    options->comboBoxChanged (*spikeRaster);
+    EXPECT_FALSE (display->getMedianOffsetPlotting());
+    EXPECT_FALSE (button->getToggleState());
+    EXPECT_EQ (value->getCurrentValueAsString(), "Off");
+
+    options->setMedianOffset (true);
+    (*spikeRaster)->setSelectedId (2, sendNotification);
+    options->comboBoxChanged (*spikeRaster);
+    (*spikeRaster)->setSelectedId (1, sendNotification);
+    options->comboBoxChanged (*spikeRaster);
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_EQ (value->getCurrentValueAsString(), "On");
+    button->removeListener (&listener);
+    processor->stopAcquisition();
+}
+
+TEST_F (LfpDisplayNodeTests,
         ShowChannelNumbersChangesTheRealChannelInfoTooltipConsumer)
 {
     auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
