@@ -31,15 +31,60 @@
 #include "../Processors/Settings/InfoObject.h"
 
 #include "../UI/LookAndFeel/CustomLookAndFeel.h"
+#include "../UI/SemanticComponent.h"
 
 const int NODE_WIDTH = 180;
 const int NODE_HEIGHT = 50;
 const int X_BORDER_SIZE = 45;
 const int Y_BORDER_SIZE = 20;
 
+namespace
+{
+class ProcessorGraphViewport final
+    : public Viewport
+{
+public:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override
+    {
+        return std::make_unique<AccessibilityHandler> (
+            *this,
+            AccessibilityRole::group);
+    }
+};
+} // namespace
+
 GraphViewport::GraphViewport (GraphViewer* gv)
 {
-    viewport = std::make_unique<Viewport>();
+    setFocusContainerType (
+        FocusContainerType::focusContainer);
+    applySemanticMetadata (
+        *this,
+        "oe.graph.navigation",
+        "Processor graph navigation",
+        "Navigate the processor graph.");
+
+    viewport =
+        std::make_unique<
+            ProcessorGraphViewport>();
+    viewport->setFocusContainerType (
+        FocusContainerType::focusContainer);
+    applySemanticMetadata (
+        *viewport,
+        "oe.graph.viewport",
+        "Processor graph viewport",
+        "Scroll through the processor graph.");
+    applySemanticMetadata (
+        viewport->getHorizontalScrollBar(),
+        "oe.graph.viewport.horizontal_scrollbar",
+        "Processor graph horizontal scroll",
+        "Scroll horizontally through the processor graph.");
+    applySemanticMetadata (
+        viewport->getVerticalScrollBar(),
+        "oe.graph.viewport.vertical_scrollbar",
+        "Processor graph vertical scroll",
+        "Scroll vertically through the processor graph.");
+
     viewport->setViewedComponent (gv, false);
     viewport->setScrollBarThickness (12.0f);
     gv->setVisible (true);
@@ -70,10 +115,34 @@ void GraphViewport::resized()
     viewport->setBounds (0, 0, getWidth(), getHeight());
 }
 
+std::unique_ptr<AccessibilityHandler>
+GraphViewport::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::group);
+}
+
 GraphViewer::GraphViewer()
 {
+    setFocusContainerType (
+        FocusContainerType::focusContainer);
+    applySemanticMetadata (
+        *this,
+        "oe.graph.content",
+        "Processor graph",
+        "Inspect and select processors and data streams.");
+
     setBufferedToImage (true);
     graphViewport = std::make_unique<GraphViewport> (this);
+}
+
+std::unique_ptr<AccessibilityHandler>
+GraphViewer::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::group);
 }
 
 void GraphViewer::updateBoundaries()

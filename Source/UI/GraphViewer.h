@@ -297,7 +297,7 @@ private:
     Allows the GraphViewer to be scrolled
 
  */
-class GraphViewport : public Visualizer
+class TESTABLE GraphViewport : public Visualizer
 {
 public:
     /** Constructor */
@@ -315,6 +315,9 @@ public:
 
     /** Sets viewport bounds*/
     void resized() override;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
 private:
     /** Scroll area*/
@@ -336,7 +339,7 @@ private:
 @see UIComponent, DataViewport, ProcessorGraph, EditorViewport
 
 */
-class GraphViewer : public Component
+class TESTABLE GraphViewer : public Component
 {
 public:
     /** Constructor */
@@ -350,6 +353,9 @@ public:
 
     /** Draws the drop shadows for nodes.*/
     void paintOverChildren (Graphics& g) override;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
     /** Resizes the component, based on the bottom-most node*/
     void updateBoundaries();
