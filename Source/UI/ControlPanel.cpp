@@ -175,7 +175,8 @@ private:
                         auto* button =
                             state
                                 ->getButtonOnMessageThread();
-                        if (button == nullptr)
+                        if (button == nullptr
+                            || ! button->isEnabled())
                             return;
 
                         button->setToggleState (
@@ -251,8 +252,15 @@ public:
 };
 } // namespace
 
-NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
+NewDirectoryButton::NewDirectoryButton()
+    : Button ("NewDirectory"),
+      accessibilityState (
+          std::make_shared<
+              MessageThreadToggleButtonAccessibilityState> (
+              false))
 {
+    accessibilityState->attach (
+        this);
     XmlDocument xmlDoc (R"(
         <svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-folder"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M9 3a1 1 0 0 1 .608 .206l.1 .087l2.706 2.707h6.586a3 3 0 0 1 2.995 2.824l.005 .176v8a3 3 0 0 1 -2.824 2.995l-.176 .005h-14a3 3 0 0 1 -2.995 -2.824l-.005 -.176v-11a3 3 0 0 1 2.824 -2.995l.176 -.005h4z" /></svg>)");
 
@@ -265,6 +273,30 @@ NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
                            "oe.control.recording.new_directory",
                            "New recording directory",
                            "Start a new data directory for the next recording.");
+}
+
+NewDirectoryButton::~NewDirectoryButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+NewDirectoryButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        MessageThreadToggleButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void NewDirectoryButton::
+    buttonStateChanged()
+{
+    Button::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
 }
 
 void NewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)

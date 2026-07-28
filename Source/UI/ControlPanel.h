@@ -53,12 +53,21 @@ public:
     NewDirectoryButton();
 
     /** Destructor */
-    ~NewDirectoryButton() {}
+    ~NewDirectoryButton() override;
+
+    /** Keeps UI Automation toggle actions on the JUCE message thread. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
 
+protected:
+    void buttonStateChanged() override;
+
 private:
     std::unique_ptr<Drawable> newDirectoryIcon;
+    std::shared_ptr<
+        MessageThreadToggleButtonAccessibilityState>
+        accessibilityState;
 };
 
 /**

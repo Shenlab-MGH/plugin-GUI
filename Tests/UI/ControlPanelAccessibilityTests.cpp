@@ -25,6 +25,14 @@ public:
         createAccessibilityHandler;
 };
 
+class InspectableNewDirectoryButton final
+    : public NewDirectoryButton
+{
+public:
+    using NewDirectoryButton::
+        createAccessibilityHandler;
+};
+
 class ThreadRecordingButtonListener final : public Button::Listener
 {
 public:
@@ -686,6 +694,117 @@ TEST (ControlPanelAccessibilityTests,
         "On");
 
     forceNewDirectory.setToggleState (
+        false,
+        dontSendNotification);
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+}
+
+TEST (ControlPanelAccessibilityTests,
+      NewDirectoryToggleHonoursDisabledStateAndMessageThread)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    InspectableNewDirectoryButton
+        newDirectory;
+    ThreadRecordingButtonListener listener;
+    newDirectory.addListener (
+        &listener);
+
+    auto handler =
+        newDirectory
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+
+    const auto invokeToggleFromWorker =
+        [&]
+        {
+            std::atomic<bool> workerEntered {
+                false
+            };
+            std::atomic<bool> invoked {
+                false
+            };
+            std::thread worker (
+                [&]
+                {
+                    workerEntered.store (
+                        true);
+                    invoked.store (
+                        handler->getActions()
+                            .invoke (
+                                AccessibilityActionType::
+                                    toggle));
+                });
+
+            while (! workerEntered.load())
+                std::this_thread::yield();
+
+            for (int attempt = 0;
+                 attempt < 20
+                     && ! invoked.load();
+                 ++attempt)
+            {
+                messageManager
+                    ->runDispatchLoopUntil (
+                        10);
+            }
+            worker.join();
+            return invoked.load();
+        };
+
+    newDirectory.setEnabled (
+        false);
+    EXPECT_TRUE (
+        invokeToggleFromWorker());
+    EXPECT_EQ (
+        listener.callCount.load(),
+        0);
+    EXPECT_FALSE (
+        newDirectory.getToggleState());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    newDirectory.setEnabled (
+        true);
+    EXPECT_TRUE (
+        invokeToggleFromWorker());
+    EXPECT_EQ (
+        listener.callCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener.usedMessageThread.load());
+    EXPECT_TRUE (
+        newDirectory.getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+
+    newDirectory.setToggleState (
         false,
         dontSendNotification);
     EXPECT_FALSE (
