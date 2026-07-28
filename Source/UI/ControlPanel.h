@@ -102,6 +102,8 @@ public:
     ~FilenameEditorButton() {}
 };
 
+struct MessageThreadToggleButtonAccessibilityState;
+
 /**
 
   Toggles data acquisition on and off.
@@ -123,10 +125,21 @@ public:
     PlayButton();
 
     /** Destructor*/
-    ~PlayButton() {}
+    ~PlayButton() override;
+
+    /** Keeps UI Automation toggle actions on the JUCE message thread. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
     /** Re-makes images with new colours */
     void updateImages (bool acquisitionIsActive);
+
+protected:
+    void buttonStateChanged() override;
+
+private:
+    std::shared_ptr<
+        MessageThreadToggleButtonAccessibilityState>
+        accessibilityState;
 };
 
 /**

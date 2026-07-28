@@ -28,12 +28,63 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FilenameConfigWindow.h"
 #include "SemanticComponent.h"
 #include "UIComponent.h"
+#include <atomic>
 #include <math.h>
 #include <stdio.h>
 
 #include "LookAndFeel/CustomLookAndFeel.h"
 
 const int SIZE_AUDIO_EDITOR_MAX_WIDTH = 500;
+
+struct MessageThreadToggleButtonAccessibilityState
+{
+    explicit MessageThreadToggleButtonAccessibilityState (
+        bool initialState)
+        : publishedState (initialState)
+    {
+    }
+
+    void synchronise (
+        bool actualState)
+    {
+        publishedState.store (
+            actualState);
+    }
+
+    bool getPublishedState() const
+    {
+        return publishedState.load();
+    }
+
+    void attach (
+        PlayButton* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+    }
+
+    PlayButton* getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+private:
+    std::atomic<bool> publishedState;
+    PlayButton* button = nullptr;
+};
 
 namespace
 {
@@ -68,6 +119,89 @@ public:
 
 private:
     std::function<String()> getValue;
+};
+
+class MessageThreadToggleButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    explicit MessageThreadToggleButtonAccessibilityHandler (
+        Button& buttonToWrap,
+        std::shared_ptr<
+            MessageThreadToggleButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              buttonToWrap,
+              AccessibilityRole::button,
+              createActions (
+                  stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<ReadOnlyTextValue> (
+                      [stateToUse]
+                      {
+                          return stateToUse
+                                     ->getPublishedState()
+                                     ? String ("On")
+                                     : String ("Off");
+                      }) }),
+          state (std::move (
+              stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto accessibleState =
+            AccessibilityHandler::getCurrentState()
+                .withCheckable();
+
+        return state->getPublishedState()
+                   ? accessibleState.withChecked()
+                   : accessibleState;
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            MessageThreadToggleButtonAccessibilityState>&
+            state)
+    {
+        const auto toggle =
+            [state]
+            {
+                MessageManager::callSync (
+                    [state]
+                    {
+                        auto* button =
+                            state
+                                ->getButtonOnMessageThread();
+                        if (button == nullptr)
+                            return;
+
+                        button->setToggleState (
+                            ! button->getToggleState(),
+                            sendNotification);
+
+                        if (auto* survivingButton =
+                                state
+                                    ->getButtonOnMessageThread())
+                        {
+                            state->synchronise (
+                                survivingButton
+                                    ->getToggleState());
+                        }
+                    });
+            };
+
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::toggle,
+                toggle);
+    }
+
+    std::shared_ptr<
+        MessageThreadToggleButtonAccessibilityState>
+        state;
 };
 
 void configureRecordingDirectoryAccessibility (FilenameComponent& component)
@@ -221,8 +355,14 @@ FilenameEditorButton::FilenameEditorButton()
 }
 
 PlayButton::PlayButton()
-    : DrawableButton ("Play Button", DrawableButton::ImageRaw)
+    : DrawableButton ("Play Button", DrawableButton::ImageRaw),
+      accessibilityState (
+          std::make_shared<
+              MessageThreadToggleButtonAccessibilityState> (
+              false))
 {
+    accessibilityState->attach (
+        this);
     setColour (DrawableButton::backgroundColourId, Colours::darkgrey.withAlpha (0.0f));
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
@@ -233,6 +373,28 @@ PlayButton::PlayButton()
                            "Start or stop data acquisition.");
 
     updateImages (false);
+}
+
+PlayButton::~PlayButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+PlayButton::createAccessibilityHandler()
+{
+    return std::make_unique<
+        MessageThreadToggleButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void PlayButton::buttonStateChanged()
+{
+    DrawableButton::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
 }
 
 void PlayButton::updateImages (bool acquisitionIsActive)

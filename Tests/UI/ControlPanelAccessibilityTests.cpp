@@ -1,8 +1,48 @@
 #include "../../Source/UI/ControlPanel.h"
 #include "gtest/gtest.h"
+#include <atomic>
+#include <thread>
 
 namespace
 {
+class InspectablePlayButton final : public PlayButton
+{
+public:
+    using PlayButton::createAccessibilityHandler;
+};
+
+class ThreadRecordingButtonListener final : public Button::Listener
+{
+public:
+    void buttonClicked (Button*) override
+    {
+        usedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        callCount.fetch_add (1);
+    }
+
+    std::atomic<int> callCount { 0 };
+    std::atomic<bool> usedMessageThread { false };
+};
+
+class RejectingButtonListener final : public Button::Listener
+{
+public:
+    void buttonClicked (Button* button) override
+    {
+        callCount.fetch_add (1);
+        if (button->getToggleState())
+        {
+            button->setToggleState (
+                false,
+                dontSendNotification);
+        }
+    }
+
+    std::atomic<int> callCount { 0 };
+};
+
 class TestClock : public Clock
 {
 public:
@@ -73,6 +113,261 @@ TEST (ControlPanelAccessibilityTests, ExposesGlobalActionButtons)
                           "Recording options",
                           "Show or hide recording options.");
     EXPECT_TRUE (recordingOptions.getClickingTogglesState());
+}
+
+TEST (ControlPanelAccessibilityTests,
+      AcquisitionToggleFromWorkerRunsOnMessageThread)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    InspectablePlayButton acquisition;
+    ThreadRecordingButtonListener listener;
+    acquisition.addListener (&listener);
+
+    auto handler =
+        acquisition.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    EXPECT_EQ (listener.callCount.load(), 0);
+    EXPECT_FALSE (acquisition.getToggleState());
+    EXPECT_FALSE (
+        handler->getCurrentState().isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (listener.callCount.load(), 1);
+    EXPECT_TRUE (listener.usedMessageThread.load());
+    EXPECT_TRUE (acquisition.getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState().isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+}
+
+TEST (ControlPanelAccessibilityTests,
+      QueuedAcquisitionTogglesPreserveParity)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    InspectablePlayButton acquisition;
+    ThreadRecordingButtonListener listener;
+    acquisition.addListener (&listener);
+    auto handler =
+        acquisition.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    std::atomic<int> workerEnteredCount { 0 };
+    std::atomic<int> successfulInvocations { 0 };
+    const auto invokeToggle =
+        [&]
+        {
+            workerEnteredCount.fetch_add (1);
+            if (handler->getActions().invoke (
+                    AccessibilityActionType::toggle))
+            {
+                successfulInvocations.fetch_add (1);
+            }
+        };
+
+    std::thread firstWorker (invokeToggle);
+    std::thread secondWorker (invokeToggle);
+
+    while (workerEnteredCount.load() < 2)
+        std::this_thread::yield();
+
+    EXPECT_EQ (listener.callCount.load(), 0);
+    EXPECT_FALSE (acquisition.getToggleState());
+    EXPECT_FALSE (
+        handler->getCurrentState().isChecked());
+
+    for (int attempt = 0;
+         attempt < 20
+             && successfulInvocations.load() < 2;
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (10);
+    }
+    firstWorker.join();
+    secondWorker.join();
+
+    EXPECT_EQ (successfulInvocations.load(), 2);
+    EXPECT_EQ (listener.callCount.load(), 2);
+    EXPECT_TRUE (listener.usedMessageThread.load());
+    EXPECT_FALSE (acquisition.getToggleState());
+    EXPECT_FALSE (
+        handler->getCurrentState().isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+}
+
+TEST (ControlPanelAccessibilityTests,
+      AcquisitionAccessibilityStateTracksExternalChanges)
+{
+    InspectablePlayButton acquisition;
+    auto handler =
+        acquisition.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    acquisition.setToggleState (
+        true,
+        dontSendNotification);
+
+    EXPECT_TRUE (
+        handler->getCurrentState().isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+
+    acquisition.setToggleState (
+        false,
+        dontSendNotification);
+
+    EXPECT_FALSE (
+        handler->getCurrentState().isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+}
+
+TEST (ControlPanelAccessibilityTests,
+      AcquisitionAccessibilityStateRollsBackRejectedToggle)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    InspectablePlayButton acquisition;
+    RejectingButtonListener listener;
+    acquisition.addListener (&listener);
+    auto handler =
+        acquisition.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (listener.callCount.load(), 1);
+    EXPECT_FALSE (acquisition.getToggleState());
+    EXPECT_FALSE (
+        handler->getCurrentState().isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+}
+
+TEST (ControlPanelAccessibilityTests,
+      QueuedAcquisitionToggleDoesNotOutliveButton)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    auto acquisition =
+        std::make_unique<InspectablePlayButton>();
+    auto handler =
+        acquisition->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                actions.invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    acquisition.reset();
+    handler.reset();
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    SUCCEED();
 }
 
 TEST (ControlPanelAccessibilityTests, ExposesHealthMetersAsReadOnlyRanges)

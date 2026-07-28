@@ -48,11 +48,16 @@ public:
         if (! isElementValid())
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
 
-        const auto& handler = getHandler();
+        const auto actions =
+            getHandler().getActions();
 
-        if (handler.getActions().invoke (AccessibilityActionType::toggle)
-            || handler.getActions().invoke (AccessibilityActionType::press))
+        if (actions.invoke (AccessibilityActionType::toggle)
+            || actions.invoke (AccessibilityActionType::press))
         {
+            if (! isElementValid())
+                return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+
+            const auto& handler = getHandler();
             VARIANT newValue;
             VariantHelpers::setInt (getCurrentToggleState(), &newValue);
 
