@@ -24,19 +24,439 @@
 #include "VisualizerEditor.h"
 #include "../../AccessClass.h"
 #include "../../UI/DataViewport.h"
+#include "../../UI/SemanticComponent.h"
 #include "../../UI/UIComponent.h"
 
 #include "../../Utils/Utils.h"
+#include <atomic>
+#include <mutex>
+#include <unordered_map>
+
+namespace
+{
+struct SelectorButtonAccessibilityState
+{
+    void attach (SelectorButton* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+        enabled.store (false);
+        focused.store (false);
+    }
+
+    SelectorButton*
+    getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button.getComponent();
+    }
+
+    void synchronise (
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isChecked,
+        bool isEnabled,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            title = std::move (titleToUse);
+            description =
+                std::move (descriptionToUse);
+            help = std::move (helpToUse);
+        }
+
+        checked.store (isChecked);
+        enabled.store (isEnabled);
+        focused.store (isFocused);
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isChecked() const
+    {
+        return checked.load();
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> checked { false };
+    std::atomic<bool> enabled { true };
+    std::atomic<bool> focused { false };
+    Component::SafePointer<
+        SelectorButton>
+        button;
+};
+
+struct SelectorButtonAccessibilityRegistry
+{
+    std::mutex mutex;
+    std::unordered_map<
+        SelectorButton*,
+        std::shared_ptr<
+            SelectorButtonAccessibilityState>>
+        states;
+};
+
+SelectorButtonAccessibilityRegistry&
+getSelectorButtonAccessibilityRegistry()
+{
+    static auto* registry =
+        new SelectorButtonAccessibilityRegistry();
+    return *registry;
+}
+
+std::shared_ptr<
+    SelectorButtonAccessibilityState>
+registerSelectorButton (
+    SelectorButton* button)
+{
+    auto state =
+        std::make_shared<
+            SelectorButtonAccessibilityState>();
+    state->attach (button);
+
+    auto& registry =
+        getSelectorButtonAccessibilityRegistry();
+    const std::lock_guard<std::mutex>
+        lock (registry.mutex);
+    for (auto iterator =
+             registry.states.begin();
+         iterator
+         != registry.states.end();)
+    {
+        if (iterator->second
+                ->getButtonOnMessageThread()
+            == nullptr)
+        {
+            iterator =
+                registry.states.erase (
+                    iterator);
+        }
+        else
+        {
+            ++iterator;
+        }
+    }
+    registry.states[button] = state;
+    return state;
+}
+
+std::shared_ptr<
+    SelectorButtonAccessibilityState>
+getSelectorButtonState (
+    SelectorButton* button)
+{
+    auto& registry =
+        getSelectorButtonAccessibilityRegistry();
+    const std::lock_guard<std::mutex>
+        lock (registry.mutex);
+    const auto found =
+        registry.states.find (button);
+    return found != registry.states.end()
+               ? found->second
+               : nullptr;
+}
+
+void unregisterSelectorButton (
+    SelectorButton* button)
+{
+    std::shared_ptr<
+        SelectorButtonAccessibilityState>
+        state;
+    {
+        auto& registry =
+            getSelectorButtonAccessibilityRegistry();
+        const std::lock_guard<std::mutex>
+            lock (registry.mutex);
+        const auto found =
+            registry.states.find (button);
+        if (found == registry.states.end())
+            return;
+
+        state = found->second;
+        registry.states.erase (found);
+    }
+
+    state->detach();
+}
+
+class SelectorButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit SelectorButtonAccessibilityValue (
+        std::shared_ptr<
+            SelectorButtonAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->isChecked()
+                   ? "On"
+                   : "Off";
+    }
+
+private:
+    std::shared_ptr<
+        SelectorButtonAccessibilityState>
+        state;
+};
+
+class SelectorButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    SelectorButtonAccessibilityHandler (
+        SelectorButton& button,
+        std::shared_ptr<
+            SelectorButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::toggleButton,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      SelectorButtonAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable()
+                .withCheckable();
+        if (state->isChecked())
+            current = current.withChecked();
+        return state->isFocused()
+                   ? current.withFocused()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            SelectorButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::toggle,
+                [state]
+                {
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager == nullptr)
+                        return;
+
+                    messageManager->callSync (
+                        [state]
+                        {
+                            auto* button =
+                                state
+                                    ->getButtonOnMessageThread();
+                            if (button == nullptr
+                                || ! button
+                                        ->isEnabled()
+                                || ! button
+                                        ->isToggleable()
+                                || button
+                                       ->getRadioGroupId()
+                                   != 0)
+                            {
+                                return;
+                            }
+
+                            button->setToggleState (
+                                ! button
+                                       ->getToggleState(),
+                                sendNotification);
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        SelectorButtonAccessibilityState>
+        state;
+};
+} // namespace
 
 SelectorButton::SelectorButton (const String& buttonName)
     : Button (buttonName)
 {
+    registerSelectorButton (this);
     setClickingTogglesState (true);
 
     if (getName().contains ("Window"))
         setTooltip ("Open visualizer in its own window");
     else
         setTooltip ("Open visualizer in a tab");
+
+    refreshAccessibilityState();
+}
+
+SelectorButton::~SelectorButton()
+{
+    unregisterSelectorButton (this);
+}
+
+std::unique_ptr<AccessibilityHandler>
+SelectorButton::createAccessibilityHandler()
+{
+    auto state =
+        getSelectorButtonState (this);
+    if (state == nullptr)
+        state =
+            registerSelectorButton (this);
+
+    refreshAccessibilityState();
+    return std::make_unique<
+        SelectorButtonAccessibilityHandler> (
+        *this,
+        std::move (state));
+}
+
+void SelectorButton::
+    refreshAccessibilityState()
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+    auto state =
+        getSelectorButtonState (this);
+    if (state == nullptr)
+        return;
+
+    auto title = getTitle();
+    if (title.isEmpty())
+        title = getName();
+    auto help = getTooltip();
+    if (help.isEmpty())
+        help = getHelpText();
+    if (help.isEmpty())
+        help = getDescription();
+
+    state->synchronise (
+        std::move (title),
+        getDescription(),
+        std::move (help),
+        getToggleState(),
+        Component::isEnabled(),
+        hasKeyboardFocus (false));
+}
+
+void SelectorButton::buttonStateChanged()
+{
+    Button::buttonStateChanged();
+    refreshAccessibilityState();
+}
+
+void SelectorButton::enablementChanged()
+{
+    Button::enablementChanged();
+    refreshAccessibilityState();
+}
+
+void SelectorButton::focusGained (
+    FocusChangeType cause)
+{
+    Button::focusGained (cause);
+    refreshAccessibilityState();
+}
+
+void SelectorButton::focusLost (
+    FocusChangeType cause)
+{
+    Button::focusLost (cause);
+    refreshAccessibilityState();
 }
 
 void SelectorButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -84,13 +504,44 @@ VisualizerEditor::VisualizerEditor (GenericProcessor* parentNode, String tabText
 
 void VisualizerEditor::initializeSelectors()
 {
+    const auto semanticPrefix =
+        createProcessorControlSemanticId (
+            getProcessor()->getNodeId(),
+            "visualizer");
+    const auto processorName =
+        getName();
+
     windowSelector = std::make_unique<SelectorButton> (getNameAndId() + " Visualizer Window Button");
+    const auto windowDescription =
+        "Show the " + processorName
+        + " visualizer in a separate window.";
+    applySemanticMetadata (
+        *windowSelector,
+        semanticPrefix + ".open_in_window",
+        "Open " + processorName
+            + " visualizer in window",
+        windowDescription,
+        windowDescription);
+    windowSelector
+        ->refreshAccessibilityState();
     windowSelector->setBounds (desiredWidth - 40, 7, 14, 10);
     windowSelector->setToggleState (false, dontSendNotification);
     windowSelector->addListener (&dataWindowButtonListener);
     addAndMakeVisible (windowSelector.get());
 
     tabSelector = std::make_unique<SelectorButton> (getNameAndId() + " Visualizer Tab Button");
+    const auto tabDescription =
+        "Show the " + processorName
+        + " visualizer in a view tab.";
+    applySemanticMetadata (
+        *tabSelector,
+        semanticPrefix + ".open_in_tab",
+        "Open " + processorName
+            + " visualizer in tab",
+        tabDescription,
+        tabDescription);
+    tabSelector
+        ->refreshAccessibilityState();
     tabSelector->setToggleState (false, dontSendNotification);
     tabSelector->setBounds (desiredWidth - 20, 7, 15, 10);
     tabSelector->addListener (&dataWindowButtonListener);

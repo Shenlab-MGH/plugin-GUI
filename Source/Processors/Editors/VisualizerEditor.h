@@ -45,7 +45,20 @@ public:
     SelectorButton (const String& buttonName);
 
     /** Destructor */
-    ~SelectorButton() {}
+    ~SelectorButton() override;
+
+    /** Publishes current UI state for worker-thread accessibility providers.
+        Must be called on the message thread. */
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (FocusChangeType cause) override;
+    void focusLost (FocusChangeType cause) override;
 
 private:
     /** Renders the button*/

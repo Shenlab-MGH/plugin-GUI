@@ -1,6 +1,7 @@
 #include "../../Source/Processors/Editors/GenericEditor.h"
 #include "../../Source/Processors/Editors/ElectrodeButtons.h"
 #include "../../Source/Processors/Editors/StreamSelector.h"
+#include "../../Source/Processors/Editors/VisualizerEditor.h"
 #include "../../Source/Processors/GenericProcessor/GenericProcessor.h"
 #include "../../Source/Processors/ProcessorGraph/ProcessorGraph.h"
 #include "../../Source/Processors/Settings/DataStream.h"
@@ -258,6 +259,41 @@ public:
     using ElectrodeButton::createAccessibilityHandler;
 };
 
+class InspectableSelectorButton final : public SelectorButton
+{
+public:
+    explicit InspectableSelectorButton (String name)
+        : SelectorButton (std::move (name))
+    {
+    }
+
+    using SelectorButton::createAccessibilityHandler;
+};
+
+class InspectableVisualizerEditor final : public VisualizerEditor
+{
+public:
+    explicit InspectableVisualizerEditor (GenericProcessor* processor)
+        : VisualizerEditor (processor, "Test visualizer")
+    {
+    }
+
+    Visualizer* createNewCanvas() override
+    {
+        return nullptr;
+    }
+
+    SelectorButton& getWindowSelector()
+    {
+        return *windowSelector;
+    }
+
+    SelectorButton& getTabSelector()
+    {
+        return *tabSelector;
+    }
+};
+
 Component* findDescendantBySemanticId (Component& parent, const String& id)
 {
     if (parent.getComponentID() == id)
@@ -316,6 +352,350 @@ const PopupMenu::Item* findMenuItem (
     return nullptr;
 }
 } // namespace
+
+TEST (GenericEditorAccessibilityTests,
+      ExposesVisualizerDestinationSelectors)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+
+    TestStreamProcessor processor (100);
+    InspectableVisualizerEditor editor (&processor);
+
+    auto& window = editor.getWindowSelector();
+    auto& tab = editor.getTabSelector();
+
+    EXPECT_EQ (
+        window.getComponentID(),
+        "oe.processor.100.visualizer.open_in_window");
+    EXPECT_EQ (
+        window.getTitle(),
+        "Open Test Processor visualizer in window");
+    EXPECT_EQ (
+        window.getDescription(),
+        "Show the Test Processor visualizer in a separate window.");
+    EXPECT_EQ (
+        tab.getComponentID(),
+        "oe.processor.100.visualizer.open_in_tab");
+    EXPECT_EQ (
+        tab.getTitle(),
+        "Open Test Processor visualizer in tab");
+    EXPECT_EQ (
+        tab.getDescription(),
+        "Show the Test Processor visualizer in a view tab.");
+
+    EXPECT_TRUE (window.isAccessible());
+    EXPECT_TRUE (tab.isAccessible());
+
+    for (const auto& name :
+         { String ("Visualizer Window Button"),
+           String ("Visualizer Tab Button") })
+    {
+        InspectableSelectorButton selector (
+            name);
+        auto ownedHandler =
+            selector
+                .createAccessibilityHandler();
+        auto* handler =
+            ownedHandler.get();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::toggleButton);
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::toggle));
+        EXPECT_FALSE (
+            handler->getActions().contains (
+                AccessibilityActionType::press));
+        EXPECT_TRUE (
+            handler->getCurrentState().isCheckable());
+        EXPECT_FALSE (
+            handler->getCurrentState().isChecked());
+        ASSERT_NE (
+            handler->getValueInterface(),
+            nullptr);
+        EXPECT_TRUE (
+            handler->getValueInterface()
+                ->isReadOnly());
+        EXPECT_EQ (
+            handler->getValueInterface()
+                ->getCurrentValueAsString(),
+            "Off");
+    }
+}
+
+TEST (GenericEditorAccessibilityTests,
+      VisualizerDestinationActionRunsOnMessageThread)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+
+    InspectableSelectorButton selector (
+        "Visualizer Window Button");
+    applySemanticMetadata (
+        selector,
+        "oe.test.visualizer.open_in_window",
+        "Open test visualizer in window",
+        "Show the test visualizer in a window.",
+        "Choose a separate visualizer window.");
+    selector.refreshAccessibilityState();
+    ThreadTrackingButtonListener listener;
+    selector.addListener (&listener);
+    auto handler =
+        selector.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    auto* value = handler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    String workerTitle;
+    String workerDescription;
+    String workerHelp;
+    String workerValue;
+    bool workerEnabled = false;
+    bool workerChecked = true;
+    std::thread worker (
+        [&]
+        {
+            workerTitle =
+                handler->getTitle();
+            workerDescription =
+                handler->getDescription();
+            workerHelp =
+                handler->getHelp();
+            workerValue =
+                value
+                    ->getCurrentValueAsString();
+            workerEnabled =
+                handler->isEnabled();
+            workerChecked =
+                handler->getCurrentState()
+                    .isChecked();
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    auto* messageManager =
+        MessageManager::getInstance();
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        workerTitle,
+        "Open test visualizer in window");
+    EXPECT_EQ (
+        workerDescription,
+        "Show the test visualizer in a window.");
+    EXPECT_EQ (
+        workerHelp,
+        "Choose a separate visualizer window.");
+    EXPECT_EQ (
+        workerValue,
+        "Off");
+    EXPECT_TRUE (workerEnabled);
+    EXPECT_FALSE (workerChecked);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener.callbackUsedMessageThread
+            .load());
+    EXPECT_TRUE (
+        selector.getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "On");
+}
+
+TEST (GenericEditorAccessibilityTests,
+      VisualizerDestinationRejectsDisabledAndStaleActions)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+
+    ThreadTrackingButtonListener listener;
+    auto selector =
+        std::make_unique<
+            InspectableSelectorButton> (
+            "Visualizer Tab Button");
+    selector->addListener (&listener);
+    auto handler =
+        selector
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    selector->setEnabled (false);
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        selector->getToggleState());
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+    EXPECT_FALSE (
+        handler->isEnabled());
+
+    const auto staleActions =
+        handler->getActions();
+    selector->setEnabled (true);
+    selector->setClickingTogglesState (
+        false);
+    EXPECT_TRUE (
+        staleActions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        selector->getToggleState());
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+
+    selector->setClickingTogglesState (
+        true);
+    selector->setRadioGroupId (
+        1,
+        dontSendNotification);
+    EXPECT_TRUE (
+        staleActions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        selector->getToggleState());
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+
+    handler.reset();
+    selector.reset();
+
+    EXPECT_TRUE (
+        staleActions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+}
+
+TEST (GenericEditorAccessibilityTests,
+      QueuedVisualizerDestinationActionDoesNotOutliveButton)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+
+    ThreadTrackingButtonListener listener;
+    auto selector =
+        std::make_unique<
+            InspectableSelectorButton> (
+            "Visualizer Window Button");
+    selector->addListener (&listener);
+    auto handler =
+        selector
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
+    handler.reset();
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&, actions]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                actions.invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    selector.reset();
+    auto* messageManager =
+        MessageManager::getInstance();
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+}
+
+TEST (GenericEditorAccessibilityTests,
+      ExternalVisualizerCloseRefreshesPublishedState)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+
+    InspectableSelectorButton selector (
+        "Visualizer Window Button");
+    selector.setToggleState (
+        true,
+        dontSendNotification);
+    auto handler =
+        selector.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+
+    DataWindow window (
+        &selector,
+        "Test visualizer");
+    window.closeButtonPressed();
+
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    TestStreamProcessor processor (100);
+    InspectableVisualizerEditor editor (
+        &processor);
+    editor.getTabSelector()
+        .setToggleState (
+            true,
+            dontSendNotification);
+    editor.tabWasClosed();
+    EXPECT_FALSE (
+        editor.getTabSelector()
+            .getToggleState());
+}
 
 TEST (GenericEditorAccessibilityTests,
       ExposesProcessorAsContextMenuTarget)

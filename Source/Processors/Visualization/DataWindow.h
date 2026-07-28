@@ -25,6 +25,7 @@
 #define __DATAWINDOW_H_FDDAB8D0__
 
 #include "../../../JuceLibraryCode/JuceHeader.h"
+#include "../../TestableExport.h"
 
 /**
 
@@ -34,7 +35,7 @@
 
 */
 
-class DataWindow : public DocumentWindow
+class TESTABLE DataWindow : public DocumentWindow
 {
 public:
     /** Constructor 
