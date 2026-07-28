@@ -28,6 +28,7 @@
 
 #include "ChannelMapActions.h"
 #include <atomic>
+#include <functional>
 #include <mutex>
 
 struct ChannelMapFileButtonAccessibilityState
@@ -276,6 +277,459 @@ createChannelMapFileButtonHandler (
         button,
         state);
 }
+
+String sanitiseChannelMapSemanticSegment (
+    StringRef segment)
+{
+    const String value (segment);
+    String result;
+
+    for (int index = 0;
+         index < value.length();
+         ++index)
+    {
+        auto character = value[index];
+        if (character >= 'A'
+            && character <= 'Z')
+        {
+            character =
+                character - 'A' + 'a';
+        }
+
+        const bool isLetter =
+            character >= 'a'
+            && character <= 'z';
+        const bool isDigit =
+            character >= '0'
+            && character <= '9';
+        if (isLetter || isDigit)
+        {
+            result += character;
+        }
+        else if (
+            result.isNotEmpty()
+            && ! result.endsWithChar ('_'))
+        {
+            result += '_';
+        }
+    }
+
+    result =
+        result.trimCharactersAtEnd ("_");
+    return result.isNotEmpty()
+               ? result
+               : "unnamed";
+}
+
+class ChannelMapSlotAccessibilityState
+{
+public:
+    void attach (
+        Component* componentToUse,
+        std::function<void()>
+            toggleToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        component = componentToUse;
+        toggle =
+            std::move (toggleToUse);
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        component = nullptr;
+        toggle = {};
+        actionAvailable.store (false);
+        focused.store (false);
+    }
+
+    void synchronise (
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool mappingIsEnabled,
+        bool actionIsAvailable,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            title =
+                std::move (titleToUse);
+            description =
+                std::move (
+                    descriptionToUse);
+            help =
+                std::move (helpToUse);
+        }
+        checked.store (
+            mappingIsEnabled);
+        actionAvailable.store (
+            actionIsAvailable);
+        focused.store (isFocused);
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isChecked() const
+    {
+        return checked.load();
+    }
+
+    bool isActionAvailable() const
+    {
+        return actionAvailable.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+    void setActionAvailability (
+        bool isAvailable,
+        bool isFocused)
+    {
+        actionAvailable.store (
+            isAvailable);
+        focused.store (isFocused);
+    }
+
+    void setFocused (
+        bool isFocused)
+    {
+        focused.store (isFocused);
+    }
+
+    void performToggleOnMessageThread()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        if (component == nullptr
+            || ! actionAvailable.load()
+            || ! toggle)
+        {
+            return;
+        }
+
+        // The callback can rebuild the editor and destroy the
+        // originating component, so copy it and do not access this
+        // state after invocation.
+        auto callback = toggle;
+        callback();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool>
+        checked { true };
+    std::atomic<bool>
+        actionAvailable { true };
+    std::atomic<bool>
+        focused { false };
+    Component::SafePointer<Component>
+        component;
+    std::function<void()> toggle;
+};
+
+class ChannelMapSlotAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit ChannelMapSlotAccessibilityValue (
+        std::shared_ptr<
+            ChannelMapSlotAccessibilityState>
+            stateToUse)
+        : state (
+              std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->isChecked()
+                   ? "Enabled"
+                   : "Disabled";
+    }
+
+private:
+    std::shared_ptr<
+        ChannelMapSlotAccessibilityState>
+        state;
+};
+
+class ChannelMapSlotAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    ChannelMapSlotAccessibilityHandler (
+        Component& component,
+        std::shared_ptr<
+            ChannelMapSlotAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              component,
+              AccessibilityRole::
+                  toggleButton,
+              createActions (
+                  stateToUse),
+              AccessibilityHandler::
+                  Interfaces {
+                      std::make_unique<
+                          ChannelMapSlotAccessibilityValue> (
+                          stateToUse) }),
+          state (
+              std::move (stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable()
+                .withCheckable();
+        if (state->isChecked())
+            current =
+                current.withChecked();
+        return state->isFocused()
+                   ? current.withFocused()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state
+            ->isActionAvailable();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            ChannelMapSlotAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::
+                    toggle,
+                [state]
+                {
+                    // Reject commands issued while locked, even if
+                    // acquisition stops before the queued task runs.
+                    if (! state
+                              ->isActionAvailable())
+                    {
+                        return;
+                    }
+
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager
+                        == nullptr)
+                    {
+                        return;
+                    }
+
+                    // UIA providers validate the element again after
+                    // invoking an action. The toggle rebuilds every
+                    // mapping button, so defer the mutation until the
+                    // provider has returned successfully.
+                    MessageManager::callAsync (
+                        [state]
+                        {
+                            state
+                                ->performToggleOnMessageThread();
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        ChannelMapSlotAccessibilityState>
+        state;
+};
+
+class ChannelMapSlotButton final
+    : public ElectrodeButton
+{
+public:
+    ChannelMapSlotButton (
+        int channelNumber,
+        Colour colour,
+        std::function<void()>
+            toggle)
+        : ElectrodeButton (
+              channelNumber,
+              colour),
+          accessibilityState (
+              std::make_shared<
+                  ChannelMapSlotAccessibilityState>())
+    {
+        accessibilityState->attach (
+            this,
+            std::move (toggle));
+    }
+
+    ~ChannelMapSlotButton() override
+    {
+        accessibilityState->detach();
+    }
+
+    void publishAccessibilityState (
+        StringRef semanticId,
+        int oneBasedSlot,
+        int oneBasedChannel,
+        StringRef streamName,
+        bool mappingEnabled,
+        bool actionAvailable)
+    {
+        const auto title =
+            "Mapping position "
+            + String (oneBasedSlot)
+            + ": input channel "
+            + String (oneBasedChannel);
+        const auto description =
+            "Input channel "
+            + String (oneBasedChannel)
+            + (mappingEnabled
+                   ? " is enabled"
+                   : " is disabled")
+            + " at mapping position "
+            + String (oneBasedSlot)
+            + " for data stream "
+            + String (streamName)
+            + ". Toggle to include or exclude this input channel; drag in the GUI to reorder mapping positions.";
+
+        applyChannelMapMetadata (
+            *this,
+            semanticId,
+            title,
+            description,
+            description);
+        accessibilityState
+            ->synchronise (
+                title,
+                description,
+                description,
+                mappingEnabled,
+                actionAvailable,
+                hasKeyboardFocus (
+                    false));
+    }
+
+    void setActionAvailable (
+        bool isAvailable)
+    {
+        accessibilityState
+            ->setActionAvailability (
+                isAvailable,
+                hasKeyboardFocus (
+                    false));
+        if (auto* handler =
+                getAccessibilityHandler())
+        {
+            handler
+                ->notifyAccessibilityEvent (
+                    AccessibilityEvent::
+                        valueChanged);
+        }
+    }
+
+protected:
+    std::unique_ptr<
+        AccessibilityHandler>
+    createAccessibilityHandler()
+        override
+    {
+        return std::make_unique<
+            ChannelMapSlotAccessibilityHandler> (
+            *this,
+            accessibilityState);
+    }
+
+    void focusGained (
+        FocusChangeType cause)
+        override
+    {
+        ElectrodeButton::focusGained (
+            cause);
+        accessibilityState
+            ->setFocused (true);
+    }
+
+    void focusLost (
+        FocusChangeType cause)
+        override
+    {
+        ElectrodeButton::focusLost (
+            cause);
+        accessibilityState
+            ->setFocused (false);
+    }
+
+private:
+    std::shared_ptr<
+        ChannelMapSlotAccessibilityState>
+        accessibilityState;
+};
 } // namespace
 
 ChannelMapLoadButton::ChannelMapLoadButton (
@@ -475,6 +929,12 @@ void ChannelMapEditor::refreshElectrodeButtons()
     if (streamId == 0) // no inputs available
         return;
 
+    auto* stream =
+        processor->getDataStream (
+            streamId);
+    if (stream == nullptr)
+        return;
+
     Array<int> buttonOrder = processor->getChannelOrder (getCurrentStream());
     Array<bool> buttonState = processor->getChannelEnabledState (getCurrentStream());
 
@@ -494,7 +954,24 @@ void ChannelMapEditor::refreshElectrodeButtons()
         float hue = float (buttonOrder[i] % 16) / 16.0f * 0.2f + 0.05f;
 
         Colour buttonColour = Colour (hue, 0.90f, 0.90f, 1.0f);
-        ElectrodeButton* button = new ElectrodeButton (buttonOrder[i] + 1, buttonColour);
+        Component::SafePointer<
+            ChannelMapEditor>
+            safeEditor (this);
+        auto* button =
+            new ChannelMapSlotButton (
+                buttonOrder[i] + 1,
+                buttonColour,
+                [safeEditor, i]
+                {
+                    if (auto* editor =
+                            safeEditor
+                                .getComponent())
+                    {
+                        editor
+                            ->toggleChannelSlotFromAccessibility (
+                                i);
+                    }
+                });
         button->setRadioGroupId (0);
         button->setClickingTogglesState (false);
         button->setToggleState (true, dontSendNotification);
@@ -514,11 +991,86 @@ void ChannelMapEditor::refreshElectrodeButtons()
         }
 
         button->setEnabled (buttonState[i]);
+        const auto streamIdentifier =
+            stream->getIdentifier()
+                    .isNotEmpty()
+                ? stream
+                      ->getIdentifier()
+                : stream->getName();
+        const auto semanticId =
+            "oe.processor."
+            + String (
+                processor->getNodeId())
+            + ".channel_map.source_"
+            + String (
+                stream
+                    ->getSourceNodeId())
+            + ".stream_"
+            + sanitiseChannelMapSemanticSegment (
+                streamIdentifier)
+            + ".slot_"
+            + String (i + 1);
+        button
+            ->publishAccessibilityState (
+                semanticId,
+                i + 1,
+                buttonOrder[i] + 1,
+                stream->getName(),
+                buttonState[i],
+                reorderActive);
 
         electrodeButtons.add (button);
     }
 
     electrodeButtonHolder->setSize (totalWidth, totalHeight);
+}
+
+void ChannelMapEditor::
+    toggleChannelSlotFromAccessibility (
+        int slotIndex)
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+    if (! reorderActive)
+        return;
+
+    auto* processor =
+        static_cast<ChannelMap*> (
+            getProcessor());
+    auto* stream =
+        processor->getDataStream (
+            getCurrentStream());
+    if (stream == nullptr)
+        return;
+
+    const auto states =
+        processor
+            ->getChannelEnabledState (
+                stream->getStreamId());
+    if (! isPositiveAndBelow (
+            slotIndex,
+            states.size()))
+    {
+        return;
+    }
+
+    auto* undoManager =
+        CoreServices::
+            getUndoManager();
+    if (undoManager == nullptr)
+        return;
+
+    auto* action =
+        new EnableChannelAction (
+            processor,
+            stream,
+            slotIndex,
+            states[slotIndex]);
+    undoManager
+        ->beginNewTransaction (
+            "Toggle channel mapping - Disabled during acquisition");
+    undoManager->perform (action);
 }
 
 void ChannelMapEditor::collapsedStateChanged()
@@ -530,20 +1082,30 @@ void ChannelMapEditor::startAcquisition()
 {
     reorderActive = false;
 
-    //for (auto button : electrodeButtons)
-    //{
-    //    button->setEnabled(false);
-    //}
+    for (auto* button :
+         electrodeButtons)
+    {
+        static_cast<
+            ChannelMapSlotButton*> (
+            button)
+            ->setActionAvailable (
+                false);
+    }
 }
 
 void ChannelMapEditor::stopAcquisition()
 {
     reorderActive = true;
 
-    //for (auto button : electrodeButtons)
-    //{
-    //    button->setEnabled(true);
-    //}
+    for (auto* button :
+         electrodeButtons)
+    {
+        static_cast<
+            ChannelMapSlotButton*> (
+            button)
+            ->setActionAvailable (
+                true);
+    }
 }
 
 void ChannelMapEditor::buttonClicked (Button* button)

@@ -132,6 +132,11 @@ private:
     /** Updates the electrode button number and location*/
     void refreshElectrodeButtons();
 
+    /** Toggles one mapping position through the same undoable action
+        used by the existing context menu. */
+    void toggleChannelSlotFromAccessibility (
+        int slotIndex);
+
     OwnedArray<ElectrodeButton> electrodeButtons;
 
     std::unique_ptr<
