@@ -45,12 +45,12 @@ public:
     //==============================================================================
     JUCE_COMRESULT Expand() override
     {
-        return invokeShowMenu();
+        return setExpanded (true);
     }
 
     JUCE_COMRESULT Collapse() override
     {
-        return invokeShowMenu();
+        return setExpanded (false);
     }
 
     JUCE_COMRESULT get_ExpandCollapseState (ExpandCollapseState* pRetVal) override
@@ -66,23 +66,45 @@ public:
     }
 
 private:
-    JUCE_COMRESULT invokeShowMenu()
+    JUCE_COMRESULT setExpanded (bool shouldBeExpanded)
     {
         if (! isElementValid())
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
 
         const auto& handler = getHandler();
+        if (! handler.isEnabled())
+            return (HRESULT) UIA_E_ELEMENTNOTENABLED;
 
-        if (handler.getActions().invoke (AccessibilityActionType::showMenu))
+        const auto directionalAction =
+            shouldBeExpanded ? AccessibilityActionType::expand
+                             : AccessibilityActionType::collapse;
+        const auto actions = handler.getActions();
+        bool invokedDirectionalAction = false;
+        if (actions.contains (directionalAction))
         {
-            sendAccessibilityAutomationEvent (handler, handler.getCurrentState().isExpanded()
-                                                           ? UIA_MenuOpenedEventId
-                                                           : UIA_MenuClosedEventId);
-
-            return S_OK;
+            if (! actions.invoke (directionalAction))
+                return (HRESULT) UIA_E_NOTSUPPORTED;
+            invokedDirectionalAction = true;
+        }
+        else
+        {
+            if (! actions.invoke (AccessibilityActionType::showMenu))
+                return (HRESULT) UIA_E_NOTSUPPORTED;
         }
 
-        return (HRESULT) UIA_E_NOTSUPPORTED;
+        if (! isElementValid())
+            return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+
+        const auto& updatedHandler = getHandler();
+        if (invokedDirectionalAction
+            && updatedHandler.getCurrentState().isExpanded() != shouldBeExpanded)
+            return (HRESULT) UIA_E_INVALIDOPERATION;
+
+        sendAccessibilityAutomationEvent (updatedHandler,
+                                          updatedHandler.getCurrentState().isExpanded()
+                                              ? UIA_MenuOpenedEventId
+                                              : UIA_MenuClosedEventId);
+        return S_OK;
     }
 
     //==============================================================================

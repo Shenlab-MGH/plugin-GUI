@@ -304,6 +304,9 @@ TEST_F (ParameterEditorAccessibilityTests,
     auto handler =
         comboBox
             .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
 
     EXPECT_TRUE (
         handler->getCurrentState()
@@ -322,6 +325,147 @@ TEST_F (ParameterEditorAccessibilityTests,
     EXPECT_TRUE (
         handler->getCurrentState()
             .isCollapsed());
+
+    EXPECT_TRUE (
+        actions.contains (
+            AccessibilityActionType::
+                expand));
+    EXPECT_TRUE (
+        actions.contains (
+            AccessibilityActionType::
+                collapse));
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                expand));
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                expand));
+    EXPECT_TRUE (
+        comboBox.isPopupActive());
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                collapse));
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                collapse));
+    EXPECT_FALSE (
+        comboBox.isPopupActive());
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ShowMenuActionTogglesComboBoxExpandedState)
+{
+    MessageThreadComboBox comboBox;
+    comboBox.addItem ("Binary", 1);
+    comboBox.setSelectedId (
+        1,
+        dontSendNotification);
+    comboBox.synchroniseAccessibilityState();
+    auto handler =
+        comboBox
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    const auto actions =
+        handler->getActions();
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                showMenu));
+    EXPECT_TRUE (
+        comboBox.isPopupActive());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpanded());
+
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                showMenu));
+    EXPECT_FALSE (
+        comboBox.isPopupActive());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isCollapsed());
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        DirectionalComboBoxActionsHonourLatestState)
+{
+    MessageThreadComboBox comboBox;
+    comboBox.addItem ("Binary", 1);
+    comboBox.setSelectedId (
+        1,
+        dontSendNotification);
+    comboBox.synchroniseAccessibilityState();
+    auto handler =
+        comboBox
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
+
+    const auto invokeFromWorker =
+        [&] (
+            AccessibilityActionType action,
+            const std::function<void()>&
+                changeStateBeforeDispatch)
+    {
+        std::atomic<bool>
+            workerStarted { false };
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                workerStarted.store (
+                    true);
+                actions.invoke (
+                    action);
+                workerReturned.store (
+                    true);
+            });
+        while (! workerStarted.load())
+            std::this_thread::yield();
+
+        changeStateBeforeDispatch();
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+        EXPECT_TRUE (
+            workerReturned.load());
+    };
+
+    invokeFromWorker (
+        AccessibilityActionType::expand,
+        [&]
+        {
+            comboBox.showPopup();
+        });
+    EXPECT_TRUE (
+        comboBox.isPopupActive());
+
+    invokeFromWorker (
+        AccessibilityActionType::collapse,
+        [&]
+        {
+            comboBox.hidePopup();
+            comboBox
+                .synchroniseAccessibilityState();
+        });
+    EXPECT_FALSE (
+        comboBox.isPopupActive());
 }
 
 TEST_F (ParameterEditorAccessibilityTests,

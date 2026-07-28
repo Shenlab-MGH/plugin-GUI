@@ -67,7 +67,13 @@ enum class AccessibilityActionType
         This will be called for UI elements which expand and collapse to
         show contextual information or menus, or show a popup.
     */
-    showMenu
+    showMenu,
+
+    /** Requests that an expandable UI element reaches its expanded state. */
+    expand,
+
+    /** Requests that an expandable UI element reaches its collapsed state. */
+    collapse
 };
 
 /** A simple wrapper for building a collection of supported accessibility actions

@@ -230,9 +230,12 @@ private:
             MessageThreadComboBoxAccessibilityState>&
             state)
     {
-        const auto showMenu =
-            [state]
+        const auto setExpanded =
+            [state] (bool shouldBeExpanded)
             {
+                if (! state->isEnabled())
+                    return;
+
                 auto* messageManager =
                     MessageManager::
                         getInstanceWithoutCreating();
@@ -240,7 +243,8 @@ private:
                     return;
 
                 messageManager->callSync (
-                    [state]
+                    [state,
+                     shouldBeExpanded]
                     {
                         auto* comboBox =
                             state
@@ -251,8 +255,30 @@ private:
                             return;
                         }
 
-                        comboBox->showPopup();
+                        if (comboBox
+                                ->isPopupActive()
+                            == shouldBeExpanded)
+                        {
+                            return;
+                        }
+
+                        if (shouldBeExpanded)
+                        {
+                            comboBox->showPopup();
+                        }
+                        else
+                        {
+                            comboBox->hidePopup();
+                            comboBox
+                                ->synchroniseAccessibilityState();
+                        }
                     });
+            };
+        const auto showMenu =
+            [state, setExpanded]
+            {
+                setExpanded (
+                    ! state->isExpanded());
             };
 
         return AccessibilityActions()
@@ -261,7 +287,19 @@ private:
                 showMenu)
             .addAction (
                 AccessibilityActionType::showMenu,
-                showMenu);
+                showMenu)
+            .addAction (
+                AccessibilityActionType::expand,
+                [setExpanded]
+                {
+                    setExpanded (true);
+                })
+            .addAction (
+                AccessibilityActionType::collapse,
+                [setExpanded]
+                {
+                    setExpanded (false);
+                });
     }
 
     std::shared_ptr<
@@ -602,7 +640,9 @@ void MessageThreadComboBox::
         getText(),
         getTitle(),
         getDescription(),
-        getTooltip(),
+        getHelpText().isNotEmpty()
+            ? getHelpText()
+            : getTooltip(),
         isPopupActive(),
         ComboBox::isEnabled(),
         hasKeyboardFocus (false));
