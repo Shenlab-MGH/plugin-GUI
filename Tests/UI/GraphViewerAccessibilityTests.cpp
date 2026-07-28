@@ -1,6 +1,11 @@
 #include "../../Source/UI/GraphViewer.h"
 #include "gtest/gtest.h"
 
+#if JUCE_WINDOWS
+#include <UIAutomation.h>
+#include <wrl/client.h>
+#endif
+
 namespace
 {
 class GraphViewerTestApplication final
@@ -44,6 +49,30 @@ public:
         }
     }
 
+    void addTestDataStream (
+        const String& name =
+            "Probe Stream")
+    {
+        auto* stream =
+            new DataStream (
+                DataStream::Settings {
+                    name,
+                    "Test probe data.",
+                    "probe.stream",
+                    30000.0f,
+                    true });
+        stream->addProcessor (this);
+        stream->addParameter (
+            new BooleanParameter (
+                stream,
+                Parameter::STREAM_SCOPE,
+                "enabled",
+                "Enabled",
+                "Enable this probe stream.",
+                true));
+        dataStreams.add (stream);
+    }
+
     void process (
         AudioBuffer<float>&) override
     {
@@ -81,6 +110,11 @@ protected:
             std::make_unique<
                 GraphViewerTestApplication>();
         MessageManager::getInstance();
+        ASSERT_TRUE (
+            static_cast<
+                JUCEApplicationBase*> (
+                    application.get())
+                ->initialiseApp());
         messageManagerLock =
             std::make_unique<
                 MessageManagerLock>();
@@ -89,6 +123,11 @@ protected:
     void TearDown() override
     {
         messageManagerLock.reset();
+        if (application != nullptr)
+            static_cast<
+                JUCEApplicationBase*> (
+                    application.get())
+                ->shutdownApp();
         AccessClass::
             clearAccessClassStateForTesting();
         application.reset();
@@ -130,6 +169,145 @@ Component* findAccessibleChild (
                ? &(*match)->getComponent()
                : nullptr;
 }
+
+AccessibilityHandler*
+findAccessibleDescendant (
+    AccessibilityHandler& parent,
+    StringRef componentId)
+{
+    for (auto* child :
+         parent.getChildren())
+    {
+        if (child == nullptr)
+            continue;
+
+        if (child->getComponent()
+                .getComponentID()
+            == componentId)
+            return child;
+
+        if (auto* match =
+                findAccessibleDescendant (
+                    *child,
+                    componentId))
+            return match;
+    }
+
+    return nullptr;
+}
+
+Component* findComponentDescendant (
+    Component& parent,
+    StringRef componentId)
+{
+    if (parent.getComponentID()
+        == componentId)
+        return &parent;
+
+    for (auto* child :
+         parent.getChildren())
+        if (auto* match =
+                findComponentDescendant (
+                    *child,
+                    componentId))
+            return match;
+
+    return nullptr;
+}
+
+void collectDataStreamDetailIds (
+    Component& parent,
+    StringArray& ids)
+{
+    if (dynamic_cast<DataStreamButton*> (
+            &parent)
+        != nullptr
+        && parent.getComponentID()
+               .endsWith (".details"))
+    {
+        ids.add (
+            parent.getComponentID());
+    }
+
+    for (auto* child :
+         parent.getChildren())
+        collectDataStreamDetailIds (
+            *child,
+            ids);
+}
+
+#if JUCE_WINDOWS
+class StructureChangedRecorder final
+    : public
+      IUIAutomationEventHandler
+{
+public:
+    HRESULT STDMETHODCALLTYPE QueryInterface (
+        REFIID interfaceId,
+        void** object) override
+    {
+        if (object == nullptr)
+            return E_POINTER;
+
+        if (interfaceId
+                == __uuidof (IUnknown)
+            || interfaceId
+                   == __uuidof (
+                       IUIAutomationEventHandler))
+        {
+            *object = static_cast<
+                IUIAutomationEventHandler*> (
+                this);
+            AddRef();
+            return S_OK;
+        }
+
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef()
+        override
+    {
+        return ++referenceCount;
+    }
+
+    ULONG STDMETHODCALLTYPE Release()
+        override
+    {
+        const auto count =
+            --referenceCount;
+
+        if (count == 0)
+            delete this;
+
+        return count;
+    }
+
+    HRESULT STDMETHODCALLTYPE
+    HandleAutomationEvent (
+        IUIAutomationElement*,
+        EVENTID eventId) override
+    {
+        if (eventId
+            == UIA_StructureChangedEventId)
+            ++notificationCount;
+
+        return S_OK;
+    }
+
+    int getNotificationCount() const
+    {
+        return notificationCount.load();
+    }
+
+private:
+    std::atomic<ULONG>
+        referenceCount { 1 };
+    std::atomic<int>
+        notificationCount { 0 };
+};
+#endif
 } // namespace
 
 TEST_F (GraphViewerAccessibilityTests,
@@ -563,3 +741,435 @@ TEST_F (GraphViewerAccessibilityTests,
             ->getCurrentValueAsString(),
         "selected");
 }
+
+TEST_F (GraphViewerAccessibilityTests,
+        ExposesDataStreamDetailsAndParameters)
+{
+    GraphNodeTestProcessor processor (
+        46,
+        false);
+    GraphNodeTestEditor editor (
+        &processor);
+    processor.addTestDataStream();
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+    graph.addAndMakeVisible (&node);
+    node.updateBoundaries();
+    graph.setBounds (
+        0,
+        0,
+        1600,
+        1200);
+    auto* navigation =
+        graph.getGraphViewport();
+    ASSERT_NE (navigation, nullptr);
+    navigation->setBounds (
+        0,
+        0,
+        800,
+        400);
+    navigation->setVisible (true);
+    navigation->addToDesktop (0);
+    navigation->setAlwaysOnTop (
+        true);
+    navigation->toFront (
+        false);
+    ASSERT_TRUE (
+        navigation->isShowing());
+    ASSERT_TRUE (graph.isShowing());
+    ASSERT_TRUE (node.isShowing());
+
+    auto* nodeHandler =
+        node.getAccessibilityHandler();
+    ASSERT_NE (nodeHandler, nullptr);
+
+    const String streamKey =
+        "46|Probe Stream";
+    const String detailsId =
+        "oe.graph.node.46.stream.46_probe_stream_34367c50726f62652053747265616d.details";
+    auto* details =
+        findAccessibleDescendant (
+            *nodeHandler,
+            detailsId);
+    ASSERT_NE (details, nullptr);
+    EXPECT_EQ (
+        details->getComponent().getTitle(),
+        "Probe Stream details");
+    EXPECT_EQ (
+        details->getComponent()
+            .getDescription(),
+        "Show or hide details for the Probe Stream data stream.");
+    EXPECT_EQ (
+        details->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        details->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        details->getActions().contains (
+            AccessibilityActionType::showMenu));
+    EXPECT_TRUE (
+        details->getCurrentState()
+            .isExpandable());
+    EXPECT_TRUE (
+        details->getCurrentState()
+            .isCollapsed());
+
+    EXPECT_TRUE (
+        details->getActions().invoke (
+            AccessibilityActionType::showMenu));
+    EXPECT_TRUE (
+        node.streamInfoVisible[streamKey]);
+    EXPECT_TRUE (
+        details->getCurrentState()
+            .isExpanded());
+
+    const String parametersId =
+        "oe.graph.node.46.stream.46_probe_stream_34367c50726f62652053747265616d.parameters";
+    auto* parameters =
+        findAccessibleDescendant (
+            *nodeHandler,
+            parametersId);
+    ASSERT_NE (parameters, nullptr);
+    EXPECT_EQ (
+        parameters->getComponent()
+            .getTitle(),
+        "Probe Stream parameters");
+    EXPECT_EQ (
+        parameters->getComponent()
+            .getDescription(),
+        "Show or hide parameters for the Probe Stream data stream.");
+    EXPECT_TRUE (
+        parameters->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        parameters->getActions().contains (
+            AccessibilityActionType::showMenu));
+    EXPECT_TRUE (
+        parameters->getCurrentState()
+            .isCollapsed());
+
+    EXPECT_TRUE (
+        parameters->getActions().invoke (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        node.streamParamsVisible[streamKey]);
+    EXPECT_TRUE (
+        parameters->getCurrentState()
+            .isExpanded());
+}
+
+TEST_F (GraphViewerAccessibilityTests,
+        DataStreamActionsRunOnMessageThread)
+{
+    GraphNodeTestProcessor processor (
+        47,
+        false);
+    GraphNodeTestEditor editor (
+        &processor);
+    processor.addTestDataStream();
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+    graph.addAndMakeVisible (&node);
+    node.updateBoundaries();
+
+    auto* details =
+        dynamic_cast<DataStreamButton*> (
+            findComponentDescendant (
+                node,
+                "oe.graph.node.47.stream.47_probe_stream_34377c50726f62652053747265616d.details"));
+    ASSERT_NE (details, nullptr);
+    auto handler =
+        details
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_FALSE (
+        details->getToggleState());
+
+    std::thread worker (
+        [handler =
+             handler.get()]
+        {
+            handler->getActions()
+                .invoke (
+                    AccessibilityActionType::
+                        showMenu);
+        });
+    worker.join();
+
+    EXPECT_FALSE (
+        details->getToggleState());
+    EXPECT_FALSE (
+        node.streamInfoVisible[
+            "47|Probe Stream"]);
+
+    auto* messageManager =
+        MessageManager::getInstance();
+    for (int attempt = 0;
+         attempt < 20
+             && ! details
+                       ->getToggleState();
+         ++attempt)
+    {
+        messageManager
+            ->runDispatchLoopUntil (10);
+    }
+
+    EXPECT_TRUE (
+        details->getToggleState());
+    EXPECT_TRUE (
+        node.streamInfoVisible[
+            "47|Probe Stream"]);
+}
+
+TEST_F (GraphViewerAccessibilityTests,
+        DataStreamIdsRemainUniqueAfterSanitising)
+{
+    GraphNodeTestProcessor processor (
+        48,
+        false);
+    GraphNodeTestEditor editor (
+        &processor);
+    processor.addTestDataStream (
+        "Probe-A");
+    processor.addTestDataStream (
+        "Probe A");
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+
+    StringArray detailsIds;
+    collectDataStreamDetailIds (
+        node,
+        detailsIds);
+
+    ASSERT_EQ (
+        detailsIds.size(),
+        2);
+    EXPECT_NE (
+        detailsIds[0],
+        detailsIds[1]);
+    EXPECT_TRUE (
+        isValidSemanticId (
+            detailsIds[0]));
+    EXPECT_TRUE (
+        isValidSemanticId (
+            detailsIds[1]));
+}
+
+#if JUCE_WINDOWS
+TEST_F (GraphViewerAccessibilityTests,
+        PublishesDataStreamStructureChangesToWindowsUia)
+{
+    GraphNodeTestProcessor processor (
+        49,
+        false);
+    GraphNodeTestEditor editor (
+        &processor);
+    processor.addTestDataStream();
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+    graph.addAndMakeVisible (&node);
+    node.updateBoundaries();
+    graph.setBounds (
+        0,
+        0,
+        1600,
+        1200);
+    auto* navigation =
+        graph.getGraphViewport();
+    ASSERT_NE (navigation, nullptr);
+    navigation->setBounds (
+        0,
+        0,
+        800,
+        400);
+    navigation->setVisible (true);
+    navigation->addToDesktop (0);
+    ASSERT_TRUE (
+        navigation->isShowing());
+    ASSERT_NE (
+        navigation
+            ->getAccessibilityHandler(),
+        nullptr);
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomation>
+        automation;
+    ASSERT_TRUE (
+        SUCCEEDED (
+            CoCreateInstance (
+                CLSID_CUIAutomation,
+                nullptr,
+                CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS (
+                    &automation))));
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>
+        rootElement;
+    ASSERT_TRUE (
+        SUCCEEDED (
+            automation
+                ->ElementFromHandle (
+                    static_cast<HWND> (
+                        navigation
+                            ->getWindowHandle()),
+                    &rootElement)));
+
+    VARIANT automationId;
+    VariantInit (
+        &automationId);
+    automationId.vt = VT_BSTR;
+    automationId.bstrVal =
+        SysAllocString (
+            L"oe.graph.node.49");
+    ASSERT_NE (
+        automationId.bstrVal,
+        nullptr);
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationCondition>
+        nodeCondition;
+    const auto conditionResult =
+        automation
+            ->CreatePropertyCondition (
+                UIA_AutomationIdPropertyId,
+                automationId,
+                &nodeCondition);
+    VariantClear (
+        &automationId);
+    ASSERT_TRUE (
+        SUCCEEDED (
+            conditionResult));
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>
+        nodeElement;
+    ASSERT_TRUE (
+        SUCCEEDED (
+            rootElement->FindFirst (
+                TreeScope_Subtree,
+                nodeCondition.Get(),
+                &nodeElement)));
+    if (nodeElement == nullptr)
+    {
+        const auto nodePoint =
+            node.localPointToGlobal (
+                Point<int> (
+                    node.getWidth() / 2,
+                    10));
+        POINT screenPoint {
+            nodePoint.x,
+            nodePoint.y
+        };
+        ASSERT_TRUE (
+            SUCCEEDED (
+                automation
+                    ->ElementFromPoint (
+                        screenPoint,
+                        &nodeElement)));
+    }
+    ASSERT_NE (
+        nodeElement.Get(),
+        nullptr);
+
+    BSTR resolvedId = nullptr;
+    ASSERT_TRUE (
+        SUCCEEDED (
+            nodeElement
+                ->get_CurrentAutomationId (
+                    &resolvedId)));
+    ASSERT_NE (
+        resolvedId,
+        nullptr);
+    EXPECT_EQ (
+        std::wstring (
+            resolvedId),
+        std::wstring (
+            L"oe.graph.node.49"));
+    SysFreeString (
+        resolvedId);
+
+    auto* details =
+        dynamic_cast<DataStreamButton*> (
+            findComponentDescendant (
+                node,
+                "oe.graph.node.49.stream.49_probe_stream_34397c50726f62652053747265616d.details"));
+    auto* parameters =
+        dynamic_cast<DataStreamButton*> (
+            findComponentDescendant (
+                node,
+                "oe.graph.node.49.stream.49_probe_stream_34397c50726f62652053747265616d.parameters"));
+    ASSERT_NE (details, nullptr);
+    ASSERT_NE (parameters, nullptr);
+    auto detailsHandler =
+        details
+            ->createAccessibilityHandler();
+    auto parametersHandler =
+        parameters
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        detailsHandler,
+        nullptr);
+    ASSERT_NE (
+        parametersHandler,
+        nullptr);
+
+    auto* recorder =
+        new StructureChangedRecorder();
+    ASSERT_TRUE (
+        SUCCEEDED (
+            automation
+                ->AddAutomationEventHandler (
+                    UIA_StructureChangedEventId,
+                    nodeElement.Get(),
+                    TreeScope_Element,
+                    nullptr,
+                    recorder)));
+
+    EXPECT_TRUE (
+        detailsHandler
+            ->getActions().invoke (
+                AccessibilityActionType::
+                    showMenu));
+    EXPECT_TRUE (
+        parametersHandler
+            ->getActions().invoke (
+                AccessibilityActionType::
+                    showMenu));
+
+    auto* messageManager =
+        MessageManager::getInstance();
+    for (int attempt = 0;
+         attempt < 20
+             && recorder
+                        ->getNotificationCount()
+                    < 2;
+         ++attempt)
+    {
+        messageManager
+            ->runDispatchLoopUntil (10);
+    }
+
+    EXPECT_TRUE (
+        SUCCEEDED (
+            automation
+                ->RemoveAutomationEventHandler (
+                    UIA_StructureChangedEventId,
+                    nodeElement.Get(),
+                    recorder)));
+    EXPECT_GE (
+        recorder
+            ->getNotificationCount(),
+        2);
+    recorder->Release();
+}
+#endif

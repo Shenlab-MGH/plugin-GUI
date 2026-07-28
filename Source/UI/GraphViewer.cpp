@@ -40,6 +40,24 @@ const int Y_BORDER_SIZE = 20;
 
 namespace
 {
+String createDataStreamSemanticSegment (
+    StringRef streamKey)
+{
+    const String key (
+        streamKey);
+    const auto utf8 =
+        key.toUTF8();
+
+    return sanitiseSemanticSegment (
+               key)
+           + "_"
+           + String::toHexString (
+               utf8.getAddress(),
+               static_cast<int> (
+                   key.getNumBytesAsUTF8()),
+               0);
+}
+
 class ProcessorGraphViewport final
     : public Viewport
 {
@@ -170,6 +188,87 @@ private:
     }
 
     GraphNode& node;
+};
+
+class DataStreamButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    explicit DataStreamButtonAccessibilityHandler (
+        DataStreamButton& buttonToWrap)
+        : AccessibilityHandler (
+              buttonToWrap,
+              AccessibilityRole::button,
+              createActions (
+                  buttonToWrap)),
+          button (buttonToWrap)
+    {
+    }
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto state =
+            AccessibilityHandler::
+                getCurrentState()
+                    .withExpandable();
+
+        return button.getToggleState()
+                   ? state.withExpanded()
+                   : state.withCollapsed();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        DataStreamButton& button)
+    {
+        const auto safeButton =
+            Component::SafePointer<
+                DataStreamButton> (
+                &button);
+        const auto activate =
+            [safeButton]
+            {
+                const auto perform =
+                    [safeButton]
+                    {
+                        if (safeButton
+                            == nullptr)
+                            return;
+
+                        safeButton
+                            ->setToggleState (
+                                ! safeButton
+                                       ->getToggleState(),
+                                sendNotification);
+                    };
+
+                if (MessageManager::
+                        getInstance()
+                        ->isThisTheMessageThread())
+                {
+                    perform();
+                }
+                else
+                {
+                    MessageManager::callAsync (
+                        perform);
+                }
+            };
+
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::
+                    press,
+                activate)
+            .addAction (
+                AccessibilityActionType::
+                    showMenu,
+                activate);
+    }
+
+    DataStreamButton& button;
 };
 } // namespace
 
@@ -729,7 +828,13 @@ DataStreamInfo::DataStreamInfo (DataStream* stream_, GenericEditor* editor, Grap
         parameterPanel->setMaximumPanelSize (streamParameterEditorComponent.get(),
                                              editorHeight);
 
-        parameterButton = new DataStreamButton (this, editor, "Parameters");
+        parameterButton =
+            new DataStreamButton (
+                this,
+                editor,
+                "Parameters",
+                DataStreamButton::Purpose::
+                    parameters);
         parameterButton->addListener (this);
         parameterPanel->setCustomPanelHeader (streamParameterEditorComponent.get(), parameterButton, true);
         // button->removeMouseListener(button->getParentComponent());
@@ -775,6 +880,11 @@ String DataStreamInfo::getStreamKey() const
     return stream->getKey();
 }
 
+String DataStreamInfo::getStreamName() const
+{
+    return stream->getName();
+}
+
 void DataStreamInfo::buttonClicked (Button* button)
 {
     DataStreamButton* dsb = (DataStreamButton*) button;
@@ -804,6 +914,16 @@ void DataStreamInfo::buttonClicked (Button* button)
 
     node->streamParamsVisible[stream->getKey()] = btnState;
     node->updateGraphView();
+
+    if (auto* handler =
+            node
+                ->getAccessibilityHandler())
+    {
+        handler
+            ->notifyAccessibilityEvent (
+                AccessibilityEvent::
+                    structureChanged);
+    }
 }
 
 int DataStreamInfo::getDesiredHeight() const
@@ -901,8 +1021,14 @@ void ProcessorParameterComponent::updateView()
     }
 }
 
-DataStreamButton::DataStreamButton (DataStreamInfo* info_, GenericEditor* editor_, const String& text)
-    : Button (text), editor (editor_), info (info_)
+DataStreamButton::DataStreamButton (
+    DataStreamInfo* info_,
+    GenericEditor* editor_,
+    const String& text,
+    Purpose purpose_)
+    : Button (text),
+      info (info_),
+      editor (editor_)
 {
     setClickingTogglesState (true);
     setToggleState (false, dontSendNotification);
@@ -913,11 +1039,52 @@ DataStreamButton::DataStreamButton (DataStreamInfo* info_, GenericEditor* editor
     pathClosed.addTriangle (8.0f, 4.0f, 8.0f, 11.0f, 15.0f, 7.5f);
     pathClosed.applyTransform (AffineTransform::scale (1.2f));
 
-    info->headerButton = this;
+    const auto streamName =
+        info->getStreamName();
+    const auto idPrefix =
+        "oe.graph.node."
+        + String (
+            editor->getProcessor()
+                ->getNodeId())
+        + ".stream."
+        + createDataStreamSemanticSegment (
+            info->getStreamKey());
+
+    if (purpose_
+        == Purpose::details)
+    {
+        applySemanticMetadata (
+            *this,
+            idPrefix + ".details",
+            streamName + " details",
+            "Show or hide details for the "
+                + streamName
+                + " data stream.");
+        info->headerButton = this;
+    }
+    else
+    {
+        applySemanticMetadata (
+            *this,
+            idPrefix + ".parameters",
+            streamName + " parameters",
+            "Show or hide parameters for the "
+                + streamName
+                + " data stream.");
+    }
 }
 
 DataStreamButton::~DataStreamButton()
 {
+}
+
+std::unique_ptr<AccessibilityHandler>
+DataStreamButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        DataStreamButtonAccessibilityHandler> (
+        *this);
 }
 
 int DataStreamButton::getDesiredHeight() const
@@ -998,7 +1165,13 @@ GraphNode::GraphNode (GenericEditor* ed, GraphViewer* g)
             infoPanel->setMaximumPanelSize (info, info->getMaxHeight());
             dataStreamInfos.add (info);
 
-            DataStreamButton* button = new DataStreamButton (info, editor, stream->getName());
+            DataStreamButton* button =
+                new DataStreamButton (
+                    info,
+                    editor,
+                    stream->getName(),
+                    DataStreamButton::Purpose::
+                        details);
             button->addListener (this);
             infoPanel->setCustomPanelHeader (info, button, true);
             button->removeMouseListener (button->getParentComponent());
@@ -1319,6 +1492,15 @@ void GraphNode::buttonClicked (Button* button)
     streamInfoVisible[streamKey] = btnState;
 
     updateGraphView();
+
+    if (auto* handler =
+            getAccessibilityHandler())
+    {
+        handler
+            ->notifyAccessibilityEvent (
+                AccessibilityEvent::
+                    structureChanged);
+    }
 }
 
 bool GraphNode::hasEditor (GenericEditor* ed) const
@@ -1473,7 +1655,13 @@ void GraphNode::updateStreamInfo()
             infoPanel->setMaximumPanelSize (info, info->getMaxHeight());
             dataStreamInfos.add (info);
 
-            DataStreamButton* button = new DataStreamButton (info, editor, stream->getName());
+            DataStreamButton* button =
+                new DataStreamButton (
+                    info,
+                    editor,
+                    stream->getName(),
+                    DataStreamButton::Purpose::
+                        details);
             button->addListener (this);
             infoPanel->setCustomPanelHeader (info, button, true);
             button->removeMouseListener (button->getParentComponent()); // remove mouse listener from header component

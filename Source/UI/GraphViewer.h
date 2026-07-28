@@ -67,6 +67,9 @@ public:
     /** Returns the stream key */
     String getStreamKey() const;
 
+    /** Returns the stream name */
+    String getStreamName() const;
+
     /** Restores panel state*/
     void restorePanels();
 
@@ -123,8 +126,17 @@ private:
 class DataStreamButton : public Button
 {
 public:
+    enum class Purpose
+    {
+        details,
+        parameters
+    };
+
     /** Constructor */
-    DataStreamButton (DataStreamInfo* info, GenericEditor* editor, const String& text);
+    DataStreamButton (DataStreamInfo* info,
+                      GenericEditor* editor,
+                      const String& text,
+                      Purpose purpose);
 
     /** Destructor */
     ~DataStreamButton();
@@ -134,6 +146,9 @@ public:
 
     /** Paint component */
     void paintButton (Graphics& g, bool isHighlighted, bool isDown);
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
     DataStreamInfo* getDataStreamInfo() const { return info; }
 
