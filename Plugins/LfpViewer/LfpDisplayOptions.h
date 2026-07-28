@@ -381,7 +381,9 @@ private:
     // CHANNELS SECTION
     std::unique_ptr<GroupComponent> channelsGroup;
 
-    std::unique_ptr<UtilityButton> reverseChannelsDisplayButton;
+    std::unique_ptr<
+        LfpOptionToggleButton>
+        reverseChannelsDisplayButton;
     std::unique_ptr<Label> reverseChannelsLabel;
 
     std::unique_ptr<

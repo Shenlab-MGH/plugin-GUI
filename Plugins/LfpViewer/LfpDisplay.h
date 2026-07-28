@@ -123,7 +123,7 @@ public:
     void setDrawMethod (bool);
 
     /** Returns a bool indicating if the channels are displayed in reverse order (true) */
-    bool getChannelsReversed();
+    TESTABLE bool getChannelsReversed();
 
     /** Reorders the displayed channels, reversed if state == true and normal if false */
     void setChannelsReversed (bool state);

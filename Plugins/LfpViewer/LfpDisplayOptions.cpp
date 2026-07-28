@@ -1616,17 +1616,36 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     extendedOptions->addAndMakeVisible (channelsGroup.get());
 
     // Reverse order
-    reverseChannelsDisplayButton = std::make_unique<UtilityButton> ("OFF");
+    reverseChannelsDisplayButton =
+        std::make_unique<
+            LfpOptionToggleButton> (
+            "OFF");
     reverseChannelsDisplayButton->setRadius (5.0f);
     reverseChannelsDisplayButton->setEnabledState (true);
     reverseChannelsDisplayButton->setCorners (true, true, true, true);
     reverseChannelsDisplayButton->addListener (this);
-    reverseChannelsDisplayButton->setClickingTogglesState (true);
     reverseChannelsDisplayButton->setToggleState (false, sendNotification);
+    const auto reverseOrderDescription =
+        "Reverse the current visible channel order in LFP display "
+        + String (displayNumber)
+        + " after filtering, channel skipping, and optional metadata-based depth sorting. This changes display order only; acquisition and recording are unaffected.";
+    applyLfpDisplayControlMetadata (
+        *reverseChannelsDisplayButton,
+        *processor,
+        displayNumber,
+        "reverse_order",
+        "LFP display "
+            + String (displayNumber)
+            + " reverse channel order",
+        reverseOrderDescription);
+    reverseChannelsDisplayButton
+        ->refreshAccessibilityState();
     extendedOptions->addAndMakeVisible (reverseChannelsDisplayButton.get());
 
     reverseChannelsLabel = std::make_unique<Label> ("ReverseChannelsLabel", "Reverse order:");
     reverseChannelsLabel->setFont (labelFont);
+    reverseChannelsLabel->setAccessible (
+        false);
     extendedOptions->addAndMakeVisible (reverseChannelsLabel.get());
 
     // Sort by depth
@@ -2222,11 +2241,11 @@ void LfpDisplayOptions::togglePauseButton (bool sendUpdate)
 
 void LfpDisplayOptions::setChannelsReversed (bool state)
 {
-    if (lfpDisplay->getChannelsReversed() == state) // ignore if we're not changing state
-        return;
-
-    lfpDisplay->setChannelsReversed (state);
-    canvasSplit->fullredraw = true;
+    if (lfpDisplay->getChannelsReversed() != state)
+    {
+        lfpDisplay->setChannelsReversed (state);
+        canvasSplit->fullredraw = true;
+    }
 
     reverseChannelsDisplayButton->setToggleState (state, dontSendNotification);
 
@@ -2238,6 +2257,9 @@ void LfpDisplayOptions::setChannelsReversed (bool state)
     {
         reverseChannelsDisplayButton->setLabel ("OFF");
     }
+
+    reverseChannelsDisplayButton
+        ->refreshAccessibilityState();
 }
 
 void LfpDisplayOptions::setInputInverted (bool state)
