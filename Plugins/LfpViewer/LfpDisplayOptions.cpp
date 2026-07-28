@@ -981,9 +981,38 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     for (int i = 0; i < 8; i++)
     {
         EventDisplayInterface* eventOptions = new EventDisplayInterface (lfpDisplay, canvasSplit, i);
+        const auto lineNumber =
+            i + 1;
+        const auto eventDescription =
+            "Show or hide TTL line "
+            + String (lineNumber)
+            + " event markers in LFP display "
+            + String (displayNumber)
+            + ". This changes the display overlay only; acquisition and recording are unaffected.";
+        eventOptions
+            ->applyAccessibilityMetadata (
+                "oe.processor."
+                    + String (
+                        processor
+                            ->getNodeId())
+                    + ".lfp.display_"
+                    + String (
+                        displayNumber)
+                    + ".event_overlay.line_"
+                    + String (
+                        lineNumber),
+                "LFP display "
+                    + String (
+                        displayNumber)
+                    + " event overlay line "
+                    + String (
+                        lineNumber),
+                eventDescription);
         eventDisplayInterfaces.add (eventOptions);
         mainOptions->addAndMakeVisible (eventOptions);
-        lfpDisplay->setEventDisplayState (i, true);
+        eventOptions
+            ->setEventDisplayState (
+                true);
     }
 
     overlayEventsLabel = std::make_unique<Label> ("OverlayEventsLabel");
@@ -1840,6 +1869,55 @@ void LfpDisplayOptions::setTTLWord (String word)
     ttlWordString = word;
 }
 
+int LfpDisplayOptions::
+    getEventOverlayMask() const
+{
+    int mask = 0;
+    for (int lineIndex = 0;
+         lineIndex < eventDisplayInterfaces
+                         .size();
+         ++lineIndex)
+    {
+        if (eventDisplayInterfaces[
+                lineIndex]
+                ->getEventDisplayState())
+        {
+            mask |= 1 << lineIndex;
+        }
+    }
+    return mask;
+}
+
+void LfpDisplayOptions::
+    saveEventOverlayState (
+        XmlElement& xml) const
+{
+    xml.setAttribute (
+        "EventButtonState",
+        getEventOverlayMask());
+}
+
+void LfpDisplayOptions::
+    restoreEventOverlayState (
+        const XmlElement& xml)
+{
+    const auto mask =
+        xml.getIntAttribute (
+            "EventButtonState");
+    for (int lineIndex = 0;
+         lineIndex < eventDisplayInterfaces
+                         .size();
+         ++lineIndex)
+    {
+        eventDisplayInterfaces[
+            lineIndex]
+            ->setEventDisplayState (
+                ((mask >> lineIndex)
+                 & 1)
+                != 0);
+    }
+}
+
 void LfpDisplayOptions::buttonClicked (Button* b)
 {
     if (b == invertInputButton.get())
@@ -2436,17 +2514,8 @@ void LfpDisplayOptions::saveParameters (XmlElement* xml)
 
     xmlNode->setAttribute ("singleChannelView", lfpDisplay->getSingleChannelShown());
 
-    int eventButtonState = 0;
-
-    for (int i = 0; i < 8; i++)
-    {
-        if (lfpDisplay->eventDisplayEnabled[i])
-        {
-            eventButtonState += (1 << i);
-        }
-    }
-
-    xmlNode->setAttribute ("EventButtonState", eventButtonState);
+    saveEventOverlayState (
+        *xmlNode);
 
     String channelDisplayState = "";
 
@@ -2656,14 +2725,8 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             //LOGD("    Set scroll position in ", MS_FROM_START, " milliseconds");
             start = Time::getHighResolutionTicks();
 
-            int eventButtonState = xmlNode->getIntAttribute ("EventButtonState");
-
-            for (int i = 0; i < 8; i++)
-            {
-                lfpDisplay->eventDisplayEnabled[i] = (eventButtonState >> i) & 1;
-
-                eventDisplayInterfaces[i]->checkEnabledState();
-            }
+            restoreEventOverlayState (
+                *xmlNode);
 
             String channelDisplayState = xmlNode->getStringAttribute ("ChannelDisplayState");
 

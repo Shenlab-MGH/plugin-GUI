@@ -211,6 +211,17 @@ public:
     /** Sets the latest ttl word value */
     void setTTLWord (String word);
 
+    /** Returns the visible event-overlay lines as the official 8-bit mask. */
+    int getEventOverlayMask() const;
+
+    /** Writes the official EventButtonState attribute. */
+    void saveEventOverlayState (
+        XmlElement& xml) const;
+
+    /** Restores the official EventButtonState attribute and UIA snapshots. */
+    void restoreEventOverlayState (
+        const XmlElement& xml);
+
     /** Sets the state of the pause button and can enable / disable some options */
     void setPausedState (bool isPaused);
 

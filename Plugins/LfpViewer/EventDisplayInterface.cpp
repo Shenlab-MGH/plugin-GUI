@@ -27,14 +27,405 @@
 #include "LfpDisplayCanvas.h"
 
 #include <math.h>
+#include <mutex>
 
 using namespace LfpViewer;
 
-EventDisplayInterface::EventDisplayInterface (LfpDisplay* display_, LfpDisplaySplitter* split, int chNum) : isEnabled (true), display (display_), canvasSplit (split)
+struct LfpViewer::EventOverlayAccessibilityState
 {
-    channelNumber = chNum;
+    void attach (
+        EventOverlayButton* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
 
-    chButton = std::make_unique<UtilityButton> (String (channelNumber + 1));
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+        enabled.store (false);
+        shown.store (false);
+        focused.store (false);
+    }
+
+    void synchronise (
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isShown,
+        bool isEnabled,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            title = std::move (
+                titleToUse);
+            description =
+                std::move (
+                    descriptionToUse);
+            help = std::move (
+                helpToUse);
+        }
+        shown.store (isShown);
+        enabled.store (isEnabled);
+        focused.store (isFocused);
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isShown() const
+    {
+        return shown.load();
+    }
+
+    bool isAvailable() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+    void toggleOnMessageThread();
+
+private:
+    mutable std::mutex textMutex;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool>
+        shown { true };
+    std::atomic<bool>
+        enabled { true };
+    std::atomic<bool>
+        focused { false };
+    Component::SafePointer<
+        EventOverlayButton>
+        button;
+};
+
+namespace
+{
+class EventOverlayAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit EventOverlayAccessibilityValue (
+        std::shared_ptr<
+            EventOverlayAccessibilityState>
+            stateToUse)
+        : state (
+              std::move (
+                  stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->isShown()
+                   ? String ("Shown")
+                   : String ("Hidden");
+    }
+
+private:
+    std::shared_ptr<
+        EventOverlayAccessibilityState>
+        state;
+};
+
+class EventOverlayAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    EventOverlayAccessibilityHandler (
+        Component& button,
+        std::shared_ptr<
+            EventOverlayAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::
+                  toggleButton,
+              createActions (
+                  stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      EventOverlayAccessibilityValue> (
+                      stateToUse) }),
+          state (
+              std::move (
+                  stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable()
+                .withCheckable();
+        if (state->isShown())
+            current =
+                current.withChecked();
+        if (state->isFocused())
+            current =
+                current.withFocused();
+        return current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription()
+        const override
+    {
+        return state
+            ->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state
+            ->isAvailable();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            EventOverlayAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::
+                    toggle,
+                [state]
+                {
+                    if (! state
+                              ->isAvailable())
+                    {
+                        return;
+                    }
+
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager
+                        == nullptr)
+                    {
+                        return;
+                    }
+
+                    const auto perform =
+                        [state]
+                        {
+                            state
+                                ->toggleOnMessageThread();
+                        };
+                    if (messageManager
+                            ->isThisTheMessageThread())
+                    {
+                        perform();
+                        return;
+                    }
+                    MessageManager::callSync (
+                        perform);
+                });
+    }
+
+    std::shared_ptr<
+        EventOverlayAccessibilityState>
+        state;
+};
+} // namespace
+
+class LfpViewer::EventOverlayButton final
+    : public UtilityButton
+{
+public:
+    EventOverlayButton (
+        String label,
+        EventDisplayInterface&
+            ownerToUse)
+        : UtilityButton (
+              std::move (label)),
+          owner (
+              ownerToUse),
+          accessibilityState (
+              std::make_shared<
+                  EventOverlayAccessibilityState>())
+    {
+        accessibilityState->attach (
+            this);
+        refreshAccessibilityState();
+    }
+
+    ~EventOverlayButton() override
+    {
+        accessibilityState->detach();
+    }
+
+    std::unique_ptr<
+        AccessibilityHandler>
+    createAccessibilityHandler()
+        override
+    {
+        return std::make_unique<
+            EventOverlayAccessibilityHandler> (
+            *this,
+            accessibilityState);
+    }
+
+    void refreshAccessibilityState()
+    {
+        auto title = getTitle();
+        if (title.isEmpty())
+            title = getName();
+
+        accessibilityState
+            ->synchronise (
+                std::move (title),
+                getDescription(),
+                getHelpText(),
+                owner
+                    .getEventDisplayState(),
+                Component::isEnabled(),
+                hasKeyboardFocus (
+                    false));
+    }
+
+    void toggleOverlayOnMessageThread()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        owner.setEventDisplayState (
+            ! owner
+                   .getEventDisplayState());
+    }
+
+    void enablementChanged() override
+    {
+        UtilityButton::
+            enablementChanged();
+        refreshAccessibilityState();
+    }
+
+    void focusGained (
+        FocusChangeType cause) override
+    {
+        UtilityButton::focusGained (
+            cause);
+        refreshAccessibilityState();
+    }
+
+    void focusLost (
+        FocusChangeType cause) override
+    {
+        UtilityButton::focusLost (
+            cause);
+        refreshAccessibilityState();
+    }
+
+private:
+    EventDisplayInterface& owner;
+    std::shared_ptr<
+        EventOverlayAccessibilityState>
+        accessibilityState;
+};
+
+void EventOverlayAccessibilityState::
+    toggleOnMessageThread()
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+    auto* currentButton =
+        button.getComponent();
+    if (currentButton == nullptr
+        || ! currentButton
+                 ->Component::
+                 isEnabled())
+    {
+        return;
+    }
+
+    Component::SafePointer<
+        EventOverlayButton>
+        safeButton (
+            currentButton);
+    currentButton
+        ->toggleOverlayOnMessageThread();
+    if (safeButton != nullptr)
+    {
+        safeButton
+            ->refreshAccessibilityState();
+    }
+}
+
+EventDisplayInterface::EventDisplayInterface (
+    LfpDisplay* display_,
+    LfpDisplaySplitter* split,
+    int chNum)
+    : channelNumber (chNum),
+      overlayShown (true),
+      display (display_),
+      canvasSplit (split)
+{
+    chButton =
+        std::make_unique<
+            EventOverlayButton> (
+            String (
+                channelNumber + 1),
+            *this);
     chButton->setRadius (5.0f);
     chButton->addListener (this);
     addAndMakeVisible (chButton.get());
@@ -48,32 +439,85 @@ EventDisplayInterface::~EventDisplayInterface()
 
 void EventDisplayInterface::checkEnabledState()
 {
-    isEnabled = display->getEventDisplayState (channelNumber);
+    overlayShown =
+        display
+            ->getEventDisplayState (
+                channelNumber);
+    if (chButton != nullptr)
+    {
+        chButton
+            ->refreshAccessibilityState();
+    }
+    repaint();
 }
 
 void EventDisplayInterface::buttonClicked (Button* button)
 {
-    checkEnabledState();
+    if (button == chButton.get())
+        setEventDisplayState (
+            ! getEventDisplayState());
+}
 
-    if (isEnabled)
+void EventDisplayInterface::
+    setEventDisplayState (
+        bool state)
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+    display->setEventDisplayState (
+        channelNumber,
+        state);
+    overlayShown = state;
+    if (chButton != nullptr)
     {
-        display->setEventDisplayState (channelNumber, false);
+        chButton
+            ->refreshAccessibilityState();
+        if (auto* handler =
+                chButton
+                    ->getAccessibilityHandler())
+        {
+            handler
+                ->notifyAccessibilityEvent (
+                    AccessibilityEvent::
+                        valueChanged);
+        }
     }
-    else
-    {
-        display->setEventDisplayState (channelNumber, true);
-    }
-
-    isEnabled = ! isEnabled;
-
     repaint();
+}
+
+bool EventDisplayInterface::
+    getEventDisplayState()
+        const
+{
+    return overlayShown;
+}
+
+void EventDisplayInterface::
+    applyAccessibilityMetadata (
+        StringRef id,
+        StringRef title,
+        StringRef description)
+{
+    chButton->setComponentID (
+        String (id));
+    chButton->setTitle (
+        String (title));
+    chButton->setDescription (
+        String (description));
+    chButton->setHelpText (
+        String (description));
+    chButton->setAccessible (
+        true);
+    chButton
+        ->invalidateAccessibilityHandler();
+    chButton
+        ->refreshAccessibilityState();
 }
 
 void EventDisplayInterface::paintOverChildren (Graphics& g)
 {
-    checkEnabledState();
-
-    if (isEnabled)
+    if (overlayShown)
     {
         g.setColour (display->channelColours[channelNumber * 2]);
         g.drawRoundedRectangle (1, 1, getWidth() - 2, getHeight() - 2, 5.0f, 3.0f);

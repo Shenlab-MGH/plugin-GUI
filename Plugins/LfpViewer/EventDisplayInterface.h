@@ -35,14 +35,18 @@
 namespace LfpViewer
 {
 
+struct EventOverlayAccessibilityState;
+class EventOverlayButton;
+
 /**
     Interface class for Event Display channels.
 
     Holds a for toggling one channel's event display on and off.
 
  */
-class EventDisplayInterface : public Component,
-                              public Button::Listener
+class TESTABLE EventDisplayInterface
+    : public Component,
+      public Button::Listener
 {
 public:
     /** Constructor */
@@ -62,14 +66,26 @@ public:
     /** Checks whether events should be displayed for this channel*/
     void checkEnabledState();
 
+    /** Updates the overlay visibility and synchronises GUI/UIA state. */
+    void setEventDisplayState (bool state);
+
+    /** Returns whether this line is currently shown as an overlay. */
+    bool getEventDisplayState() const;
+
+    /** Publishes stable agent-facing identity and meaning for the line button. */
+    void applyAccessibilityMetadata (
+        StringRef id,
+        StringRef title,
+        StringRef description);
+
 private:
     int channelNumber;
-    bool isEnabled;
+    bool overlayShown;
 
     LfpDisplay* display;
     LfpDisplaySplitter* canvasSplit;
 
-    std::unique_ptr<UtilityButton> chButton;
+    std::unique_ptr<EventOverlayButton> chButton;
 };
 
 }; // namespace LfpViewer

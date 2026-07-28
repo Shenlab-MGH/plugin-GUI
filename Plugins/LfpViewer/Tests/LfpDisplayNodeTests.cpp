@@ -2166,6 +2166,490 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesEventOverlayLinesForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        for (int lineIndex = 0;
+             lineIndex < 8;
+             ++lineIndex)
+        {
+            const auto lineNumber =
+                lineIndex + 1;
+            const auto id =
+                prefix
+                + String (displayNumber)
+                + ".event_overlay.line_"
+                + String (lineNumber);
+            auto* button =
+                dynamic_cast<Button*> (
+                    findLfpDescendantById (
+                        *canvas,
+                        id));
+            ASSERT_NE (
+                button,
+                nullptr)
+                << id;
+            auto* handler =
+                button
+                    ->getAccessibilityHandler();
+            ASSERT_NE (
+                handler,
+                nullptr);
+            const auto description =
+                "Show or hide TTL line "
+                + String (lineNumber)
+                + " event markers in LFP display "
+                + String (displayNumber)
+                + ". This changes the display overlay only; acquisition and recording are unaffected.";
+            EXPECT_EQ (
+                handler->getRole(),
+                AccessibilityRole::
+                    toggleButton);
+            EXPECT_EQ (
+                handler->getTitle(),
+                "LFP display "
+                    + String (
+                        displayNumber)
+                    + " event overlay line "
+                    + String (
+                        lineNumber));
+            EXPECT_EQ (
+                handler
+                    ->getDescription(),
+                description);
+            EXPECT_EQ (
+                handler->getHelp(),
+                description);
+            EXPECT_TRUE (
+                handler
+                    ->getCurrentState()
+                    .isCheckable());
+            EXPECT_TRUE (
+                handler
+                    ->getCurrentState()
+                    .isChecked());
+            EXPECT_TRUE (
+                handler->getActions()
+                    .contains (
+                        AccessibilityActionType::
+                            toggle));
+            EXPECT_FALSE (
+                handler->getActions()
+                    .contains (
+                        AccessibilityActionType::
+                            press));
+            auto* value =
+                handler
+                    ->getValueInterface();
+            ASSERT_NE (
+                value,
+                nullptr);
+            EXPECT_TRUE (
+                value->isReadOnly());
+            EXPECT_EQ (
+                value
+                    ->getCurrentValueAsString(),
+                "Shown");
+            EXPECT_EQ (
+                findLfpAncestor<
+                    LfpViewer::
+                        LfpDisplayOptions> (
+                    *button)
+                    ->isVisible(),
+                displayIndex == 0);
+        }
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        EventOverlayWorkerToggleIsPerPaneAndLifecycleSafe)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    auto* line1 =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "1.event_overlay.line_1"));
+    auto* line2 =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "1.event_overlay.line_2"));
+    auto* otherPaneLine1 =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "2.event_overlay.line_1"));
+    ASSERT_NE (
+        line1,
+        nullptr);
+    ASSERT_NE (
+        line2,
+        nullptr);
+    ASSERT_NE (
+        otherPaneLine1,
+        nullptr);
+    auto* handler =
+        line1
+            ->getAccessibilityHandler();
+    auto* line2Handler =
+        line2
+            ->getAccessibilityHandler();
+    auto* otherPaneHandler =
+        otherPaneLine1
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+    ASSERT_NE (
+        line2Handler,
+        nullptr);
+    ASSERT_NE (
+        otherPaneHandler,
+        nullptr);
+    auto* eventInterface =
+        findLfpAncestor<
+            LfpViewer::
+                EventDisplayInterface> (
+            *line1);
+    ASSERT_NE (
+        eventInterface,
+        nullptr);
+
+    const auto actions =
+        handler->getActions();
+    bool invoked = false;
+    std::atomic<bool>
+        workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            invoked =
+                actions.invoke (
+                    AccessibilityActionType::
+                        toggle);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+
+    EXPECT_TRUE (
+        invoked);
+    EXPECT_FALSE (
+        eventInterface
+            ->getEventDisplayState());
+    EXPECT_FALSE (
+        handler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Hidden");
+    EXPECT_TRUE (
+        line2Handler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        otherPaneHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_FALSE (
+        line1->getToggleState());
+
+    eventInterface
+        ->setEventDisplayState (
+            true);
+    EXPECT_TRUE (
+        handler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Shown");
+
+    line1->triggerClick();
+    for (int attempt = 0;
+         attempt < 100
+             && eventInterface
+                    ->getEventDisplayState();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    EXPECT_FALSE (
+        eventInterface
+            ->getEventDisplayState());
+    EXPECT_FALSE (
+        handler
+            ->getCurrentState()
+            .isChecked());
+
+    line1->triggerClick();
+    for (int attempt = 0;
+         attempt < 100
+             && ! eventInterface
+                      ->getEventDisplayState();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    EXPECT_TRUE (
+        eventInterface
+            ->getEventDisplayState());
+
+    line1->setEnabled (
+        false);
+    EXPECT_FALSE (
+        handler->isEnabled());
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_TRUE (
+        eventInterface
+            ->getEventDisplayState());
+
+    line1->setEnabled (
+        true);
+    canvas.reset();
+
+    workerReturned.store (
+        false);
+    std::thread staleWorker (
+        [&]
+        {
+            actions.invoke (
+                AccessibilityActionType::
+                    toggle);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        workerReturned);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        EventOverlayXmlMaskRoundTripsAndPreservesPaneIsolation)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    auto* pane1Line1 =
+        findLfpDescendantById (
+            *canvas,
+            prefix
+                + "1.event_overlay.line_1");
+    auto* pane2Line1 =
+        findLfpDescendantById (
+            *canvas,
+            prefix
+                + "2.event_overlay.line_1");
+    ASSERT_NE (
+        pane1Line1,
+        nullptr);
+    ASSERT_NE (
+        pane2Line1,
+        nullptr);
+    auto* pane1Options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *pane1Line1);
+    auto* pane2Options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *pane2Line1);
+    ASSERT_NE (
+        pane1Options,
+        nullptr);
+    ASSERT_NE (
+        pane2Options,
+        nullptr);
+    EXPECT_EQ (
+        pane1Options
+            ->getEventOverlayMask(),
+        0xff);
+    EXPECT_EQ (
+        pane2Options
+            ->getEventOverlayMask(),
+        0xff);
+
+    for (const auto mask :
+         { 0x00,
+           0x01,
+           0x55,
+           0x80,
+           0xff })
+    {
+        XmlElement xml (
+            "LFPDISPLAY");
+        xml.setAttribute (
+            "EventButtonState",
+            mask);
+        pane1Options
+            ->restoreEventOverlayState (
+                xml);
+        EXPECT_EQ (
+            pane1Options
+                ->getEventOverlayMask(),
+            mask);
+        EXPECT_EQ (
+            pane2Options
+                ->getEventOverlayMask(),
+            0xff);
+        for (int lineIndex = 0;
+             lineIndex < 8;
+             ++lineIndex)
+        {
+            auto* button =
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + "1.event_overlay.line_"
+                        + String (
+                            lineIndex + 1));
+            ASSERT_NE (
+                button,
+                nullptr);
+            auto* handler =
+                button
+                    ->getAccessibilityHandler();
+            ASSERT_NE (
+                handler,
+                nullptr);
+            const auto expectedShown =
+                ((mask >> lineIndex)
+                 & 1)
+                != 0;
+            EXPECT_EQ (
+                handler
+                    ->getCurrentState()
+                    .isChecked(),
+                expectedShown);
+            EXPECT_EQ (
+                handler
+                    ->getValueInterface()
+                    ->getCurrentValueAsString(),
+                expectedShown
+                    ? "Shown"
+                    : "Hidden");
+        }
+
+        XmlElement saved (
+            "LFPDISPLAY");
+        pane1Options
+            ->saveEventOverlayState (
+                saved);
+        EXPECT_EQ (
+            saved.getIntAttribute (
+                "EventButtonState"),
+            mask);
+    }
+
+    XmlElement missingAttribute (
+        "LFPDISPLAY");
+    pane1Options
+        ->restoreEventOverlayState (
+            missingAttribute);
+    EXPECT_EQ (
+        pane1Options
+            ->getEventOverlayMask(),
+        0x00);
+    EXPECT_EQ (
+        pane2Options
+            ->getEventOverlayMask(),
+        0xff);
+}
+
+TEST_F (LfpDisplayNodeTests,
         ExposesOptionsDrawerForEveryPane)
 {
     auto canvas =
@@ -4990,6 +5474,182 @@ TEST_F (LfpDisplayNodeTests,
             L"8");
     EXPECT_EQ (
         hiddenResult.invokeResult,
+        E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerTogglesEventOverlayLine)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.event_overlay.line_1";
+    auto* button =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        button,
+        nullptr);
+    auto* eventInterface =
+        findLfpAncestor<
+            LfpViewer::
+                EventDisplayInterface> (
+            *button);
+    ASSERT_NE (
+        eventInterface,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto runAction =
+        [&] (
+            StringRef targetId,
+            LfpWindowsUiaAction action,
+            bool expectedShown)
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (
+                                targetId)
+                                .toWideCharPointer()),
+                        action);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && (! workerReturned.load()
+                     || eventInterface
+                                ->getEventDisplayState()
+                            != expectedShown);
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return actionResult;
+    };
+
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryToggle,
+            true);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (
+        initialResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 event overlay line 1");
+    EXPECT_EQ (
+        initialResult.help,
+        L"Show or hide TTL line 1 event markers in LFP display 1. This changes the display overlay only; acquisition and recording are unaffected.");
+    EXPECT_TRUE (
+        initialResult
+            .togglePatternAvailable);
+    EXPECT_FALSE (
+        initialResult
+            .invokePatternAvailable);
+    EXPECT_TRUE (
+        initialResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult.valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (
+        initialResult.value,
+        L"Shown");
+
+    const auto hiddenResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                toggle,
+            false);
+    EXPECT_EQ (
+        hiddenResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        hiddenResult.toggleState,
+        ToggleState_Off);
+    EXPECT_EQ (
+        hiddenResult.value,
+        L"Hidden");
+
+    button->setEnabled (
+        false);
+    const auto disabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                toggle,
+            false);
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_FALSE (
+        eventInterface
+            ->getEventDisplayState());
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix
+                + "2.event_overlay.line_1",
+            LfpWindowsUiaAction::
+                queryToggle,
+            false);
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
         E_FAIL);
 }
 
