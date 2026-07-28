@@ -16,6 +16,12 @@ enum class TestSourceNodeType
     Base
 };
 
+enum class TestGuiRuntimeLifetime
+{
+    fixture,
+    process
+};
+
 class TestSourceNodeBuilder
 {
 public:
@@ -63,10 +69,19 @@ private:
 class ProcessorTester
 {
 public:
-    ProcessorTester (TestSourceNodeBuilder sourceNodeBuilder)
+    ProcessorTester (
+        TestSourceNodeBuilder sourceNodeBuilder,
+        TestGuiRuntimeLifetime
+            guiRuntimeLifetimeToUse =
+                TestGuiRuntimeLifetime::fixture)
+        : guiRuntimeLifetime (
+              guiRuntimeLifetimeToUse)
     {
-        // Singletons...
-        MessageManager::deleteInstance();
+        if (guiRuntimeLifetime
+            == TestGuiRuntimeLifetime::fixture)
+        {
+            MessageManager::deleteInstance();
+        }
 
         // initializes the singleton instance
         MessageManager::getInstance();
@@ -113,8 +128,18 @@ public:
 
         AccessClass::clearAccessClassStateForTesting();
 
-        DeletedAtShutdown::deleteAll();
-        MessageManager::deleteInstance();
+        if (guiRuntimeLifetime
+            == TestGuiRuntimeLifetime::fixture)
+        {
+            DeletedAtShutdown::deleteAll();
+            MessageManager::deleteInstance();
+        }
+        else
+        {
+            LookAndFeel::setDefaultLookAndFeel (
+                nullptr);
+            customLookAndFeel = nullptr;
+        }
     }
 
     /**
@@ -257,6 +282,10 @@ public:
     int nextProcessorId = 1;
     int currentSampleIndex = 0;
     std::unique_ptr<CustomLookAndFeel> customLookAndFeel;
+
+private:
+    const TestGuiRuntimeLifetime
+        guiRuntimeLifetime;
 };
 
 class DataThreadTester : public ProcessorTester

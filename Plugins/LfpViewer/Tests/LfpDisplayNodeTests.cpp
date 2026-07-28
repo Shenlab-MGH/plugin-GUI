@@ -44,6 +44,30 @@
 
 namespace
 {
+class LfpGuiRuntimeEnvironment final
+    : public testing::Environment
+{
+public:
+    void SetUp() override
+    {
+        MessageManager::deleteInstance();
+        MessageManager::getInstance();
+    }
+
+    void TearDown() override
+    {
+        DeletedAtShutdown::deleteAll();
+        MessageManager::deleteInstance();
+    }
+};
+
+[[maybe_unused]]
+testing::Environment* const
+    lfpGuiRuntimeEnvironment =
+        testing::
+            AddGlobalTestEnvironment (
+                new LfpGuiRuntimeEnvironment());
+
 Component* findLfpDescendantById (
     Component& parent,
     StringRef id)
@@ -243,6 +267,32 @@ struct LfpWindowsUiaInvokeResult
     std::wstring value;
 };
 
+class LfpScopedComApartment
+{
+public:
+    LfpScopedComApartment()
+        : result (
+            CoInitializeEx (
+                nullptr,
+                COINIT_MULTITHREADED))
+    {
+    }
+
+    ~LfpScopedComApartment()
+    {
+        if (SUCCEEDED (result))
+            CoUninitialize();
+    }
+
+    HRESULT getResult() const
+    {
+        return result;
+    }
+
+private:
+    const HRESULT result;
+};
+
 LfpWindowsUiaInvokeResult
 invokeLfpWindowsUiaControl (
     HWND window,
@@ -251,10 +301,10 @@ invokeLfpWindowsUiaControl (
     const std::wstring& valueToSet = {})
 {
     LfpWindowsUiaInvokeResult output;
+    const LfpScopedComApartment
+        comApartment;
     const auto comResult =
-        CoInitializeEx (
-            nullptr,
-            COINIT_MULTITHREADED);
+        comApartment.getResult();
     if (FAILED (comResult))
     {
         output.invokeResult =
@@ -266,7 +316,6 @@ invokeLfpWindowsUiaControl (
         [&] (HRESULT result)
     {
         output.invokeResult = result;
-        CoUninitialize();
         return output;
     };
 
@@ -771,10 +820,16 @@ protected:
     void SetUp() override
     {
         numChannels = 16;
-        tester = std::make_unique<ProcessorTester> (TestSourceNodeBuilder (FakeSourceNodeParams {
-            numChannels,
-            sampleRate,
-            bitVolts }));
+        tester =
+            std::make_unique<
+                ProcessorTester> (
+                TestSourceNodeBuilder (
+                    FakeSourceNodeParams {
+                        numChannels,
+                        sampleRate,
+                        bitVolts }),
+                TestGuiRuntimeLifetime::
+                    process);
 
         processor = tester->createProcessor<LfpViewer::LfpDisplayNode> (Plugin::Processor::SINK);
 
