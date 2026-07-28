@@ -28,6 +28,7 @@
 #include <atomic>
 #include <mutex>
 #include <stdio.h>
+#include <unordered_map>
 
 struct RecordToggleButtonAccessibilityState
 {
@@ -116,8 +117,197 @@ private:
     String status = "Status: idle; Available: 0.00 GB";
 };
 
+struct SyncMonitorAccessibilityState
+{
+    void synchronise (String valueToUse,
+                      String titleToUse,
+                      String descriptionToUse,
+                      String helpToUse,
+                      bool isEnabled)
+    {
+        {
+            const std::lock_guard<std::mutex> lock (textMutex);
+            value = std::move (valueToUse);
+            title = std::move (titleToUse);
+            description = std::move (descriptionToUse);
+            help = std::move (helpToUse);
+        }
+
+        enabled.store (isEnabled);
+    }
+
+    void detach()
+    {
+        enabled.store (false);
+    }
+
+    String getValue() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return value;
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return help;
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String value = "--";
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> enabled { true };
+};
+
 namespace
 {
+struct SyncMonitorAccessibilityRegistry
+{
+    std::mutex mutex;
+    std::unordered_map<
+        SyncMonitor*,
+        std::shared_ptr<SyncMonitorAccessibilityState>>
+        states;
+};
+
+SyncMonitorAccessibilityRegistry&
+getSyncMonitorAccessibilityRegistry()
+{
+    static auto* registry =
+        new SyncMonitorAccessibilityRegistry();
+    return *registry;
+}
+
+std::shared_ptr<SyncMonitorAccessibilityState>
+registerSyncMonitor (SyncMonitor* monitor)
+{
+    auto state =
+        std::make_shared<SyncMonitorAccessibilityState>();
+    auto& registry =
+        getSyncMonitorAccessibilityRegistry();
+    const std::lock_guard<std::mutex> lock (registry.mutex);
+    registry.states[monitor] = state;
+    return state;
+}
+
+std::shared_ptr<SyncMonitorAccessibilityState>
+getSyncMonitorState (SyncMonitor* monitor)
+{
+    auto& registry =
+        getSyncMonitorAccessibilityRegistry();
+    const std::lock_guard<std::mutex> lock (registry.mutex);
+    const auto found = registry.states.find (monitor);
+    return found != registry.states.end()
+               ? found->second
+               : nullptr;
+}
+
+void unregisterSyncMonitor (SyncMonitor* monitor)
+{
+    std::shared_ptr<SyncMonitorAccessibilityState> state;
+    {
+        auto& registry =
+            getSyncMonitorAccessibilityRegistry();
+        const std::lock_guard<std::mutex> lock (registry.mutex);
+        const auto found = registry.states.find (monitor);
+        if (found == registry.states.end())
+            return;
+
+        state = found->second;
+        registry.states.erase (found);
+    }
+
+    state->detach();
+}
+
+class SyncMonitorAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit SyncMonitorAccessibilityValue (
+        std::shared_ptr<SyncMonitorAccessibilityState> stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (const String&) override { jassertfalse; }
+    String getCurrentValueAsString() const override
+    {
+        return state->getValue();
+    }
+
+private:
+    std::shared_ptr<SyncMonitorAccessibilityState> state;
+};
+
+class SyncMonitorAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    SyncMonitorAccessibilityHandler (
+        SyncMonitor& monitor,
+        std::shared_ptr<SyncMonitorAccessibilityState> stateToUse)
+        : AccessibilityHandler (
+              monitor,
+              AccessibilityRole::staticText,
+              AccessibilityActions {},
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<SyncMonitorAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        return AccessibleState().withFocusable();
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    std::shared_ptr<SyncMonitorAccessibilityState> state;
+};
+
 class DiskMonitorAccessibilityValue final
     : public AccessibilityRangedNumericValueInterface
 {
@@ -342,17 +532,29 @@ String getParameterSemanticTitle (
 
 SyncMonitor::SyncMonitor()
 {
+    registerSyncMonitor (this);
     setInterceptsMouseClicks (false, false);
 }
 
 SyncMonitor::~SyncMonitor()
 {
+    unregisterSyncMonitor (this);
 }
 
 void SyncMonitor::setSyncMetric (bool isSynchronized_, float syncMetric_)
 {
     isSynchronized = isSynchronized_;
     metric = syncMetric_;
+
+    if (auto state = getSyncMonitorState (this))
+    {
+        state->synchronise (
+            getAccessibleValue(),
+            getTitle(),
+            getDescription(),
+            getHelpText(),
+            Component::isEnabled());
+    }
 
     if (auto* handler = getAccessibilityHandler())
         handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
@@ -362,23 +564,56 @@ void SyncMonitor::setEnabled (bool state)
 {
     isEnabled = state;
 
+    Component::setEnabled (state);
     repaint();
+}
+
+void SyncMonitor::enablementChanged()
+{
+    if (auto state = getSyncMonitorState (this))
+    {
+        state->synchronise (
+            getAccessibleValue(),
+            getTitle(),
+            getDescription(),
+            getHelpText(),
+            Component::isEnabled());
+    }
 }
 
 void SyncMonitor::setAccessibilityContext (StringRef semanticId,
                                            StringRef title,
                                            StringRef description)
 {
-    applySemanticMetadata (*this, semanticId, title, description);
+    applySemanticMetadata (
+        *this,
+        semanticId,
+        title,
+        description,
+        description);
+
+    if (auto state = getSyncMonitorState (this))
+    {
+        state->synchronise (
+            getAccessibleValue(),
+            getTitle(),
+            getDescription(),
+            getHelpText(),
+            Component::isEnabled());
+    }
 }
 
 std::unique_ptr<AccessibilityHandler>
 SyncMonitor::createAccessibilityHandler()
 {
-    return createReadOnlyTextAccessibilityHandler (
+    auto state = getSyncMonitorState (this);
+    if (state == nullptr)
+        state = registerSyncMonitor (this);
+
+    return std::make_unique<
+        SyncMonitorAccessibilityHandler> (
         *this,
-        [this]
-        { return getAccessibleValue(); });
+        std::move (state));
 }
 
 LastSyncEventMonitor::LastSyncEventMonitor()

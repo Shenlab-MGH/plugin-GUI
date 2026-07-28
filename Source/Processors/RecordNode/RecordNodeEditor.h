@@ -69,6 +69,7 @@ public:
 
 protected:
     virtual String getAccessibleValue() const = 0;
+    void enablementChanged() override;
 
     bool isEnabled = true;
     bool isSynchronized = false;
