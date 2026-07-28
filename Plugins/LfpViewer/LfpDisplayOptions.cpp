@@ -699,6 +699,256 @@ void LfpChannelTypeButton::
     refreshAccessibilityState();
 }
 
+struct LfpViewer::
+    LfpTtlWordAccessibilityState
+{
+    void synchronise (
+        String valueToUse,
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isEnabled)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            value = std::move (
+                valueToUse);
+            title = std::move (
+                titleToUse);
+            description =
+                std::move (
+                    descriptionToUse);
+            help = std::move (
+                helpToUse);
+        }
+        enabled.store (
+            isEnabled);
+    }
+
+    String getValue() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return value;
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String value { "NONE" };
+    String title;
+    String description;
+    String help;
+    std::atomic<bool>
+        enabled { true };
+};
+
+namespace
+{
+class LfpTtlWordAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit LfpTtlWordAccessibilityValue (
+        std::shared_ptr<
+            LfpTtlWordAccessibilityState>
+            stateToUse)
+        : state (
+              std::move (
+                  stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getValue();
+    }
+
+private:
+    std::shared_ptr<
+        LfpTtlWordAccessibilityState>
+        state;
+};
+
+class LfpTtlWordAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    LfpTtlWordAccessibilityHandler (
+        Component& component,
+        std::shared_ptr<
+            LfpTtlWordAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              component,
+              AccessibilityRole::
+                  staticText,
+              AccessibilityActions {},
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      LfpTtlWordAccessibilityValue> (
+                      stateToUse) }),
+          state (
+              std::move (
+                  stateToUse))
+    {
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription()
+        const override
+    {
+        return state
+            ->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    std::shared_ptr<
+        LfpTtlWordAccessibilityState>
+        state;
+};
+} // namespace
+
+class LfpViewer::LfpTtlWordLabel final
+    : public Label
+{
+public:
+    LfpTtlWordLabel()
+        : Label (
+              "TTL word",
+              "NONE"),
+          accessibilityState (
+              std::make_shared<
+                  LfpTtlWordAccessibilityState>())
+    {
+        refreshAccessibilityState();
+    }
+
+    std::unique_ptr<
+        AccessibilityHandler>
+    createAccessibilityHandler()
+        override
+    {
+        return std::make_unique<
+            LfpTtlWordAccessibilityHandler> (
+            *this,
+            accessibilityState);
+    }
+
+    void publishValue (
+        String value)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        const auto changed =
+            getText() != value;
+        if (changed)
+        {
+            Label::setText (
+                value,
+                dontSendNotification);
+        }
+        refreshAccessibilityState();
+        if (changed)
+        {
+            if (auto* handler =
+                    getAccessibilityHandler())
+            {
+                handler
+                    ->notifyAccessibilityEvent (
+                        AccessibilityEvent::
+                            valueChanged);
+            }
+        }
+    }
+
+    void refreshAccessibilityState()
+    {
+        auto title = getTitle();
+        if (title.isEmpty())
+            title = getName();
+        auto help = getHelpText();
+        if (help.isEmpty())
+            help = getDescription();
+
+        accessibilityState
+            ->synchronise (
+                getText(),
+                std::move (title),
+                getDescription(),
+                std::move (help),
+                Component::isEnabled());
+    }
+
+    void enablementChanged() override
+    {
+        Label::enablementChanged();
+        refreshAccessibilityState();
+    }
+
+private:
+    std::shared_ptr<
+        LfpTtlWordAccessibilityState>
+        accessibilityState;
+};
+
+LfpDisplayOptions::
+    ~LfpDisplayOptions() =
+        default;
+
 LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplitter* canvasSplit_, LfpTimescale* timescale_, LfpDisplay* lfpDisplay_, LfpDisplayNode* processor_)
     : canvas (canvas_),
       canvasSplit (canvasSplit_),
@@ -707,8 +957,7 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
       processor (processor_),
       selectedChannelType (ContinuousChannel::Type::ELECTRODE),
       labelColour (100, 100, 100),
-      medianOffsetOnForSpikeRaster (false),
-      ttlWordString ("NONE")
+      medianOffsetOnForSpikeRaster (false)
 {
     setBufferedToImage (true);
 
@@ -1024,13 +1273,33 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     mainOptions->addAndMakeVisible (overlayEventsLabel.get());
 
     // TTL Word
-    ttlWordLabel = std::make_unique<Label> ("TTL word");
+    ttlWordLabel =
+        std::make_unique<
+            LfpTtlWordLabel>();
+    const auto ttlWordDescription =
+        "Latest non-zero 64-bit TTL word received while its stream was selected in LFP display "
+        + String (displayNumber)
+        + ", shown as an unsigned decimal value. NONE means no non-zero word has been received by this display pane.";
+    applyLfpDisplayControlMetadata (
+        *ttlWordLabel,
+        *processor,
+        displayNumber,
+        "ttl_word",
+        "LFP display "
+            + String (
+                displayNumber)
+            + " latest non-zero TTL word",
+        ttlWordDescription);
+    ttlWordLabel
+        ->refreshAccessibilityState();
     ttlWordLabel->setColour (Label::outlineColourId, findColour (ThemeColours::outline));
     mainOptions->addAndMakeVisible (ttlWordLabel.get());
     startTimer (250);
 
     ttlWordNameLabel = std::make_unique<Label> ("TTL word name", "TTL Word:");
     ttlWordNameLabel->setFont (labelFont);
+    ttlWordNameLabel->setAccessible (
+        false);
     ttlWordNameLabel->attachToComponent (ttlWordLabel.get(), false);
     mainOptions->addAndMakeVisible (ttlWordNameLabel.get());
 
@@ -1435,7 +1704,16 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
 
 void LfpDisplayOptions::timerCallback()
 {
-    ttlWordLabel->setText (ttlWordString, dontSendNotification);
+    ttlWordLabel
+        ->publishValue (
+            hasLatestTtlWord
+                    .load (
+                        std::memory_order_acquire)
+                ? String (
+                      latestTtlWord
+                          .load (
+                              std::memory_order_acquire))
+                : String ("NONE"));
 }
 
 void LfpDisplayOptions::resized()
@@ -1864,9 +2142,18 @@ void LfpDisplayOptions::setShowChannelNumbers (bool state)
     }
 }
 
-void LfpDisplayOptions::setTTLWord (String word)
+void LfpDisplayOptions::setTTLWord (
+    uint64 word)
 {
-    ttlWordString = word;
+    if (word == 0)
+        return;
+
+    latestTtlWord.store (
+        word,
+        std::memory_order_release);
+    hasLatestTtlWord.store (
+        true,
+        std::memory_order_release);
 }
 
 int LfpDisplayOptions::

@@ -27,6 +27,7 @@
 #include <VisualizerWindowHeaders.h>
 #include <EditorHeaders.h>
 
+#include <atomic>
 #include <array>
 #include <vector>
 
@@ -44,6 +45,8 @@ TESTABLE int normaliseLfpColourGroupingId (
     int numberOfChoices);
 
 struct LfpOptionButtonAccessibilityState;
+struct LfpTtlWordAccessibilityState;
+class LfpTtlWordLabel;
 
 /** A pause control with worker-safe UI Automation state and actions. */
 class TESTABLE LfpPauseButton : public UtilityButton
@@ -119,7 +122,7 @@ public:
                        LfpDisplayNode*);
 
     /** Destructor */
-    ~LfpDisplayOptions() {}
+    ~LfpDisplayOptions();
 
     /** Paint background*/
     void paint (Graphics& g);
@@ -208,8 +211,8 @@ public:
     /** Sets whether channel numbers should be shown instead of names */
     void setShowChannelNumbers (bool);
 
-    /** Sets the latest ttl word value */
-    void setTTLWord (String word);
+    /** Publishes a non-zero TTL word from the acquisition thread. */
+    void setTTLWord (uint64 word);
 
     /** Returns the visible event-overlay lines as the official 8-bit mask. */
     int getEventOverlayMask() const;
@@ -273,7 +276,10 @@ private:
 
     Colour labelColour;
 
-    String ttlWordString;
+    std::atomic<uint64>
+        latestTtlWord { 0 };
+    std::atomic<bool>
+        hasLatestTtlWord { false };
 
     // Main options
     std::unique_ptr<Component> mainOptions;
@@ -301,7 +307,9 @@ private:
     OwnedArray<EventDisplayInterface> eventDisplayInterfaces;
     std::unique_ptr<Label> overlayEventsLabel;
 
-    std::unique_ptr<Label> ttlWordLabel;
+    std::unique_ptr<
+        LfpTtlWordLabel>
+        ttlWordLabel;
     std::unique_ptr<Label> ttlWordNameLabel;
 
     std::unique_ptr<LfpPauseButton> pauseButton;

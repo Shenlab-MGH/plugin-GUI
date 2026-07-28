@@ -280,7 +280,8 @@ void LfpDisplayNode::handleTTLEvent (TTLEventPtr event)
         if (display->selectedStreamId == eventStreamId)
         {
             if (event->getWord() != 0)
-                display->options->setTTLWord (String (event->getWord()));
+                display->options->setTTLWord (
+                    event->getWord());
         }
     }
 }

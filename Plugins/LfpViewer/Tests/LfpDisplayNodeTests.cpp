@@ -35,6 +35,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <limits>
 #include <thread>
 
 #if JUCE_WINDOWS
@@ -231,6 +232,7 @@ enum class LfpWindowsUiaAction
     expand,
     collapse,
     queryExpansion,
+    queryValue,
     setValue
 };
 
@@ -547,6 +549,16 @@ invokeLfpWindowsUiaControl (
                 currentValue);
         }
         return finish (result);
+    }
+
+    if (action
+        == LfpWindowsUiaAction::
+               queryValue)
+    {
+        return finish (
+            valuePattern != nullptr
+                ? S_OK
+                : E_NOINTERFACE);
     }
 
     if (action
@@ -2702,6 +2714,551 @@ TEST_F (LfpDisplayNodeTests,
         pane2Options
             ->getEventOverlayMask(),
         0xff);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ExposesLatestNonzeroTtlWordForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".ttl_word";
+        auto* component =
+            findLfpDescendantById (
+                *canvas,
+                id);
+        ASSERT_NE (
+            component,
+            nullptr)
+            << id;
+        auto* handler =
+            component
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        const auto description =
+            "Latest non-zero 64-bit TTL word received while its stream was selected in LFP display "
+            + String (displayNumber)
+            + ", shown as an unsigned decimal value. NONE means no non-zero word has been received by this display pane.";
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                staticText);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (
+                    displayNumber)
+                + " latest non-zero TTL word");
+        EXPECT_EQ (
+            handler
+                ->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        toggle));
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_TRUE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "NONE");
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *component)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        TtlWordPublishingIsThreadSafeAndPaneLocal)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    auto* pane1Label =
+        dynamic_cast<Label*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "1.ttl_word"));
+    auto* pane2Label =
+        dynamic_cast<Label*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "2.ttl_word"));
+    ASSERT_NE (
+        pane1Label,
+        nullptr);
+    ASSERT_NE (
+        pane2Label,
+        nullptr);
+    auto* pane1Options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *pane1Label);
+    ASSERT_NE (
+        pane1Options,
+        nullptr);
+    auto* pane1Handler =
+        pane1Label
+            ->getAccessibilityHandler();
+    auto* pane2Handler =
+        pane2Label
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        pane1Handler,
+        nullptr);
+    ASSERT_NE (
+        pane2Handler,
+        nullptr);
+    auto* pane1Value =
+        pane1Handler
+            ->getValueInterface();
+    ASSERT_NE (
+        pane1Value,
+        nullptr);
+
+    std::atomic<bool>
+        writerReturned { false };
+    std::atomic<bool>
+        readerReturned { false };
+    std::atomic<bool>
+        startWorkers { false };
+    std::atomic<bool>
+        publishingFinished { false };
+    std::atomic<bool>
+        readerSawInvalidValue {
+            false
+        };
+    std::atomic<bool>
+        readerSawPublishedValue {
+            false
+        };
+    std::thread writer (
+        [&]
+        {
+            while (! startWorkers.load())
+                std::this_thread::yield();
+
+            for (uint64 word = 1;
+                 word <= 10000;
+                 ++word)
+            {
+                pane1Options
+                    ->setTTLWord (
+                        word);
+            }
+            pane1Options
+                ->setTTLWord (
+                    0);
+            writerReturned.store (
+                true);
+        });
+    std::thread reader (
+        [&]
+        {
+            while (! startWorkers.load())
+                std::this_thread::yield();
+
+            do
+            {
+                const auto value =
+                    pane1Value
+                        ->getCurrentValueAsString();
+                if (value != "NONE")
+                {
+                    readerSawPublishedValue
+                        .store (true);
+                    if (! value
+                             .containsOnly (
+                                 "0123456789"))
+                    {
+                        readerSawInvalidValue
+                            .store (
+                                true);
+                    }
+                }
+            }
+            while (! publishingFinished
+                          .load());
+            readerReturned.store (
+                true);
+        });
+    startWorkers.store (true);
+    while (! writerReturned.load())
+    {
+        pane1Options
+            ->timerCallback();
+        std::this_thread::yield();
+    }
+    pane1Options
+        ->timerCallback();
+    publishingFinished.store (
+        true);
+    writer.join();
+    reader.join();
+    EXPECT_TRUE (
+        writerReturned.load());
+    EXPECT_TRUE (
+        readerReturned.load());
+    EXPECT_FALSE (
+        readerSawInvalidValue
+            .load());
+    EXPECT_TRUE (
+        readerSawPublishedValue
+            .load());
+    EXPECT_EQ (
+        pane1Label->getText(),
+        "10000");
+    EXPECT_EQ (
+        pane1Value
+            ->getCurrentValueAsString(),
+        "10000");
+    EXPECT_EQ (
+        pane1Handler->getTitle(),
+        "LFP display 1 latest non-zero TTL word");
+    EXPECT_EQ (
+        pane2Label->getText(),
+        "NONE");
+    EXPECT_EQ (
+        pane2Handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "NONE");
+
+    pane1Options
+        ->setTTLWord (
+            0);
+    pane1Options
+        ->timerCallback();
+    EXPECT_EQ (
+        pane1Value
+            ->getCurrentValueAsString(),
+        "10000");
+
+    pane1Options
+        ->setTTLWord (
+            std::numeric_limits<
+                uint64>::max());
+    pane1Options
+        ->timerCallback();
+    EXPECT_EQ (
+        pane1Label->getText(),
+        "18446744073709551615");
+    EXPECT_EQ (
+        pane1Value
+            ->getCurrentValueAsString(),
+        "18446744073709551615");
+    EXPECT_EQ (
+        pane1Handler->getTitle(),
+        "LFP display 1 latest non-zero TTL word");
+}
+
+TEST_F (LfpDisplayNodeTests,
+        TtlWordFlowsThroughSerializedEventsAndRemainsTransient)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (
+        1200,
+        800);
+    canvas->addToDesktop (
+        0);
+    canvas->setVisible (
+        true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    std::array<Label*, 3>
+        labels {};
+    std::array<
+        LfpViewer::
+            LfpDisplayOptions*,
+        3>
+        options {};
+    std::array<
+        LfpViewer::
+            LfpDisplaySplitter*,
+        3>
+        splitters {};
+    for (int paneIndex = 0;
+         paneIndex < 3;
+         ++paneIndex)
+    {
+        const auto paneNumber =
+            paneIndex + 1;
+        labels[paneIndex] =
+            dynamic_cast<Label*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + String (
+                            paneNumber)
+                        + ".ttl_word"));
+        ASSERT_NE (
+            labels[paneIndex],
+            nullptr);
+        options[paneIndex] =
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *labels[paneIndex]);
+        ASSERT_NE (
+            options[paneIndex],
+            nullptr);
+
+        auto* selector =
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + String (
+                        paneNumber)
+                    + ".stream");
+        ASSERT_NE (
+            selector,
+            nullptr);
+        splitters[paneIndex] =
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplaySplitter> (
+                *selector);
+        ASSERT_NE (
+            splitters[paneIndex],
+            nullptr);
+    }
+    const auto streamId =
+        processor
+            ->getDataStreams()[0]
+            ->getStreamId();
+    const auto* sourceStream =
+        tester
+            ->getSourceNodeDataStream (
+                streamId);
+    ASSERT_NE (
+        sourceStream,
+        nullptr);
+    const auto eventChannels =
+        sourceStream
+            ->getEventChannels();
+    ASSERT_GE (
+        eventChannels.size(),
+        1);
+    auto processEvent =
+        [&] (TTLEventPtr event)
+    {
+        auto input =
+            createBuffer (
+                0.0f,
+                1.0f,
+                numChannels,
+                8);
+        tester->processBlock (
+            processor,
+            input,
+            event.get());
+        for (auto* paneOptions :
+             options)
+        {
+            paneOptions
+                ->timerCallback();
+        }
+    };
+
+    splitters[1]
+        ->selectedStreamId = 0;
+    auto highBitEvent =
+        TTLEvent::
+            createTTLEvent (
+                eventChannels[0],
+                0,
+                uint8 (63),
+                true);
+    processEvent (
+        highBitEvent);
+
+    EXPECT_EQ (
+        labels[0]->getText(),
+        "9223372036854775808");
+    EXPECT_EQ (
+        labels[1]->getText(),
+        "NONE");
+    EXPECT_EQ (
+        labels[2]->getText(),
+        "9223372036854775808");
+
+    splitters[1]
+        ->selectedStreamId =
+        streamId;
+    for (auto* paneOptions :
+         options)
+    {
+        paneOptions
+            ->timerCallback();
+    }
+    EXPECT_EQ (
+        labels[1]->getText(),
+        "NONE");
+
+    XmlElement before (
+        "ROOT");
+    canvas
+        ->saveCustomParametersToXml (
+            &before);
+    auto lowBitEvent =
+        TTLEvent::
+            createTTLEvent (
+                eventChannels[0],
+                8,
+                uint8 (0),
+                true);
+    processEvent (
+        lowBitEvent);
+    for (auto* label :
+         labels)
+    {
+        EXPECT_EQ (
+            label->getText(),
+            "9223372036854775809");
+        auto* handler =
+            label
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "9223372036854775809");
+    }
+
+    auto clearHighBitEvent =
+        TTLEvent::
+            createTTLEvent (
+                eventChannels[0],
+                16,
+                uint8 (63),
+                false);
+    processEvent (
+        clearHighBitEvent);
+    for (auto* label :
+         labels)
+    {
+        EXPECT_EQ (
+            label->getText(),
+            "1");
+    }
+
+    auto zeroWordEvent =
+        TTLEvent::
+            createTTLEvent (
+                eventChannels[0],
+                24,
+                uint8 (0),
+                false);
+    ASSERT_EQ (
+        zeroWordEvent
+            ->getWord(),
+        0);
+    processEvent (
+        zeroWordEvent);
+    for (auto* label :
+         labels)
+    {
+        EXPECT_EQ (
+            label->getText(),
+            "1");
+    }
+
+    XmlElement after (
+        "ROOT");
+    canvas
+        ->saveCustomParametersToXml (
+            &after);
+    EXPECT_TRUE (
+        before
+            .isEquivalentTo (
+                &after,
+                true));
 }
 
 TEST_F (LfpDisplayNodeTests,
@@ -5529,6 +6086,177 @@ TEST_F (LfpDisplayNodeTests,
             L"8");
     EXPECT_EQ (
         hiddenResult.invokeResult,
+        E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerReadsLatestNonzeroTtlWord)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.ttl_word";
+    auto* label =
+        dynamic_cast<Label*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        label,
+        nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *label);
+    ASSERT_NE (
+        options,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto runAction =
+        [&] (
+            StringRef targetId,
+            LfpWindowsUiaAction action,
+            StringRef value = {})
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (
+                                targetId)
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (value)
+                                .toWideCharPointer()));
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return actionResult;
+    };
+
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_TextControlTypeId);
+    EXPECT_EQ (
+        initialResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 latest non-zero TTL word");
+    EXPECT_EQ (
+        initialResult.help,
+        L"Latest non-zero 64-bit TTL word received while its stream was selected in LFP display 1, shown as an unsigned decimal value. NONE means no non-zero word has been received by this display pane.");
+    EXPECT_TRUE (
+        initialResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult.valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.value,
+        L"NONE");
+    EXPECT_FALSE (
+        initialResult
+            .invokePatternAvailable);
+    EXPECT_FALSE (
+        initialResult
+            .togglePatternAvailable);
+
+    options->setTTLWord (
+        4294967297ULL);
+    options->timerCallback();
+    const auto updatedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        updatedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        updatedResult.name,
+        initialResult.name);
+    EXPECT_EQ (
+        updatedResult.value,
+        L"4294967297");
+
+    const auto writeResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            "7");
+    EXPECT_EQ (
+        writeResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_INVALIDOPERATION));
+    EXPECT_EQ (
+        label->getText(),
+        "4294967297");
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix
+                + "2.ttl_word",
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
         E_FAIL);
 }
 
