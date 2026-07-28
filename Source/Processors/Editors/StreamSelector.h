@@ -49,6 +49,7 @@ class ExpanderButton;
 class ExpandedTableComponent;
 
 class StreamSelectorTable;
+class StreamSelectorAccessibilityValueState;
 
 /**
 *   TableListBoxModel for selecting streams
@@ -164,6 +165,10 @@ public:
     /** Returns a pointer to the currently viewed stream*/
     const DataStream* getCurrentStream();
 
+    /** Exposes the currently viewed stream as a read-only UIA value. */
+    std::unique_ptr<AccessibilityHandler>
+        createAccessibilityHandler() override;
+
     /** Returns true if a given stream is enabled*/
     bool checkStream (const DataStream* stream);
 
@@ -230,6 +235,9 @@ private:
     /** Applies a user-originated stream selection to the processor editor. */
     void selectStreamFromRow (int rowNumber);
 
+    /** Publishes the current stream after GUI or model selection changes. */
+    void publishCurrentStreamAccessibilityValue();
+
     /** Creates a new table view */
     TableListBox* createTableView (bool expanded = false);
 
@@ -238,6 +246,9 @@ private:
     std::unique_ptr<ExpanderButton> expanderButton;
 
     ExpandedTableComponent* expandedTableComponent = nullptr;
+
+    std::shared_ptr<StreamSelectorAccessibilityValueState>
+        accessibilityValueState;
 
     Array<const DataStream*> streams;
 

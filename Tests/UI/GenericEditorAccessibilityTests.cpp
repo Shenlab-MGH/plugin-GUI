@@ -1188,6 +1188,115 @@ TEST (GenericEditorAccessibilityTests, ExposesUniqueNamedStreamRows)
     EXPECT_EQ (secondHandler->getTitle(), "Probe AP (source 102)");
 }
 
+TEST (GenericEditorAccessibilityTests,
+      PublishesCurrentStreamAsReadOnlyValue)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+    MessageManagerLock lock;
+    TestStreamProcessor processor;
+    processor.setNodeId (100);
+    InspectableGenericEditor editor (&processor);
+    editor.setVisible (true);
+    editor.addToDesktop (0);
+    auto& selector = editor.getStreamSelector();
+    TestDataStream first ({ "Probe AP",
+                            "Neuropixels action-potential stream",
+                            "probe.ap",
+                            30000.0f,
+                            true },
+                          101);
+    TestDataStream second ({ "Probe LFP",
+                             "Neuropixels local-field-potential stream",
+                             "probe.lfp",
+                             2500.0f,
+                             true },
+                           101);
+
+    ASSERT_TRUE (selector.isShowing());
+
+    auto* handler =
+        selector.getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        handler->getValueInterface()
+            ->isReadOnly());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "No data streams");
+
+    selector.add (&first);
+    selector.add (&second);
+    selector.finishedUpdate();
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Probe AP (source 101)");
+
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    auto* secondRow =
+        table->getComponentForRowNumber (1);
+    ASSERT_NE (secondRow, nullptr);
+    auto rowHandler =
+        secondRow->createAccessibilityHandler();
+    ASSERT_NE (rowHandler, nullptr);
+
+    EXPECT_TRUE (
+        rowHandler->getActions().invoke (
+            AccessibilityActionType::focus));
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Probe LFP (source 101)");
+
+    selector.setViewedIndex (0);
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Probe AP (source 101)");
+
+    selector.beginUpdate();
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Probe AP (source 101)");
+    String workerValue;
+    std::thread worker (
+        [&selector,
+         &workerValue]
+        {
+            auto workerHandler =
+                selector.createAccessibilityHandler();
+            ASSERT_NE (
+                workerHandler,
+                nullptr);
+            ASSERT_NE (
+                workerHandler->getValueInterface(),
+                nullptr);
+            workerValue =
+                workerHandler->getValueInterface()
+                    ->getCurrentValueAsString();
+        });
+    worker.join();
+    EXPECT_EQ (
+        workerValue,
+        "Probe AP (source 101)");
+    selector.add (&second);
+    selector.finishedUpdate();
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Probe LFP (source 101)");
+}
+
 TEST (GenericEditorAccessibilityTests, SelectingStreamRowUpdatesEditor)
 {
     MessageManager::getInstance();

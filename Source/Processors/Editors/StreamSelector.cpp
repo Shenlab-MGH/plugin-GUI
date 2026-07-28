@@ -33,8 +33,138 @@
 #include "../Settings/DataStream.h"
 #include "../../UI/SemanticComponent.h"
 
+#include <mutex>
+
+class StreamSelectorAccessibilityValueState
+{
+public:
+    explicit StreamSelectorAccessibilityValueState (
+        String initialValue)
+        : value (std::move (
+              initialValue))
+    {
+    }
+
+    String get() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (mutex);
+        return value;
+    }
+
+    bool set (
+        String newValue)
+    {
+        const std::lock_guard<std::mutex>
+            lock (mutex);
+        if (value == newValue)
+            return false;
+
+        value = std::move (
+            newValue);
+        return true;
+    }
+
+private:
+    mutable std::mutex mutex;
+    String value;
+};
+
 namespace
 {
+class StreamSelectorAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit StreamSelectorAccessibilityValue (
+        std::shared_ptr<
+            StreamSelectorAccessibilityValueState>
+            stateToUse)
+        : state (std::move (
+              stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->get();
+    }
+
+private:
+    std::shared_ptr<
+        StreamSelectorAccessibilityValueState>
+        state;
+};
+
+class StreamSelectorAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    StreamSelectorAccessibilityHandler (
+        StreamSelectorTable& selector,
+        std::shared_ptr<
+            StreamSelectorAccessibilityValueState>
+            stateToUse)
+        : AccessibilityHandler (
+              selector,
+              AccessibilityRole::group,
+              AccessibilityActions {},
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      StreamSelectorAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (
+              stateToUse))
+    {
+    }
+
+    void setCurrentValue (
+        String value)
+    {
+        if (! state->set (
+                std::move (
+                    value)))
+        {
+            return;
+        }
+
+        notifyAccessibilityEvent (
+            AccessibilityEvent::valueChanged);
+    }
+
+private:
+    std::shared_ptr<
+        StreamSelectorAccessibilityValueState>
+        state;
+};
+
+String getCurrentStreamAccessibilityValue (
+    StreamSelectorTable& selector)
+{
+    const auto* stream =
+        selector.getCurrentStream();
+    if (stream == nullptr)
+        return "No data streams";
+
+    return stream->getName()
+           + " (source "
+           + String (
+               stream->getSourceNodeId())
+           + ")";
+}
+
 String getStreamSelectorSemanticId (const GenericEditor& editor)
 {
     return createProcessorControlSemanticId (
@@ -376,9 +506,13 @@ void StreamTableModel::listWasScrolled()
 }
 
 StreamSelectorTable::StreamSelectorTable (GenericEditor* ed_) : editor (ed_),
+                                                                viewedStreamIndex (0),
+                                                                accessibilityValueState (
+                                                                    std::make_shared<
+                                                                        StreamSelectorAccessibilityValueState> (
+                                                                        "No data streams")),
                                                                 streamInfoViewWidth (130),
-                                                                streamInfoViewHeight (80),
-                                                                viewedStreamIndex (0)
+                                                                streamInfoViewHeight (80)
 {
     isRecordNode = editor->getProcessor()->isRecordNode();
     const auto semanticId = getStreamSelectorSemanticId (*editor);
@@ -746,6 +880,7 @@ void StreamSelectorTable::selectStreamFromRow (int rowNumber)
             streams[rowNumber]->getStreamId());
 
     tableModel->table->repaint();
+    publishCurrentStreamAccessibilityValue();
 }
 
 void StreamSelectorTable::setViewedIndex (int i)
@@ -754,7 +889,29 @@ void StreamSelectorTable::setViewedIndex (int i)
     {
         viewedStreamIndex = i;
         streamTable->selectRow (viewedStreamIndex);
+        publishCurrentStreamAccessibilityValue();
     }
+}
+
+void StreamSelectorTable::
+    publishCurrentStreamAccessibilityValue()
+{
+    const auto value =
+        getCurrentStreamAccessibilityValue (
+            *this);
+
+    if (auto* handler =
+            dynamic_cast<
+                StreamSelectorAccessibilityHandler*> (
+                getAccessibilityHandler()))
+    {
+        handler->setCurrentValue (
+            value);
+        return;
+    }
+
+    accessibilityValueState->set (
+        value);
 }
 
 void StreamSelectorTable::paint (Graphics& g)
@@ -772,10 +929,21 @@ void StreamSelectorTable::paint (Graphics& g)
 
 const DataStream* StreamSelectorTable::getCurrentStream()
 {
-    if (streams.size() > 0)
+    if (isPositiveAndBelow (
+            viewedStreamIndex,
+            streams.size()))
         return streams[viewedStreamIndex];
-    else
-        return nullptr;
+
+    return nullptr;
+}
+
+std::unique_ptr<AccessibilityHandler>
+StreamSelectorTable::createAccessibilityHandler()
+{
+    return std::make_unique<
+        StreamSelectorAccessibilityHandler> (
+        *this,
+        accessibilityValueState);
 }
 
 void StreamSelectorTable::add (const DataStream* stream)
@@ -814,6 +982,7 @@ uint16 StreamSelectorTable::finishedUpdate()
         expanderButton->setEnabled (false);
         tableModel->table = streamTable.get();
         tableModel->update (newStreams);
+        publishCurrentStreamAccessibilityValue();
         return 0;
     }
     else
@@ -826,12 +995,14 @@ uint16 StreamSelectorTable::finishedUpdate()
         if (viewedStreamIndex < streams.size())
         {
             streamTable->selectRow (viewedStreamIndex);
+            publishCurrentStreamAccessibilityValue();
             return streams[viewedStreamIndex]->getStreamId();
         }
         else
         {
             viewedStreamIndex = streams.size() - 1;
             streamTable->selectRow (viewedStreamIndex);
+            publishCurrentStreamAccessibilityValue();
             return streams[viewedStreamIndex]->getStreamId();
         }
     }
@@ -844,6 +1015,8 @@ void StreamSelectorTable::remove (const DataStream* stream)
 
     if (streamStates.count (stream->getStreamId()) > 0)
         streamStates.erase (stream->getStreamId());
+
+    publishCurrentStreamAccessibilityValue();
 }
 
 // StreamEnableButton::StreamEnableButton (const String& name) : Button (name),
