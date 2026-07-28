@@ -140,7 +140,7 @@ public:
     float getRange();
 
     /** Sets whether this channel display should be inverted */
-    TESTABLE void setInputInverted (bool);
+    void setInputInverted (bool);
 
     /** Returns whether this channel display is inverted */
     TESTABLE bool getInputInverted();
