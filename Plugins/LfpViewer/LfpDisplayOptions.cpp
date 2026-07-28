@@ -45,6 +45,18 @@
 
 using namespace LfpViewer;
 
+int LfpViewer::
+    normaliseLfpColourGroupingId (
+        int requestedId,
+        int numberOfChoices)
+{
+    return requestedId > 0
+               && requestedId
+                      <= numberOfChoices
+               ? requestedId
+               : 1;
+}
+
 struct LfpViewer::
     LfpOptionButtonAccessibilityState
 {
@@ -1043,12 +1055,67 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     colourGroupings.add ("16");
     colourGroupings.add ("By Shank"); // special case for shank grouping
 
-    colourGroupingSelection = std::make_unique<ComboBox> ("Colour Grouping");
+    colourGroupingSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    colourGroupingSelection->setName (
+        "Colour grouping");
+    const auto colourGroupingDescription =
+        "Choose how LFP display "
+        + String (displayNumber)
+        + " assigns display colours: 1, 2, 4, 8, or 16 groups that many adjacent channels, while By Shank uses channel group metadata with a legacy depth-based fallback. This changes display colours only; acquisition and recording are unaffected.";
+    applyLfpDisplayParameterMetadata (
+        *colourGroupingSelection,
+        *processor,
+        displayNumber,
+        "colour_grouping",
+        "LFP display "
+            + String (displayNumber)
+            + " colour grouping",
+        colourGroupingDescription);
+    colourGroupingSelection
+        ->setEditableText (
+            false);
+    colourGroupingSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
     for (int i = 0; i < colourGroupings.size(); i++)
         colourGroupingSelection->addItem (colourGroupings[i], i + 1);
-    colourGroupingSelection->setSelectedId (1, sendNotification);
+    const std::array<String, 6>
+        colourGroupingChoiceIds {
+            "1",
+            "2",
+            "4",
+            "8",
+            "16",
+            "by_shank"
+        };
+    int colourGroupingChoiceIndex =
+        0;
+    for (PopupMenu::MenuItemIterator
+             iterator (
+                 *colourGroupingSelection
+                      ->getRootMenu(),
+                 false);
+         iterator.next();)
+    {
+        iterator
+            .getItem()
+            .accessibilityId =
+            colourGroupingSelection
+                ->getComponentID()
+            + ".choice."
+            + colourGroupingChoiceIds
+                  [colourGroupingChoiceIndex++];
+    }
+    colourGroupingSelection
+        ->setSelectedId (
+            1,
+            dontSendNotification);
     colourGroupingSelection->addListener (this);
     mainOptions->addAndMakeVisible (colourGroupingSelection.get());
+    colourGroupingSelection
+        ->synchroniseAccessibilityState();
 
     colourGroupingLabel = std::make_unique<Label> ("ColourGroupingLabel", "Colour grouping");
     colourGroupingLabel->setFont (labelFont);
@@ -1874,6 +1941,15 @@ void LfpDisplayOptions::setTimebaseAndSelectionText (float timebase)
 
 void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
 {
+    if (cb
+        == colourGroupingSelection
+               .get())
+    {
+        setColourGroupingSelection (
+            cb->getSelectedId());
+        return;
+    }
+
     if (canvasSplit->getNumChannels() == 0)
         return;
 
@@ -2165,13 +2241,6 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         lfpDisplay->setChannelHeight (lfpDisplay->getChannelHeight());
         canvasSplit->redraw();
     }
-    else if (cb == colourGroupingSelection.get())
-    {
-        // set colour grouping here
-        String selectedGrouping = colourGroupings[cb->getSelectedId() - 1];
-        lfpDisplay->setColourGrouping (selectedGrouping); // so that channel colours get re-assigned
-        canvasSplit->redraw();
-    }
     else if (cb == triggerSourceSelection.get())
     {
         canvasSplit->setTriggerChannel (cb->getSelectedId() - 2);
@@ -2210,6 +2279,32 @@ ContinuousChannel::Type LfpDisplayOptions::getSelectedType()
 bool LfpDisplayOptions::isAuxAutoScaleEnabled()
 {
     return selectedVoltageRangeValues[ContinuousChannel::Type::AUX].equalsIgnoreCase ("Auto");
+}
+
+void LfpDisplayOptions::
+    setColourGroupingSelection (
+        int itemId)
+{
+    const auto validId =
+        normaliseLfpColourGroupingId (
+            itemId,
+            colourGroupings.size());
+    colourGroupingSelection
+        ->setSelectedId (
+            validId,
+            dontSendNotification);
+    lfpDisplay
+        ->setColourGrouping (
+            colourGroupings[
+                validId - 1]);
+    if (canvasSplit
+            ->getNumChannels()
+        > 0)
+    {
+        canvasSplit->redraw();
+    }
+    colourGroupingSelection
+        ->synchroniseAccessibilityState();
 }
 
 void LfpDisplayOptions::setSelectedType (ContinuousChannel::Type type, bool toggleButton)
@@ -2301,7 +2396,8 @@ void LfpDisplayOptions::saveParameters (XmlElement* xml)
     xmlNode->setAttribute ("Timebase", timebaseSelection->getText());
     xmlNode->setAttribute ("Spread", spreadSelection->getText());
     xmlNode->setAttribute ("colourScheme", colourSchemeOptionSelection->getSelectedId());
-    xmlNode->setAttribute ("colourGrouping", colourGroupingSelection->getSelectedId());
+    saveColourGroupingParameter (
+        *xmlNode);
 
     xmlNode->setAttribute ("spikeRaster", spikeRasterSelection->getText());
     xmlNode->setAttribute ("clipWarning", clipWarningSelection->getSelectedId());
@@ -2351,6 +2447,26 @@ void LfpDisplayOptions::saveParameters (XmlElement* xml)
 
     xmlNode->setAttribute ("ScrollX", canvasSplit->viewport->getViewPositionX());
     xmlNode->setAttribute ("ScrollY", canvasSplit->viewport->getViewPositionY());
+}
+
+void LfpDisplayOptions::
+    saveColourGroupingParameter (
+        XmlElement& xmlNode) const
+{
+    xmlNode.setAttribute (
+        "colourGrouping",
+        colourGroupingSelection
+            ->getSelectedId());
+}
+
+void LfpDisplayOptions::
+    restoreColourGroupingParameter (
+        const XmlElement& xmlNode)
+{
+    setColourGroupingSelection (
+        xmlNode.getIntAttribute (
+            "colourGrouping",
+            1));
 }
 
 void LfpDisplayOptions::loadParameters (XmlElement* xml)
@@ -2435,8 +2551,8 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             colourSchemeOptionSelection->setSelectedId (xmlNode->getIntAttribute ("colourScheme"), dontSendNotification);
 
             // COLOUR GROUPING
-            colourGroupingSelection->setSelectedId (xmlNode->getIntAttribute ("colourGrouping", 1), dontSendNotification);
-            lfpDisplay->setColourGrouping (colourGroupings[colourGroupingSelection->getSelectedId() - 1]);
+            restoreColourGroupingParameter (
+                *xmlNode);
 
             // SPIKE RASTER
             String spikeRasterThresh = xmlNode->getStringAttribute ("spikeRaster", "OFF");

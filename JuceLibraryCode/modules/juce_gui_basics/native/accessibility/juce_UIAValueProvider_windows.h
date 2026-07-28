@@ -62,9 +62,48 @@ public:
         if (valueInterface->isReadOnly())
             return (HRESULT) UIA_E_INVALIDOPERATION;
 
-        valueInterface
-            ->setValueAsString (
-                String (val));
+        const String requestedValue (
+            val);
+        if (auto* validatedWriter =
+                dynamic_cast<
+                    AccessibilityValueStringWriter*> (
+                    valueInterface))
+        {
+            if (! validatedWriter
+                      ->setValueAsStringIfSupported (
+                          requestedValue))
+            {
+                if (! isElementValid())
+                    return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+
+                const auto& rejectedHandler =
+                    getHandler();
+                if (! rejectedHandler.isEnabled())
+                    return (HRESULT) UIA_E_ELEMENTNOTENABLED;
+
+                auto* rejectedValueInterface =
+                    rejectedHandler
+                        .getValueInterface();
+                if (rejectedValueInterface
+                    == nullptr)
+                {
+                    return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+                }
+                if (rejectedValueInterface
+                        ->isReadOnly())
+                {
+                    return (HRESULT) UIA_E_INVALIDOPERATION;
+                }
+
+                return E_INVALIDARG;
+            }
+        }
+        else
+        {
+            valueInterface
+                ->setValueAsString (
+                    requestedValue);
+        }
 
         if (! isElementValid())
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;

@@ -38,6 +38,11 @@
 namespace LfpViewer
 {
 
+/** Returns a valid colour-grouping item id, defaulting malformed values to 1. */
+TESTABLE int normaliseLfpColourGroupingId (
+    int requestedId,
+    int numberOfChoices);
+
 struct LfpOptionButtonAccessibilityState;
 
 /** A pause control with worker-safe UI Automation state and actions. */
@@ -155,6 +160,14 @@ public:
     /** Loads options from XML */
     void loadParameters (XmlElement* xml);
 
+    /** Saves the official numeric colour-grouping XML attribute. */
+    void saveColourGroupingParameter (
+        XmlElement& xmlNode) const;
+
+    /** Restores and validates the official colour-grouping XML attribute. */
+    void restoreColourGroupingParameter (
+        const XmlElement& xmlNode);
+
     /** Returns the channel type of a given channel index */
     ContinuousChannel::Type getChannelType (int index);
 
@@ -172,6 +185,10 @@ public:
 
     /** Set the selected channel type (DATA, AUX, ADC) */
     void setSelectedType (ContinuousChannel::Type type, bool toggleButton = true);
+
+    /** Applies a colour-grouping item id and refreshes display and accessibility state. */
+    void setColourGroupingSelection (
+        int itemId);
 
     /** Sets whether channel order should be reversed */
     void setChannelsReversed (bool);
@@ -277,7 +294,9 @@ private:
     std::unique_ptr<ComboBox> colourSchemeOptionSelection;
     std::unique_ptr<Label> colourSchemeOptionLabel;
 
-    std::unique_ptr<ComboBox> colourGroupingSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        colourGroupingSelection;
     std::unique_ptr<Label> colourGroupingLabel;
 
     std::unique_ptr<ShowHideOptionsButton> showHideOptionsButton;

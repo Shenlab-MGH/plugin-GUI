@@ -65,6 +65,7 @@ struct MessageThreadComboBoxAccessibilityState
         bool isExpanded,
         bool isEnabled,
         bool isEditable,
+        bool isValueSelectionEnabled,
         bool hasFocus)
     {
         {
@@ -80,6 +81,8 @@ struct MessageThreadComboBoxAccessibilityState
         expanded.store (isExpanded);
         enabled.store (isEnabled);
         editable.store (isEditable);
+        valueSelectionEnabled.store (
+            isValueSelectionEnabled);
         focused.store (hasFocus);
     }
 
@@ -126,6 +129,11 @@ struct MessageThreadComboBoxAccessibilityState
         return editable.load();
     }
 
+    bool isValueSelectionEnabled() const
+    {
+        return valueSelectionEnabled.load();
+    }
+
     bool hasFocus() const
     {
         return focused.load();
@@ -140,6 +148,8 @@ private:
     std::atomic<bool> expanded { false };
     std::atomic<bool> enabled { true };
     std::atomic<bool> editable { false };
+    std::atomic<bool>
+        valueSelectionEnabled { false };
     std::atomic<bool> focused { false };
     MessageThreadComboBox* comboBox = nullptr;
 };
@@ -147,7 +157,8 @@ private:
 namespace
 {
 class MessageThreadComboBoxAccessibilityValue final
-    : public AccessibilityTextValueInterface
+    : public AccessibilityTextValueInterface,
+      public AccessibilityValueStringWriter
 {
 public:
     explicit MessageThreadComboBoxAccessibilityValue (
@@ -164,7 +175,10 @@ public:
             MessageManager::
                 getInstanceWithoutCreating();
         if (messageManager == nullptr)
-            return ! state->isEditable();
+            return ! (
+                state->isEditable()
+                || state
+                       ->isValueSelectionEnabled());
 
         const auto readEditableState =
             [state = state]
@@ -178,7 +192,9 @@ public:
                 comboBox
                     ->synchroniseAccessibilityState();
                 return comboBox
-                    ->isTextEditable();
+                           ->isTextEditable()
+                       || state
+                              ->isValueSelectionEnabled();
             };
 
         if (messageManager
@@ -195,53 +211,127 @@ public:
     void setValueAsString (
         const String& newValue) override
     {
+        setValueAsStringIfSupported (
+            newValue);
+    }
+
+    bool setValueAsStringIfSupported (
+        const String& newValue) override
+    {
         if (! state->isEnabled())
         {
-            return;
+            return false;
         }
 
         auto* messageManager =
             MessageManager::
                 getInstanceWithoutCreating();
         if (messageManager == nullptr)
-            return;
+            return false;
 
-        messageManager->callSync (
+        const auto callerUsesMessageThread =
+            messageManager
+                ->isThisTheMessageThread();
+        const auto selectionQueued =
+            messageManager->callSync (
             [state = state,
-             newValue]
+             newValue,
+             callerUsesMessageThread]
             {
+                bool queuedSelection =
+                    false;
                 auto* comboBox =
                     state
                         ->getComboBoxOnMessageThread();
                 if (comboBox == nullptr)
                 {
-                    return;
+                    return queuedSelection;
                 }
                 if (! comboBox
-                         ->isEnabled()
-                    || ! comboBox
-                            ->isTextEditable())
+                         ->isEnabled())
                 {
                     comboBox
                         ->synchroniseAccessibilityState();
-                    return;
+                    return queuedSelection;
                 }
 
                 Component::SafePointer<
                     MessageThreadComboBox>
                     safeComboBox (
                         comboBox);
-                comboBox->setText (
-                    newValue,
-                    sendNotificationSync);
+                if (comboBox
+                        ->isTextEditable())
+                {
+                    comboBox->setText (
+                        newValue,
+                        sendNotificationSync);
+                    queuedSelection =
+                        true;
+                }
+                else if (
+                    state
+                        ->isValueSelectionEnabled())
+                {
+                    for (int itemIndex = 0;
+                         itemIndex
+                         < comboBox
+                               ->getNumItems();
+                         ++itemIndex)
+                    {
+                        if (comboBox
+                                ->getItemText (
+                                    itemIndex)
+                                != newValue
+                            || ! comboBox
+                                      ->isItemEnabled (
+                                          comboBox
+                                              ->getItemId (
+                                                  itemIndex)))
+                        {
+                            continue;
+                        }
+
+                        comboBox
+                            ->setSelectedItemIndex (
+                                itemIndex,
+                                callerUsesMessageThread
+                                    ? sendNotificationSync
+                                    : sendNotification);
+                        queuedSelection =
+                            true;
+                        break;
+                    }
+                }
                 if (safeComboBox
                     != nullptr)
                 {
                     safeComboBox
                         ->synchroniseAccessibilityState();
                 }
+                return queuedSelection;
             });
+
+        if (! callerUsesMessageThread
+            && selectionQueued
+                   .value_or (false))
+        {
+            messageManager->callSync (
+                [state = state]
+                {
+                    if (auto* comboBox =
+                            state
+                                ->getComboBoxOnMessageThread())
+                    {
+                        comboBox
+                            ->synchroniseAccessibilityState();
+                    }
+                });
+        }
+
+        return selectionQueued
+            .value_or (false);
     }
+
     String getCurrentValueAsString()
         const override
     {
@@ -725,6 +815,15 @@ void MessageThreadComboBox::setEditableText (
 }
 
 void MessageThreadComboBox::
+    setAccessibilityValueSelectionEnabled (
+        bool shouldEnable)
+{
+    accessibilityValueSelectionEnabled =
+        shouldEnable;
+    synchroniseAccessibilityState();
+}
+
+void MessageThreadComboBox::
     synchroniseAccessibilityState()
 {
     jassert (
@@ -740,6 +839,7 @@ void MessageThreadComboBox::
         isPopupActive(),
         ComboBox::isEnabled(),
         isTextEditable(),
+        accessibilityValueSelectionEnabled,
         hasKeyboardFocus (false));
 }
 
@@ -756,7 +856,6 @@ std::unique_ptr<AccessibilityHandler>
 MessageThreadComboBox::
     createAccessibilityHandler()
 {
-    synchroniseAccessibilityState();
     return std::make_unique<
         MessageThreadComboBoxAccessibilityHandler> (
         *this,

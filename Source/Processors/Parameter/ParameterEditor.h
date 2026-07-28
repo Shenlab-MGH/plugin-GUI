@@ -246,6 +246,13 @@ public:
     /** Sets whether text values are writable and refreshes the provider state. */
     void setEditableText (bool isEditable);
 
+    /**
+        Allows accessibility clients to select an existing item by its exact
+        text without making the visual editor free-form editable.
+    */
+    void setAccessibilityValueSelectionEnabled (
+        bool shouldEnable);
+
     /** Opens the choices and publishes expanded/collapsed state. */
     void showPopup() override;
 
@@ -265,6 +272,8 @@ private:
     std::shared_ptr<
         MessageThreadComboBoxAccessibilityState>
         accessibilityState;
+    bool accessibilityValueSelectionEnabled =
+        false;
 };
 
 /**

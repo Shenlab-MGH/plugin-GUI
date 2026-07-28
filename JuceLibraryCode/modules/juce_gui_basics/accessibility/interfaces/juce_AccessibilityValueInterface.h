@@ -141,6 +141,26 @@ public:
 };
 
 //==============================================================================
+/**
+    Optional interface for atomic, validated accessibility string writes.
+
+    This is intentionally separate from AccessibilityValueInterface so adding
+    validation does not change the binary layout of existing value providers.
+*/
+class JUCE_API
+    AccessibilityValueStringWriter
+{
+public:
+    virtual ~AccessibilityValueStringWriter() =
+        default;
+
+    /** Validates and applies a value atomically, returning false if rejected. */
+    virtual bool
+    setValueAsStringIfSupported (
+        const String& newValue) = 0;
+};
+
+//==============================================================================
 /** A value interface that represents a text value.
 
     @tags{Accessibility}

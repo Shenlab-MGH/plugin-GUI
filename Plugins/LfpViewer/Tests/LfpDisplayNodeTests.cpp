@@ -137,6 +137,24 @@ public:
         callbackUsedMessageThread { false };
 };
 
+class LfpThreadTrackingComboBoxListener final
+    : public ComboBox::Listener
+{
+public:
+    void comboBoxChanged (
+        ComboBox*) override
+    {
+        callbackCount.fetch_add (1);
+        callbackUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+    }
+
+    std::atomic<int> callbackCount { 0 };
+    std::atomic<bool>
+        callbackUsedMessageThread { false };
+};
+
 class LfpDestroyCanvasButtonListener final
     : public Button::Listener
 {
@@ -2268,6 +2286,605 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesColourGroupingForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const std::array<String, 6>
+        choices {
+            "1",
+            "2",
+            "4",
+            "8",
+            "16",
+            "By Shank"
+        };
+    const std::array<String, 6>
+        choiceIds {
+            "1",
+            "2",
+            "4",
+            "8",
+            "16",
+            "by_shank"
+        };
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".colour_grouping";
+        auto* grouping =
+            dynamic_cast<
+                MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (
+            grouping,
+            nullptr)
+            << id;
+        EXPECT_EQ (
+            grouping->getNumItems(),
+            static_cast<int> (
+                choices.size()));
+        for (int choiceIndex = 0;
+             choiceIndex
+             < static_cast<int> (
+                   choices.size());
+             ++choiceIndex)
+        {
+            EXPECT_EQ (
+                grouping->getItemText (
+                    choiceIndex),
+                choices[choiceIndex]);
+        }
+
+        int choiceIndex = 0;
+        for (PopupMenu::
+                 MenuItemIterator
+                 iterator (
+                     *grouping
+                          ->getRootMenu(),
+                     false);
+             iterator.next();)
+        {
+            ASSERT_LT (
+                choiceIndex,
+                static_cast<int> (
+                    choices.size()));
+            EXPECT_EQ (
+                iterator
+                    .getItem()
+                    .accessibilityId,
+                id
+                    + ".choice."
+                    + choiceIds[choiceIndex]);
+            ++choiceIndex;
+        }
+        EXPECT_EQ (
+            choiceIndex,
+            static_cast<int> (
+                choices.size()));
+
+        auto* handler =
+            grouping
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (
+                    displayNumber)
+                + " colour grouping");
+        const auto description =
+            "Choose how LFP display "
+            + String (
+                displayNumber)
+            + " assigns display colours: 1, 2, 4, 8, or 16 groups that many adjacent channels, while By Shank uses channel group metadata with a legacy depth-based fallback. This changes display colours only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler
+                ->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_FALSE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "1");
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        expand));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        collapse));
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *grouping)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ColourGroupingWorkerSelectsByShankOnMessageThread)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.colour_grouping";
+    auto* grouping =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        grouping,
+        nullptr);
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        display,
+        nullptr);
+    auto* handler =
+        grouping
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+    auto* value =
+        handler
+            ->getValueInterface();
+    ASSERT_NE (
+        value,
+        nullptr);
+
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (
+            30);
+    LfpThreadTrackingComboBoxListener
+        listener;
+    grouping->addListener (
+        &listener);
+    std::atomic<bool>
+        workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            value->setValueAsString (
+                "By Shank");
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && (! workerReturned.load()
+                 || grouping->getSelectedId()
+                        != 6);
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+    grouping->removeListener (
+        &listener);
+
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        grouping->getText(),
+        "By Shank");
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "By Shank");
+    EXPECT_EQ (
+        display
+            ->getColourGrouping(),
+        "By Shank");
+
+    value->setValueAsString (
+        "unsupported");
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "By Shank");
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ColourGroupingRemainsConsistentWithoutChannels)
+{
+    auto zeroChannelTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::
+                    SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            zeroChannelProcessor
+                ->getNodeId())
+        + ".lfp.display_1.colour_grouping";
+    auto* grouping =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        grouping,
+        nullptr);
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        display,
+        nullptr);
+    ASSERT_EQ (
+        zeroChannelProcessor
+            ->getNumInputs(),
+        0);
+
+    auto* value =
+        grouping
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (
+        value,
+        nullptr);
+    value->setValueAsString (
+        "By Shank");
+
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "By Shank");
+    EXPECT_EQ (
+        display
+            ->getColourGrouping(),
+        "By Shank");
+}
+
+TEST (LfpColourGroupingTests,
+      NormalisesMalformedPersistedIds)
+{
+    constexpr int numberOfChoices =
+        6;
+    for (int validId = 1;
+         validId <= numberOfChoices;
+         ++validId)
+    {
+        EXPECT_EQ (
+            LfpViewer::
+                normaliseLfpColourGroupingId (
+                    validId,
+                    numberOfChoices),
+            validId);
+    }
+
+    for (const auto invalidId :
+         { -1, 0, 7, 999 })
+    {
+        EXPECT_EQ (
+            LfpViewer::
+                normaliseLfpColourGroupingId (
+                    invalidId,
+                    numberOfChoices),
+            1);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ColourGroupingXmlParameterRoundTripsAndNormalisesMalformedIds)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.colour_grouping";
+    auto* grouping =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        grouping,
+        nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *grouping);
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        options,
+        nullptr);
+    ASSERT_NE (
+        display,
+        nullptr);
+    auto* value =
+        grouping
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (
+        value,
+        nullptr);
+
+    LfpThreadTrackingComboBoxListener
+        listener;
+    grouping->addListener (
+        &listener);
+    options
+        ->setColourGroupingSelection (
+            6);
+    XmlElement savedNode (
+        "LFPDISPLAY0");
+    options
+        ->saveColourGroupingParameter (
+            savedNode);
+    EXPECT_TRUE (
+        savedNode.hasAttribute (
+            "colourGrouping"));
+    EXPECT_EQ (
+        savedNode.getIntAttribute (
+            "colourGrouping"),
+        6);
+
+    options
+        ->setColourGroupingSelection (
+            1);
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        1);
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "1");
+    options
+        ->restoreColourGroupingParameter (
+            savedNode);
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        grouping->getText(),
+        "By Shank");
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "By Shank");
+    EXPECT_EQ (
+        display
+            ->getColourGrouping(),
+        "By Shank");
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        0);
+
+    const std::array<String, 6>
+        expectedValues {
+            "1",
+            "2",
+            "4",
+            "8",
+            "16",
+            "By Shank"
+        };
+    for (int itemId = 1;
+         itemId <= 6;
+         ++itemId)
+    {
+        XmlElement node (
+            "LFPDISPLAY0");
+        node.setAttribute (
+            "colourGrouping",
+            itemId);
+        options
+            ->restoreColourGroupingParameter (
+                node);
+        EXPECT_EQ (
+            grouping->getSelectedId(),
+            itemId);
+        EXPECT_EQ (
+            grouping->getText(),
+            expectedValues[
+                itemId - 1]);
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            expectedValues[
+                itemId - 1]);
+        EXPECT_EQ (
+            display
+                ->getColourGrouping(),
+            expectedValues[
+                itemId - 1]);
+    }
+
+    for (const auto invalidId :
+         { -1, 0, 7, 999 })
+    {
+        XmlElement node (
+            "LFPDISPLAY0");
+        node.setAttribute (
+            "colourGrouping",
+            invalidId);
+        options
+            ->setColourGroupingSelection (
+                6);
+        options
+            ->restoreColourGroupingParameter (
+                node);
+        EXPECT_EQ (
+            grouping->getSelectedId(),
+            1);
+        EXPECT_EQ (
+            grouping->getText(),
+            "1");
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "1");
+        EXPECT_EQ (
+            display
+                ->getColourGrouping(),
+            "1");
+    }
+
+    XmlElement missingAttributeNode (
+        "LFPDISPLAY0");
+    options
+        ->setColourGroupingSelection (
+            6);
+    options
+        ->restoreColourGroupingParameter (
+            missingAttributeNode);
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        1);
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "1");
+    EXPECT_EQ (
+        display
+            ->getColourGrouping(),
+        "1");
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        0);
+    grouping->removeListener (
+        &listener);
+}
+
+TEST_F (LfpDisplayNodeTests,
         RangeTypeSelectionRunsOnMessageThreadAndTracksProgrammaticState)
 {
     auto canvas =
@@ -3491,6 +4108,260 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (
         hiddenPaneResult
             .invokeResult,
+        E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerSetsColourGroupingByShank)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.";
+    const auto id =
+        prefix
+        + "colour_grouping";
+    auto* grouping =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        grouping,
+        nullptr);
+    ASSERT_NE (
+        display,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto runAction =
+        [&] (
+            StringRef targetId,
+            LfpWindowsUiaAction action,
+            const std::wstring&
+                valueToSet = {})
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (
+                                targetId)
+                                .toWideCharPointer()),
+                        action,
+                        valueToSet);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return actionResult;
+    };
+
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (
+            30);
+    LfpThreadTrackingComboBoxListener
+        listener;
+    grouping->addListener (
+        &listener);
+    const auto selectedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            L"By Shank");
+    grouping->removeListener (
+        &listener);
+
+    EXPECT_EQ (
+        selectedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        selectedResult.controlType,
+        UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (
+        selectedResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        selectedResult.name,
+        L"LFP display 1 colour grouping");
+    EXPECT_EQ (
+        selectedResult.help,
+        L"Choose how LFP display 1 assigns display colours: 1, 2, 4, 8, or 16 groups that many adjacent channels, while By Shank uses channel group metadata with a legacy depth-based fallback. This changes display colours only; acquisition and recording are unaffected.");
+    EXPECT_EQ (
+        selectedResult
+            .valuePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        selectedResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        selectedResult
+            .valueReadOnly,
+        FALSE);
+    EXPECT_EQ (
+        selectedResult.value,
+        L"By Shank");
+    EXPECT_EQ (
+        selectedResult
+            .expandCollapsePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        selectedResult
+            .expandCollapsePatternAvailable);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        display
+            ->getColourGrouping(),
+        "By Shank");
+
+    const auto invalidValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            L"unsupported");
+    EXPECT_EQ (
+        invalidValueResult
+            .invokeResult,
+        E_INVALIDARG);
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        display
+            ->getColourGrouping(),
+        "By Shank");
+
+    const auto expandedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand);
+    EXPECT_EQ (
+        expandedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        expandedResult
+            .expansionState,
+        ExpandCollapseState_Expanded);
+    EXPECT_TRUE (
+        grouping->isPopupActive());
+    const auto collapsedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                collapse);
+    EXPECT_EQ (
+        collapsedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        collapsedResult
+            .expansionState,
+        ExpandCollapseState_Collapsed);
+    EXPECT_FALSE (
+        grouping->isPopupActive());
+
+    grouping->setEnabled (
+        false);
+    const auto disabledValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            L"8");
+    EXPECT_EQ (
+        disabledValueResult
+            .invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    const auto disabledExpandResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand);
+    EXPECT_EQ (
+        disabledExpandResult
+            .invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_EQ (
+        grouping->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        display
+            ->getColourGrouping(),
+        "By Shank");
+
+    const auto hiddenResult =
+        runAction (
+            prefix
+                .replace (
+                    "display_1.",
+                    "display_2.")
+                + "colour_grouping",
+            LfpWindowsUiaAction::
+                setValue,
+            L"8");
+    EXPECT_EQ (
+        hiddenResult.invokeResult,
         E_FAIL);
 }
 

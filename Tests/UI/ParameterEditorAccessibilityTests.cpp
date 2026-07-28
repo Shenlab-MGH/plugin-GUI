@@ -83,6 +83,21 @@ public:
         callbackUsedMessageThread { false };
 };
 
+void joinUiWorkerOrAbort (
+    std::thread& worker,
+    const std::atomic<bool>&
+        workerReturned)
+{
+    if (! workerReturned.load())
+    {
+        ADD_FAILURE()
+            << "UI worker did not return before its message-loop watchdog expired";
+        std::abort();
+    }
+
+    worker.join();
+}
+
 #if JUCE_WINDOWS
 struct WindowsComboBoxValueResult
 {
@@ -798,6 +813,169 @@ TEST_F (ParameterEditorAccessibilityTests,
     EXPECT_EQ (
         listener.callbackCount.load(),
         2);
+
+    comboBox.removeListener (
+        &listener);
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ExistingComboBoxItemsCanOptInToExactAccessibilitySelection)
+{
+    MessageThreadComboBox comboBox;
+    comboBox.addItem ("1", 1);
+    comboBox.addItem (
+        "By Shank",
+        2);
+    comboBox.setSelectedId (
+        1,
+        dontSendNotification);
+    comboBox
+        .synchroniseAccessibilityState();
+
+    auto handler =
+        comboBox
+            .createAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+    auto* value =
+        handler
+            ->getValueInterface();
+    ASSERT_NE (
+        value,
+        nullptr);
+    EXPECT_TRUE (
+        value->isReadOnly());
+    EXPECT_FALSE (
+        comboBox
+            .isTextEditable());
+
+    comboBox
+        .setAccessibilityValueSelectionEnabled (
+            true);
+    EXPECT_FALSE (
+        value->isReadOnly());
+    EXPECT_FALSE (
+        comboBox
+            .isTextEditable());
+    auto* validatedWriter =
+        dynamic_cast<
+            AccessibilityValueStringWriter*> (
+            value);
+    ASSERT_NE (
+        validatedWriter,
+        nullptr);
+
+    TrackingComboBoxValueListener
+        listener;
+    comboBox.addListener (
+        &listener);
+    const auto setValueFromWorker =
+        [&] (const String& text)
+    {
+        bool accepted = false;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                accepted =
+                    validatedWriter
+                        ->setValueAsStringIfSupported (
+                            text);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinUiWorkerOrAbort (
+            worker,
+            workerReturned);
+        return accepted;
+    };
+
+    EXPECT_TRUE (
+        setValueFromWorker (
+            "By Shank"));
+    EXPECT_EQ (
+        comboBox.getSelectedId(),
+        2);
+    EXPECT_EQ (
+        comboBox.getText(),
+        "By Shank");
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "By Shank");
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+
+    EXPECT_FALSE (
+        setValueFromWorker (
+            "unsupported"));
+    EXPECT_EQ (
+        comboBox.getSelectedId(),
+        2);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+
+    comboBox.setItemEnabled (
+        1,
+        false);
+    EXPECT_FALSE (
+        setValueFromWorker (
+            "1"));
+    EXPECT_EQ (
+        comboBox.getSelectedId(),
+        2);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    comboBox.setItemEnabled (
+        1,
+        true);
+
+    comboBox.setEnabled (
+        false);
+    EXPECT_FALSE (
+        setValueFromWorker (
+            "1"));
+    EXPECT_EQ (
+        comboBox.getSelectedId(),
+        2);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+
+    comboBox.setEnabled (
+        true);
+    comboBox
+        .setAccessibilityValueSelectionEnabled (
+            false);
+    EXPECT_TRUE (
+        value->isReadOnly());
+    EXPECT_FALSE (
+        setValueFromWorker (
+            "1"));
+    EXPECT_EQ (
+        comboBox.getSelectedId(),
+        2);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
 
     comboBox.removeListener (
         &listener);

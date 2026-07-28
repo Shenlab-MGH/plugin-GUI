@@ -162,7 +162,8 @@ public:
     bool getEventDisplayState (int ttlLine);
 
     /** Returns the number of adjacent channels of each colour */
-    const String& getColourGrouping();
+    TESTABLE const String&
+    getColourGrouping();
 
     /** Sets the number of adjacent channels of each colour */
     void setColourGrouping (const String& i);
