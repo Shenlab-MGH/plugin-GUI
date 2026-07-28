@@ -363,17 +363,44 @@ TEST_F (RecordNodeEditorAccessibilityTests,
     EXPECT_TRUE (
         browseHandler->getValueInterface()
             ->isReadOnly());
+    struct BrowseSnapshot
+    {
+        String value;
+        String help;
+        bool enabled = false;
+    };
+    const auto readBrowseSnapshot =
+        [&]
+        {
+            BrowseSnapshot snapshot;
+            std::thread worker (
+                [&]
+                {
+                    snapshot.value =
+                        browseHandler
+                            ->getValueInterface()
+                            ->getCurrentValueAsString();
+                    snapshot.help =
+                        browseHandler->getHelp();
+                    snapshot.enabled =
+                        browseHandler->isEnabled();
+                });
+            worker.join();
+            return snapshot;
+        };
+    auto browseSnapshot =
+        readBrowseSnapshot();
     EXPECT_EQ (
-        browseHandler->getValueInterface()
-            ->getCurrentValueAsString(),
+        browseSnapshot.value,
         directory.getFullPathName());
     EXPECT_EQ (
-        browseHandler->getHelp(),
+        browseSnapshot.help,
         "Valid recording directory: "
             + directory.getFullPathName());
+    EXPECT_TRUE (browseSnapshot.enabled);
     EXPECT_EQ (
         browseButton->getTooltip(),
-        browseHandler->getHelp());
+        browseSnapshot.help);
 
     const auto invalidDirectory =
         directory
@@ -390,19 +417,20 @@ TEST_F (RecordNodeEditorAccessibilityTests,
     parameter.fromXml (
         &savedParameters);
     editor.updateView();
+    browseSnapshot =
+        readBrowseSnapshot();
     EXPECT_EQ (
-        browseHandler->getValueInterface()
-            ->getCurrentValueAsString(),
+        browseSnapshot.value,
         invalidDirectory
             .getFullPathName());
     EXPECT_EQ (
-        browseHandler->getHelp(),
+        browseSnapshot.help,
         "Invalid recording directory: "
             + invalidDirectory
                   .getFullPathName());
     EXPECT_EQ (
         browseButton->getTooltip(),
-        browseHandler->getHelp());
+        browseSnapshot.help);
 
     const auto watchedDirectory =
         File::getSpecialLocation (
@@ -421,13 +449,14 @@ TEST_F (RecordNodeEditorAccessibilityTests,
     parameter.fromXml (
         &savedParameters);
     editor.updateView();
+    browseSnapshot =
+        readBrowseSnapshot();
     EXPECT_EQ (
-        browseHandler->getValueInterface()
-            ->getCurrentValueAsString(),
+        browseSnapshot.value,
         watchedDirectory
             .getFullPathName());
     EXPECT_EQ (
-        browseHandler->getHelp(),
+        browseSnapshot.help,
         "Valid recording directory: "
             + watchedDirectory
                   .getFullPathName());
@@ -435,25 +464,36 @@ TEST_F (RecordNodeEditorAccessibilityTests,
         watchedDirectory
             .deleteRecursively());
     editor.updateView();
+    browseSnapshot =
+        readBrowseSnapshot();
     EXPECT_EQ (
-        browseHandler->getValueInterface()
-            ->getCurrentValueAsString(),
+        browseSnapshot.value,
         watchedDirectory
             .getFullPathName());
     EXPECT_EQ (
-        browseHandler->getHelp(),
+        browseSnapshot.help,
         "Invalid recording directory: "
             + watchedDirectory
                   .getFullPathName());
     EXPECT_EQ (
         browseButton->getTooltip(),
-        browseHandler->getHelp());
+        browseSnapshot.help);
 
     auto* useDefault = findDescendantById (
         editor,
         "oe.parameter.100_directory.use_default");
     ASSERT_NE (useDefault, nullptr);
     EXPECT_TRUE (useDefault->isVisible());
+    auto* useDefaultButton =
+        dynamic_cast<TextButton*> (
+            useDefault);
+    ASSERT_NE (useDefaultButton, nullptr);
+    EXPECT_EQ (
+        useDefaultButton->getName(),
+        "Revert Dir");
+    EXPECT_EQ (
+        useDefaultButton->getButtonText(),
+        "default");
     EXPECT_EQ (
         useDefault->getTitle(),
         "Use default recording directory");
@@ -463,25 +503,72 @@ TEST_F (RecordNodeEditorAccessibilityTests,
     auto defaultHandler =
         useDefault->createAccessibilityHandler();
     ASSERT_NE (defaultHandler, nullptr);
+    ASSERT_NE (
+        defaultHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        defaultHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "default");
+    const auto defaultActions =
+        defaultHandler->getActions();
+    const auto changeCountBeforeDefault =
+        owner.parameterChangeCount.load();
+    owner.parameterChangeUsedMessageThread
+        .store (false);
+    std::atomic<bool> defaultCompleted {
+        false
+    };
+    bool defaultInvoked = false;
+    std::thread defaultWorker (
+        [&]
+        {
+            defaultInvoked =
+                defaultActions.invoke (
+                    AccessibilityActionType::
+                        press);
+            defaultCompleted.store (true);
+        });
+    while (! defaultCompleted.load())
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    defaultWorker.join();
+    EXPECT_TRUE (defaultInvoked);
+    for (int attempt = 0;
+         attempt < 20
+             && owner
+                    .parameterChangeCount
+                    .load()
+                 == changeCountBeforeDefault;
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    EXPECT_EQ (
+        owner.parameterChangeCount.load(),
+        changeCountBeforeDefault + 1);
     EXPECT_TRUE (
-        defaultHandler->getActions().invoke (
-            AccessibilityActionType::press));
-    MessageManager::getInstance()
-        ->runDispatchLoopUntil (50);
+        owner
+            .parameterChangeUsedMessageThread
+            .load());
     EXPECT_EQ (
         parameter.getValueAsString(),
         "None");
+    browseSnapshot =
+        readBrowseSnapshot();
     EXPECT_EQ (
-        browseHandler->getValueInterface()
-            ->getCurrentValueAsString(),
+        browseSnapshot.value,
         "default");
     EXPECT_EQ (
-        browseHandler->getHelp(),
+        browseSnapshot.help,
         String (
             "Using the default recording directory. Press to choose an override."));
     EXPECT_EQ (
         browseButton->getTooltip(),
-        browseHandler->getHelp());
+        browseSnapshot.help);
 }
 
 TEST_F (RecordNodeEditorAccessibilityTests,

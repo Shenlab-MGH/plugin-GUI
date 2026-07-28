@@ -1441,6 +1441,15 @@ void RecordToggleParameterEditor::resized()
 {
 }
 
+ClearButton::ClearButton()
+    : ReadOnlyValueTextButton (
+          "Revert Dir")
+{
+    setButtonTextWithAccessibilityValue (
+        *this,
+        "default");
+}
+
 void ClearButton::paintButton (Graphics& g, bool isMouseOverButton, bool isButtonDown)
 {
     g.fillAll (findColour (ThemeColours::widgetBackground).contrasting (0.05f));
@@ -1463,14 +1472,6 @@ void ClearButton::paintButton (Graphics& g, bool isMouseOverButton, bool isButto
     path.applyTransform (AffineTransform::translation (xoffset + 2, yoffset + 2));
 
     g.strokePath (path, PathStrokeType (1.0f));
-}
-
-std::unique_ptr<AccessibilityHandler>
-ClearButton::createAccessibilityHandler()
-{
-    return createReadOnlyButtonTextAccessibilityHandler (
-        *this,
-        [] { return String ("default"); });
 }
 
 RecordPathParameterEditor::RecordPathParameterEditor (Parameter* param, int rowHeightPixels, int rowWidthPixels) : ParameterEditor (param)
@@ -1614,6 +1615,15 @@ void RecordPathParameterEditor::updateView()
         {
             button->setHelpText (
                 statusHelp);
+        }
+
+        if (auto* readOnlyButton =
+                dynamic_cast<
+                    ReadOnlyValueTextButton*> (
+                    button.get()))
+        {
+            readOnlyButton
+                ->refreshAccessibilityState();
         }
     }
 }

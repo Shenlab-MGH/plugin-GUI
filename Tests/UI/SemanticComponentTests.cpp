@@ -1,5 +1,7 @@
 #include "../../Source/UI/SemanticComponent.h"
 #include "gtest/gtest.h"
+#include <atomic>
+#include <thread>
 
 namespace
 {
@@ -40,6 +42,43 @@ public:
     }
 
     bool isEnabled() const override { return false; }
+};
+
+class ButtonClickListener final : public Button::Listener
+{
+public:
+    void buttonClicked (Button*) override
+    {
+        clickUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        clickCount.fetch_add (1);
+    }
+
+    std::atomic<int> clickCount { 0 };
+    std::atomic<bool> clickUsedMessageThread { false };
+};
+
+class SemanticComponentMessageThreadTests
+    : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        MessageManager::getInstance();
+        messageManagerLock =
+            std::make_unique<MessageManagerLock>();
+    }
+
+    void TearDown() override
+    {
+        messageManagerLock.reset();
+        DeletedAtShutdown::deleteAll();
+        MessageManager::deleteInstance();
+    }
+
+    std::unique_ptr<MessageManagerLock>
+        messageManagerLock;
 };
 } // namespace
 
@@ -125,6 +164,121 @@ TEST (SemanticComponentTests, CreatesReadOnlyTextSemantics)
 
     value = "active";
     EXPECT_EQ (text->getCurrentValueAsString(), "active");
+}
+
+TEST_F (SemanticComponentMessageThreadTests,
+        ReadOnlyValueButtonProvidersAndActionsAreWorkerSafe)
+{
+    auto button =
+        std::make_unique<ReadOnlyValueTextButton> (
+            "initial");
+    applySemanticMetadata (
+        *button,
+        "oe.parameter.100_directory",
+        "Directory",
+        "Select a directory to write data to");
+    setButtonTextWithAccessibilityValue (
+        *button,
+        "C:\\recordings");
+
+    ButtonClickListener listener;
+    button->addListener (&listener);
+    auto handler =
+        button->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+
+    String workerTitle;
+    String workerDescription;
+    String workerHelp;
+    String workerValue;
+    bool workerEnabled = false;
+    AccessibleState workerState;
+    std::thread reader (
+        [&]
+        {
+            workerTitle = handler->getTitle();
+            workerDescription =
+                handler->getDescription();
+            workerHelp = handler->getHelp();
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+            workerEnabled = handler->isEnabled();
+            workerState = handler->getCurrentState();
+        });
+    reader.join();
+
+    EXPECT_EQ (workerTitle, "Directory");
+    EXPECT_EQ (
+        workerDescription,
+        "Select a directory to write data to");
+    EXPECT_EQ (workerHelp, workerDescription);
+    EXPECT_EQ (workerValue, "C:\\recordings");
+    EXPECT_TRUE (workerEnabled);
+    EXPECT_TRUE (workerState.isFocusable());
+
+    const auto actions = handler->getActions();
+    const auto invokePressFromWorker =
+        [&]
+        {
+            std::atomic<bool> completed { false };
+            bool invoked = false;
+            std::thread worker (
+                [&]
+                {
+                    invoked = actions.invoke (
+                        AccessibilityActionType::press);
+                    completed.store (true);
+                });
+            while (! completed.load())
+            {
+                MessageManager::getInstance()
+                    ->runDispatchLoopUntil (10);
+            }
+            worker.join();
+            return invoked;
+        };
+
+    EXPECT_TRUE (invokePressFromWorker());
+    for (int attempt = 0;
+         attempt < 20
+             && listener.clickCount.load() == 0;
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    EXPECT_EQ (listener.clickCount.load(), 1);
+    EXPECT_TRUE (
+        listener.clickUsedMessageThread.load());
+
+    Component parent;
+    parent.addAndMakeVisible (button.get());
+    parent.setEnabled (false);
+    EXPECT_FALSE (handler->isEnabled());
+    EXPECT_TRUE (invokePressFromWorker());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.clickCount.load(), 1);
+    parent.setEnabled (true);
+    EXPECT_TRUE (handler->isEnabled());
+
+    button->setEnabled (false);
+    EXPECT_FALSE (handler->isEnabled());
+    EXPECT_TRUE (invokePressFromWorker());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.clickCount.load(), 1);
+
+    handler.reset();
+    button.reset();
+    EXPECT_TRUE (invokePressFromWorker());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.clickCount.load(), 1);
 }
 
 TEST (SemanticComponentTests, PreservesPopupMenuAccessibilityMetadata)

@@ -41,18 +41,29 @@ createReadOnlyTextAccessibilityHandler (
     Component& component,
     std::function<String()> getValue);
 
-TESTABLE std::unique_ptr<AccessibilityHandler>
-createReadOnlyButtonTextAccessibilityHandler (
-    Button& button,
-    std::function<String()> getValue);
-
-class ReadOnlyValueTextButton : public TextButton
+class TESTABLE ReadOnlyValueTextButton : public TextButton
 {
 public:
     using TextButton::TextButton;
+    ~ReadOnlyValueTextButton() override;
 
     std::unique_ptr<AccessibilityHandler>
     createAccessibilityHandler() override;
+
+    /** Publishes the current value and semantic metadata for worker-thread
+        accessibility providers. Must be called on the message thread. */
+    void refreshAccessibilityState();
+
+    void enablementChanged() override;
+    void focusGained (FocusChangeType cause) override;
+    void focusLost (FocusChangeType cause) override;
+
+private:
+    struct AccessibilityState;
+    class AccessibilityHandlerImpl;
+
+    std::shared_ptr<AccessibilityState>
+        accessibilityState;
 };
 
 TESTABLE void setButtonTextWithAccessibilityValue (

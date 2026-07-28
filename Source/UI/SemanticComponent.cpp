@@ -22,6 +22,8 @@
 */
 
 #include "SemanticComponent.h"
+#include <atomic>
+#include <mutex>
 
 namespace
 {
@@ -64,6 +66,200 @@ private:
     std::function<String()> getValue;
 };
 } // namespace
+
+struct ReadOnlyValueTextButton::AccessibilityState
+{
+    void attach (
+        ReadOnlyValueTextButton* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+        enabled.store (false);
+        focused.store (false);
+    }
+
+    ReadOnlyValueTextButton*
+    getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+    void synchronise (
+        String valueToUse,
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isEnabled,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            value = std::move (valueToUse);
+            title = std::move (titleToUse);
+            description =
+                std::move (descriptionToUse);
+            help = std::move (helpToUse);
+        }
+
+        enabled.store (isEnabled);
+        focused.store (isFocused);
+    }
+
+    String getValue() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return value;
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String value;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> enabled { true };
+    std::atomic<bool> focused { false };
+    ReadOnlyValueTextButton* button = nullptr;
+};
+
+class ReadOnlyValueTextButton::
+    AccessibilityHandlerImpl final
+    : public AccessibilityHandler
+{
+public:
+    AccessibilityHandlerImpl (
+        ReadOnlyValueTextButton& button,
+        std::shared_ptr<AccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::button,
+              createActions (stateToUse),
+              Interfaces {
+                  std::make_unique<
+                      ReadOnlyTextValue> (
+                      [stateToUse]
+                      {
+                          return stateToUse
+                              ->getValue();
+                      }) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState().withFocusable();
+        return state->isFocused()
+                   ? current.withFocused()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            AccessibilityState>& state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::press,
+                [state]
+                {
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager == nullptr)
+                        return;
+
+                    messageManager->callSync (
+                        [state]
+                        {
+                            auto* button =
+                                state
+                                    ->getButtonOnMessageThread();
+                            if (button == nullptr
+                                || ! button
+                                        ->isEnabled())
+                            {
+                                return;
+                            }
+
+                            button->triggerClick();
+                        });
+                });
+    }
+
+    std::shared_ptr<AccessibilityState>
+        state;
+};
 
 bool isValidSemanticId (StringRef id)
 {
@@ -161,39 +357,67 @@ createReadOnlyTextAccessibilityHandler (
 }
 
 std::unique_ptr<AccessibilityHandler>
-createReadOnlyButtonTextAccessibilityHandler (
-    Button& button,
-    std::function<String()> getValue)
-{
-    return std::make_unique<AccessibilityHandler> (
-        button,
-        AccessibilityRole::button,
-        AccessibilityActions().addAction (
-            AccessibilityActionType::press,
-            [safeButton =
-                 Component::SafePointer<Button> (&button)]
-            {
-                if (safeButton != nullptr)
-                    safeButton->triggerClick();
-            }),
-        AccessibilityHandler::Interfaces {
-            std::make_unique<ReadOnlyTextValue> (
-                std::move (getValue)) });
-}
-
-std::unique_ptr<AccessibilityHandler>
 ReadOnlyValueTextButton::createAccessibilityHandler()
 {
-    return createReadOnlyButtonTextAccessibilityHandler (
+    if (accessibilityState == nullptr)
+    {
+        accessibilityState =
+            std::make_shared<AccessibilityState>();
+        accessibilityState->attach (this);
+    }
+
+    refreshAccessibilityState();
+    return std::make_unique<
+        AccessibilityHandlerImpl> (
         *this,
-        [safeButton =
-             Component::SafePointer<
-                 ReadOnlyValueTextButton> (this)]
-        {
-            return safeButton != nullptr
-                       ? safeButton->getButtonText()
-                       : String();
-        });
+        accessibilityState);
+}
+
+ReadOnlyValueTextButton::
+    ~ReadOnlyValueTextButton()
+{
+    if (accessibilityState != nullptr)
+        accessibilityState->detach();
+}
+
+void ReadOnlyValueTextButton::
+    refreshAccessibilityState()
+{
+    if (accessibilityState == nullptr)
+        return;
+
+    auto help = getHelpText();
+    if (help.isEmpty())
+        help = getDescription();
+
+    accessibilityState->synchronise (
+        getButtonText(),
+        getTitle(),
+        getDescription(),
+        std::move (help),
+        Component::isEnabled(),
+        hasKeyboardFocus (false));
+}
+
+void ReadOnlyValueTextButton::
+    enablementChanged()
+{
+    Button::enablementChanged();
+    refreshAccessibilityState();
+}
+
+void ReadOnlyValueTextButton::focusGained (
+    FocusChangeType cause)
+{
+    Button::focusGained (cause);
+    refreshAccessibilityState();
+}
+
+void ReadOnlyValueTextButton::focusLost (
+    FocusChangeType cause)
+{
+    Button::focusLost (cause);
+    refreshAccessibilityState();
 }
 
 void setButtonTextWithAccessibilityValue (
@@ -203,9 +427,28 @@ void setButtonTextWithAccessibilityValue (
     const String newValue (value);
 
     if (button.getButtonText() == newValue)
+    {
+        if (auto* readOnlyButton =
+                dynamic_cast<
+                    ReadOnlyValueTextButton*> (
+                    &button))
+        {
+            readOnlyButton
+                ->refreshAccessibilityState();
+        }
         return;
+    }
 
     button.setButtonText (newValue);
+
+    if (auto* readOnlyButton =
+            dynamic_cast<
+                ReadOnlyValueTextButton*> (
+                &button))
+    {
+        readOnlyButton
+            ->refreshAccessibilityState();
+    }
 
     if (auto* handler =
             button.getAccessibilityHandler())
@@ -283,4 +526,13 @@ void applySemanticMetadata (Component& component,
     component.setHelpText (String (help));
     component.setAccessible (true);
     component.invalidateAccessibilityHandler();
+
+    if (auto* readOnlyButton =
+            dynamic_cast<
+                ReadOnlyValueTextButton*> (
+                &component))
+    {
+        readOnlyButton
+            ->refreshAccessibilityState();
+    }
 }

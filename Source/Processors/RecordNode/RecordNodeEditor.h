@@ -25,6 +25,7 @@
 #define __RECORDNODEEDITOR_H__
 
 #include "../../Utils/Utils.h"
+#include "../../UI/SemanticComponent.h"
 #include "../Editors/GenericEditor.h"
 #include "../Editors/PopupChannelSelector.h"
 
@@ -329,15 +330,12 @@ private:
  Custom button to revert recording directory to the control panel default
  
  */
-class ClearButton : public juce::Button
+class ClearButton
+    : public ReadOnlyValueTextButton
 {
 public:
     /** Constructor */
-    ClearButton() : Button ("Revert Dir") {}
-
-    /** Exposes a reliable press action to accessibility clients. */
-    std::unique_ptr<AccessibilityHandler>
-    createAccessibilityHandler() override;
+    ClearButton();
 
     /** Renders the button */
     void paintButton (Graphics& g, bool isMouseOverButton, bool isButtonDown) override;
