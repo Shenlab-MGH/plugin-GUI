@@ -2922,7 +2922,8 @@ TEST_F (LfpDisplayNodeTests,
             while (! startWorkers.load())
                 std::this_thread::yield();
 
-            do
+            const auto inspectPublishedValue =
+                [&]
             {
                 const auto value =
                     pane1Value
@@ -2940,9 +2941,13 @@ TEST_F (LfpDisplayNodeTests,
                                 true);
                     }
                 }
-            }
+            };
             while (! publishingFinished
-                          .load());
+                          .load())
+            {
+                inspectPublishedValue();
+            }
+            inspectPublishedValue();
             readerReturned.store (
                 true);
         });
