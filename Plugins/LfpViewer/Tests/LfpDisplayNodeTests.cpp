@@ -25,13 +25,16 @@
 
 #include "gtest/gtest.h"
 
+#include "../DisplayBuffer.h"
 #include "../LfpDisplayCanvas.h"
+#include "../LfpDisplay.h"
 #include "../LfpDisplayEditor.h"
 #include "../LfpDisplayNode.h"
 #include <ModelApplication.h>
 #include <ModelProcessors.h>
 #include <ProcessorHeaders.h>
 #include <TestFixtures.h>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdlib>
@@ -119,6 +122,31 @@ ComponentType* findLfpDescendant (
     }
 
     return nullptr;
+}
+
+template <typename ComponentType>
+void collectLfpDescendants (
+    Component& parent,
+    std::vector<ComponentType*>&
+        results)
+{
+    if (auto* result =
+            dynamic_cast<
+                ComponentType*> (
+                &parent))
+    {
+        results.push_back (
+            result);
+    }
+
+    for (auto* child :
+         parent.getChildren())
+    {
+        collectLfpDescendants<
+            ComponentType> (
+            *child,
+            results);
+    }
 }
 
 template <typename ComponentType>
@@ -3895,6 +3923,782 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesSortByDepthToggleForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (
+        true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".sort_by_depth";
+        auto* button =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (
+            button,
+            nullptr)
+            << id;
+        auto* handler =
+            button
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        const auto description =
+            "Turn metadata-based channel ordering on or off in LFP display "
+            + String (displayNumber)
+            + ". When enabled, visible channels are ordered using available group, depth, and horizontal-position metadata. This changes display order only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                toggleButton);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (
+                    displayNumber)
+                + " sort channels by depth");
+        EXPECT_EQ (
+            handler
+                ->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        EXPECT_TRUE (
+            handler
+                ->getCurrentState()
+                .isCheckable());
+        EXPECT_FALSE (
+            handler
+                ->getCurrentState()
+                .isChecked());
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        toggle));
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_TRUE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "Off");
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *button)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SortByDepthToggleRunsOnMessageThreadAndTracksProgrammaticState)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (
+        true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.sort_by_depth";
+    auto* button =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        button,
+        nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *button);
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        options,
+        nullptr);
+    ASSERT_NE (
+        display,
+        nullptr);
+    auto* handler =
+        button
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+    auto* value =
+        handler
+            ->getValueInterface();
+    ASSERT_NE (
+        value,
+        nullptr);
+    const auto actions =
+        handler->getActions();
+
+    LfpThreadTrackingButtonListener
+        listener;
+    button->addListener (
+        &listener);
+    std::atomic<bool>
+        workerReturned { false };
+    bool toggled = false;
+    std::thread worker (
+        [&]
+        {
+            toggled =
+                actions.invoke (
+                    AccessibilityActionType::
+                        toggle);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && (! workerReturned.load()
+                 || ! display
+                           ->shouldOrderChannelsByDepth());
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+    button->removeListener (
+        &listener);
+
+    EXPECT_TRUE (toggled);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_TRUE (
+        display
+            ->shouldOrderChannelsByDepth());
+    EXPECT_TRUE (
+        button->getToggleState());
+    EXPECT_TRUE (
+        handler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "On");
+
+    options->setSortByDepth (
+        false);
+    EXPECT_FALSE (
+        display
+            ->shouldOrderChannelsByDepth());
+    EXPECT_FALSE (
+        button->getToggleState());
+    EXPECT_FALSE (
+        handler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "Off");
+    button->setEnabled (
+        false);
+    workerReturned.store (
+        false);
+    std::thread disabledWorker (
+        [&]
+        {
+            toggled =
+                actions.invoke (
+                    AccessibilityActionType::
+                        toggle);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        disabledWorker,
+        workerReturned);
+    EXPECT_TRUE (toggled);
+    EXPECT_FALSE (
+        display
+            ->shouldOrderChannelsByDepth());
+    EXPECT_FALSE (
+        button->getToggleState());
+    EXPECT_FALSE (
+        handler->isEnabled());
+
+    button->setEnabled (
+        true);
+    auto* splitter =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (
+        splitter,
+        nullptr);
+    auto* displayBuffer =
+        splitter->displayBuffer;
+    splitter->displayBuffer =
+        nullptr;
+    options->setSortByDepth (
+        true);
+    EXPECT_TRUE (
+        display
+            ->shouldOrderChannelsByDepth());
+    EXPECT_TRUE (
+        button->getToggleState());
+    EXPECT_TRUE (
+        handler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "On");
+    options->setSortByDepth (
+        false);
+    splitter->displayBuffer =
+        displayBuffer;
+
+    canvas.reset();
+    workerReturned.store (
+        false);
+    std::thread destroyedWorker (
+        [&]
+        {
+            actions.invoke (
+                AccessibilityActionType::
+                    toggle);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        destroyedWorker,
+        workerReturned);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SortByDepthXmlRoundTripsPerPaneWithoutNotifications)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (
+        true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    std::array<Button*, 3>
+        buttons {};
+    std::array<
+        LfpViewer::
+            LfpDisplayOptions*,
+        3>
+        options {};
+    std::array<
+        LfpViewer::
+            LfpDisplay*,
+        3>
+        displays {};
+    std::array<
+        AccessibilityValueInterface*,
+        3>
+        values {};
+    std::array<
+        LfpThreadTrackingButtonListener,
+        3>
+        listeners;
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        buttons[displayIndex] =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + String (
+                            displayIndex
+                            + 1)
+                        + ".sort_by_depth"));
+        ASSERT_NE (
+            buttons[displayIndex],
+            nullptr);
+        options[displayIndex] =
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[
+                    displayIndex]);
+        ASSERT_NE (
+            options[displayIndex],
+            nullptr);
+        values[displayIndex] =
+            buttons[displayIndex]
+                ->getAccessibilityHandler()
+                ->getValueInterface();
+        ASSERT_NE (
+            values[displayIndex],
+            nullptr);
+        buttons[displayIndex]
+            ->addListener (
+                &listeners[
+                    displayIndex]);
+        options[displayIndex]
+            ->setSortByDepth (
+                displayIndex != 1);
+    }
+    std::vector<
+        LfpViewer::
+            LfpDisplay*>
+        allDisplays;
+    collectLfpDescendants (
+        *canvas,
+        allDisplays);
+    ASSERT_EQ (
+        allDisplays.size(),
+        3);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        for (auto* candidate :
+             allDisplays)
+        {
+            if (candidate->options
+                == options[
+                    displayIndex])
+            {
+                displays[displayIndex] =
+                    candidate;
+                break;
+            }
+        }
+        ASSERT_NE (
+            displays[displayIndex],
+            nullptr);
+    }
+
+    XmlElement savedRoot (
+        "ROOT");
+    for (auto* paneOptions :
+         options)
+    {
+        paneOptions
+            ->saveParameters (
+                &savedRoot);
+    }
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        auto* savedPane =
+            savedRoot
+                .getChildByName (
+                    "LFPDISPLAY"
+                    + String (
+                        displayIndex));
+        ASSERT_NE (
+            savedPane,
+            nullptr);
+        EXPECT_EQ (
+            savedPane
+                ->getBoolAttribute (
+                    "sortByDepth"),
+            displayIndex != 1);
+        options[displayIndex]
+            ->setSortByDepth (
+                false);
+    }
+
+    for (auto* paneOptions :
+         options)
+    {
+        paneOptions
+            ->loadParameters (
+                &savedRoot);
+    }
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto expected =
+            displayIndex != 1;
+        EXPECT_EQ (
+            buttons[displayIndex]
+                ->getToggleState(),
+            expected);
+        EXPECT_EQ (
+            buttons[displayIndex]
+                ->getAccessibilityHandler()
+                ->getCurrentState()
+                .isChecked(),
+            expected);
+        EXPECT_EQ (
+            values[displayIndex]
+                ->getCurrentValueAsString(),
+            expected
+                ? String ("On")
+                : String ("Off"));
+        EXPECT_EQ (
+            displays[displayIndex]
+                ->shouldOrderChannelsByDepth(),
+            expected);
+        EXPECT_EQ (
+            listeners[displayIndex]
+                .callbackCount
+                .load(),
+            0);
+    }
+
+    for (auto* savedPane :
+         savedRoot
+             .getChildIterator())
+    {
+        savedPane->removeAttribute (
+            "sortByDepth");
+    }
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        options[displayIndex]
+            ->setSortByDepth (
+                true);
+        options[displayIndex]
+            ->loadParameters (
+                &savedRoot);
+        EXPECT_FALSE (
+            buttons[displayIndex]
+                ->getToggleState());
+        EXPECT_FALSE (
+            buttons[displayIndex]
+                ->getAccessibilityHandler()
+                ->getCurrentState()
+                .isChecked());
+        EXPECT_EQ (
+            values[displayIndex]
+                ->getCurrentValueAsString(),
+            "Off");
+        EXPECT_FALSE (
+            displays[displayIndex]
+                ->shouldOrderChannelsByDepth());
+        EXPECT_EQ (
+            listeners[displayIndex]
+                .callbackCount
+                .load(),
+            0);
+        buttons[displayIndex]
+            ->removeListener (
+                &listeners[
+                    displayIndex]);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SortByDepthOrdersVisibleChannelsByMetadataBeforeReverse)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        display,
+        nullptr);
+    ASSERT_NE (
+        display->options,
+        nullptr);
+    auto* splitter =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (
+        splitter,
+        nullptr);
+    ASSERT_NE (
+        splitter->displayBuffer,
+        nullptr);
+    ASSERT_EQ (
+        display
+            ->channelInfo
+            .size(),
+        16);
+    ASSERT_EQ (
+        splitter
+            ->displayBuffer
+            ->channelMetadata
+            .size(),
+        16);
+
+    const auto getOrder =
+        [&]
+    {
+        std::vector<int> order;
+        for (const auto& track :
+             display->drawableChannels)
+        {
+            for (int channel = 0;
+                 channel < display
+                               ->channelInfo
+                               .size();
+                 ++channel)
+            {
+                if (display
+                        ->channelInfo[
+                            channel]
+                    == track.channelInfo)
+                {
+                    order.push_back (
+                        channel);
+                    break;
+                }
+            }
+        }
+        return order;
+    };
+    std::vector<int> originalOrder;
+    for (int channel = 0;
+         channel < 16;
+         ++channel)
+    {
+        originalOrder.push_back (
+            channel);
+        auto& metadata =
+            splitter
+                ->displayBuffer
+                ->channelMetadata
+                .getReference (
+                    channel);
+        metadata.group = 2;
+        metadata.ypos =
+            float (channel);
+        metadata.xpos = 0.0f;
+        metadata.hasGroupMetadata = true;
+        metadata.hasYposMetadata = true;
+        metadata.hasXposMetadata = true;
+    }
+    auto& channel0 =
+        splitter
+            ->displayBuffer
+            ->channelMetadata
+            .getReference (0);
+    channel0.group = 0;
+    channel0.ypos = 200.0f;
+    splitter
+        ->displayBuffer
+        ->channelMetadata
+        .getReference (2)
+        .ypos = 1.0f;
+    auto& channel4 =
+        splitter
+            ->displayBuffer
+            ->channelMetadata
+            .getReference (4);
+    channel4.group = 1;
+    channel4.ypos = 100.0f;
+    auto& channel8 =
+        splitter
+            ->displayBuffer
+            ->channelMetadata
+            .getReference (8);
+    channel8.group = 0;
+    channel8.ypos = 100.0f;
+    channel8.xpos = 10.0f;
+    auto& channel12 =
+        splitter
+            ->displayBuffer
+            ->channelMetadata
+            .getReference (12);
+    channel12.group = 0;
+    channel12.ypos = 100.0f;
+    channel12.xpos = -5.0f;
+    canvas->updateSettings();
+
+    display->options
+        ->setSortByDepth (
+            false);
+    EXPECT_EQ (
+        getOrder(),
+        originalOrder);
+
+    display->options
+        ->setSortByDepth (
+            true);
+    const std::vector<int>
+        sortedOrder {
+            12,
+            8,
+            0,
+            4,
+            1,
+            2,
+            3,
+            5,
+            6,
+            7,
+            9,
+            10,
+            11,
+            13,
+            14,
+            15
+        };
+    EXPECT_EQ (
+        getOrder(),
+        sortedOrder);
+
+    display->options
+        ->setChannelsReversed (
+            true);
+    auto reversedOrder =
+        sortedOrder;
+    std::reverse (
+        reversedOrder.begin(),
+        reversedOrder.end());
+    EXPECT_EQ (
+        getOrder(),
+        reversedOrder);
+
+    display->options
+        ->setChannelsReversed (
+            false);
+    display->options
+        ->setSortByDepth (
+            false);
+    for (int channel = 0;
+         channel < 16;
+         ++channel)
+    {
+        auto& metadata =
+            splitter
+                ->displayBuffer
+                ->channelMetadata
+                .getReference (
+                    channel);
+        metadata.group = 0;
+        metadata.ypos = 0.0f;
+        metadata.xpos = 0.0f;
+        metadata.hasGroupMetadata = false;
+        metadata.hasYposMetadata = false;
+        metadata.hasXposMetadata = false;
+    }
+    canvas->updateSettings();
+    display->options
+        ->setSortByDepth (
+            true);
+    EXPECT_EQ (
+        getOrder(),
+        originalOrder);
+}
+
+TEST_F (LfpDisplayNodeTests,
         ExposesRangeTypeSelectorsForEveryPane)
 {
     auto canvas =
@@ -6091,6 +6895,198 @@ TEST_F (LfpDisplayNodeTests,
             L"8");
     EXPECT_EQ (
         hiddenResult.invokeResult,
+        E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerTogglesSortByDepth)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (
+        true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.sort_by_depth";
+    auto* button =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        button,
+        nullptr);
+    ASSERT_NE (
+        display,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto runAction =
+        [&] (
+            StringRef targetId,
+            LfpWindowsUiaAction action)
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (
+                                targetId)
+                                .toWideCharPointer()),
+                        action);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return actionResult;
+    };
+
+    const auto description =
+        L"Turn metadata-based channel ordering on or off in LFP display 1. When enabled, visible channels are ordered using available group, depth, and horizontal-position metadata. This changes display order only; acquisition and recording are unaffected.";
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryToggle);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (
+        initialResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 sort channels by depth");
+    EXPECT_EQ (
+        initialResult.help,
+        description);
+    EXPECT_TRUE (
+        initialResult
+            .togglePatternAvailable);
+    EXPECT_EQ (
+        initialResult.toggleState,
+        ToggleState_Off);
+    EXPECT_TRUE (
+        initialResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult.valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.value,
+        L"Off");
+    EXPECT_FALSE (
+        initialResult
+            .invokePatternAvailable);
+
+    const auto enabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                toggle);
+    EXPECT_EQ (
+        enabledResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        enabledResult.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (
+        enabledResult.value,
+        L"On");
+    EXPECT_TRUE (
+        button->getToggleState());
+    EXPECT_TRUE (
+        display
+            ->shouldOrderChannelsByDepth());
+
+    button->setEnabled (
+        false);
+    const auto disabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                toggle);
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_TRUE (
+        button->getToggleState());
+    EXPECT_TRUE (
+        display
+            ->shouldOrderChannelsByDepth());
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix
+                + "2.sort_by_depth",
+            LfpWindowsUiaAction::
+                queryToggle);
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
+        E_FAIL);
+
+    button->setEnabled (
+        true);
+    canvas->toggleOptionsDrawer (
+        false);
+    const auto closedDrawerResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryToggle);
+    EXPECT_EQ (
+        closedDrawerResult.invokeResult,
         E_FAIL);
 }
 

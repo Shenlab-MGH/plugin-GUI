@@ -75,6 +75,35 @@ private:
         accessibilityState;
 };
 
+/** A worker-safe on/off control for display-only options. */
+class TESTABLE LfpOptionToggleButton
+    : public UtilityButton
+{
+public:
+    explicit LfpOptionToggleButton (
+        String label);
+    ~LfpOptionToggleButton() override;
+
+    /** Publishes the current state for accessibility providers. */
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+private:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (
+        FocusChangeType cause) override;
+    void focusLost (
+        FocusChangeType cause) override;
+
+    std::shared_ptr<
+        LfpOptionButtonAccessibilityState>
+        accessibilityState;
+};
+
 /** A channel-type radio control with worker-safe UI Automation state and actions. */
 class TESTABLE LfpChannelTypeButton : public UtilityButton
 {
@@ -346,7 +375,9 @@ private:
     std::unique_ptr<UtilityButton> reverseChannelsDisplayButton;
     std::unique_ptr<Label> reverseChannelsLabel;
 
-    std::unique_ptr<UtilityButton> sortByDepthButton;
+    std::unique_ptr<
+        LfpOptionToggleButton>
+        sortByDepthButton;
     std::unique_ptr<Label> sortByDepthLabel;
 
     std::unique_ptr<ComboBox> channelDisplaySkipSelection;

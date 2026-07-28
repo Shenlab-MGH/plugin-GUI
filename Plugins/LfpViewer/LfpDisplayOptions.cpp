@@ -202,17 +202,25 @@ private:
 
 namespace
 {
-class LfpPauseButtonAccessibilityValue final
+class LfpToggleButtonAccessibilityValue final
     : public AccessibilityTextValueInterface
 {
 public:
-    explicit LfpPauseButtonAccessibilityValue (
+    LfpToggleButtonAccessibilityValue (
         std::shared_ptr<
             LfpOptionButtonAccessibilityState>
-            stateToUse)
+            stateToUse,
+        String checkedValueToUse,
+        String uncheckedValueToUse)
         : state (
               std::move (
-                  stateToUse))
+                  stateToUse)),
+          checkedValue (
+              std::move (
+                  checkedValueToUse)),
+          uncheckedValue (
+              std::move (
+                  uncheckedValueToUse))
     {
     }
 
@@ -231,25 +239,29 @@ public:
         const override
     {
         return state->isChecked()
-                   ? String ("Paused")
-                   : String ("Running");
+                   ? checkedValue
+                   : uncheckedValue;
     }
 
 private:
     std::shared_ptr<
         LfpOptionButtonAccessibilityState>
         state;
+    const String checkedValue;
+    const String uncheckedValue;
 };
 
-class LfpPauseButtonAccessibilityHandler final
+class LfpToggleButtonAccessibilityHandler final
     : public AccessibilityHandler
 {
 public:
-    LfpPauseButtonAccessibilityHandler (
+    LfpToggleButtonAccessibilityHandler (
         Button& button,
         std::shared_ptr<
             LfpOptionButtonAccessibilityState>
-            stateToUse)
+            stateToUse,
+        String checkedValue,
+        String uncheckedValue)
         : AccessibilityHandler (
               button,
               AccessibilityRole::
@@ -258,8 +270,12 @@ public:
                   stateToUse),
               AccessibilityHandler::Interfaces {
                   std::make_unique<
-                      LfpPauseButtonAccessibilityValue> (
-                      stateToUse) }),
+                      LfpToggleButtonAccessibilityValue> (
+                      stateToUse,
+                      std::move (
+                          checkedValue),
+                      std::move (
+                          uncheckedValue)) }),
           state (
               std::move (
                   stateToUse))
@@ -554,9 +570,11 @@ LfpPauseButton::
     createAccessibilityHandler()
 {
     return std::make_unique<
-        LfpPauseButtonAccessibilityHandler> (
+        LfpToggleButtonAccessibilityHandler> (
         *this,
-        accessibilityState);
+        accessibilityState,
+        "Paused",
+        "Running");
 }
 
 void LfpPauseButton::
@@ -606,6 +624,95 @@ void LfpPauseButton::focusGained (
 
 void LfpPauseButton::focusLost (
     FocusChangeType cause)
+{
+    UtilityButton::focusLost (
+        cause);
+    refreshAccessibilityState();
+}
+
+LfpOptionToggleButton::
+    LfpOptionToggleButton (
+        String label)
+    : UtilityButton (
+          std::move (label)),
+      accessibilityState (
+          std::make_shared<
+              LfpOptionButtonAccessibilityState>())
+{
+    accessibilityState->attach (
+        this);
+    setClickingTogglesState (
+        true);
+    refreshAccessibilityState();
+}
+
+LfpOptionToggleButton::
+    ~LfpOptionToggleButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+LfpOptionToggleButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        LfpToggleButtonAccessibilityHandler> (
+        *this,
+        accessibilityState,
+        "On",
+        "Off");
+}
+
+void LfpOptionToggleButton::
+    refreshAccessibilityState()
+{
+    auto title = getTitle();
+    if (title.isEmpty())
+        title = getName();
+    auto help = getHelpText();
+    if (help.isEmpty())
+        help = getDescription();
+
+    accessibilityState
+        ->synchronise (
+            std::move (title),
+            getDescription(),
+            std::move (help),
+            getToggleState(),
+            Component::isEnabled(),
+            hasKeyboardFocus (
+                false));
+}
+
+void LfpOptionToggleButton::
+    buttonStateChanged()
+{
+    UtilityButton::
+        buttonStateChanged();
+    refreshAccessibilityState();
+}
+
+void LfpOptionToggleButton::
+    enablementChanged()
+{
+    UtilityButton::
+        enablementChanged();
+    refreshAccessibilityState();
+}
+
+void LfpOptionToggleButton::
+    focusGained (
+        FocusChangeType cause)
+{
+    UtilityButton::focusGained (
+        cause);
+    refreshAccessibilityState();
+}
+
+void LfpOptionToggleButton::
+    focusLost (
+        FocusChangeType cause)
 {
     UtilityButton::focusLost (
         cause);
@@ -1511,17 +1618,37 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     extendedOptions->addAndMakeVisible (reverseChannelsLabel.get());
 
     // Sort by depth
-    sortByDepthButton = std::make_unique<UtilityButton> ("OFF");
+    sortByDepthButton =
+        std::make_unique<
+            LfpOptionToggleButton> (
+            "OFF");
     sortByDepthButton->setRadius (5.0f);
     sortByDepthButton->setEnabledState (true);
     sortByDepthButton->setCorners (true, true, true, true);
     sortByDepthButton->addListener (this);
-    sortByDepthButton->setClickingTogglesState (true);
     sortByDepthButton->setToggleState (false, sendNotification);
+    const auto sortByDepthDescription =
+        "Turn metadata-based channel ordering on or off in LFP display "
+        + String (displayNumber)
+        + ". When enabled, visible channels are ordered using available group, depth, and horizontal-position metadata. This changes display order only; acquisition and recording are unaffected.";
+    applyLfpDisplayControlMetadata (
+        *sortByDepthButton,
+        *processor,
+        displayNumber,
+        "sort_by_depth",
+        "LFP display "
+            + String (
+                displayNumber)
+            + " sort channels by depth",
+        sortByDepthDescription);
+    sortByDepthButton
+        ->refreshAccessibilityState();
     extendedOptions->addAndMakeVisible (sortByDepthButton.get());
 
     sortByDepthLabel = std::make_unique<Label> ("SortByDepthLabel", "Sort by depth:");
     sortByDepthLabel->setFont (labelFont);
+    sortByDepthLabel->setAccessible (
+        false);
     extendedOptions->addAndMakeVisible (sortByDepthLabel.get());
 
     // Channel skip
@@ -2103,11 +2230,12 @@ void LfpDisplayOptions::setAveraging (bool state)
 
 void LfpDisplayOptions::setSortByDepth (bool state)
 {
-    if (lfpDisplay->shouldOrderChannelsByDepth() == state)
-        return;
-
-    if (canvasSplit->displayBuffer != nullptr)
+    if (lfpDisplay
+            ->shouldOrderChannelsByDepth()
+        != state)
+    {
         lfpDisplay->orderChannelsByDepth (state);
+    }
 
     sortByDepthButton->setToggleState (state, dontSendNotification);
 

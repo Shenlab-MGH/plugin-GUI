@@ -132,7 +132,7 @@ public:
     void orderChannelsByDepth (bool state);
 
     /** Returns true if channels are ordered by depth */
-    bool shouldOrderChannelsByDepth();
+    TESTABLE bool shouldOrderChannelsByDepth();
 
     /** Returns a factor of 2 by which the displayed channels should skip */
     int getChannelDisplaySkipAmount();
