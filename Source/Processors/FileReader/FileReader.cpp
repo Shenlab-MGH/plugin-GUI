@@ -403,7 +403,9 @@ int64 FileReader::getCurrentNumTotalSamples()
 
 float FileReader::getCurrentSampleRate() const
 {
-    return input->getActiveSampleRate();
+    return input != nullptr
+               ? input->getActiveSampleRate()
+               : 0.0f;
 }
 
 float FileReader::getDefaultSampleRate() const

@@ -26,6 +26,53 @@
 
 namespace
 {
+class WritableNormalizedValue final
+    : public AccessibilityRangedNumericValueInterface
+{
+public:
+    WritableNormalizedValue (
+        std::function<double()> getValueIn,
+        std::function<void (double)> setValueIn,
+        std::function<double()> getStepIn)
+        : getValue (std::move (getValueIn)),
+          setValueCallback (std::move (setValueIn)),
+          getStep (std::move (getStepIn))
+    {
+    }
+
+    bool isReadOnly() const override { return false; }
+
+    void setValue (double value) override
+    {
+        setValueCallback (
+            jlimit (0.0, 1.0, value));
+    }
+
+    double getCurrentValue() const override
+    {
+        return jlimit (
+            0.0,
+            1.0,
+            getValue());
+    }
+
+    AccessibleValueRange getRange() const override
+    {
+        return {
+            { 0.0, 1.0 },
+            jlimit (
+                0.000001,
+                1.0,
+                getStep())
+        };
+    }
+
+private:
+    std::function<double()> getValue;
+    std::function<void (double)> setValueCallback;
+    std::function<double()> getStep;
+};
+
 class ScrubberTimeLabel final : public Label
 {
 public:
@@ -46,6 +93,21 @@ public:
             });
     }
 };
+
+ScrubberInterface*
+getScrubberInterfaceIfAvailable (
+    FileReader* fileReader)
+{
+    if (fileReader == nullptr)
+        return nullptr;
+
+    if (auto* editor =
+            dynamic_cast<FileReaderEditor*> (
+                fileReader->getEditor()))
+        return editor->getScrubberInterface();
+
+    return nullptr;
+}
 } // namespace
 
 void FullTimeline::paint (Graphics& g)
@@ -135,28 +197,127 @@ void FullTimeline::paint (Graphics& g)
 
 void FullTimeline::setIntervalPosition (int pos)
 {
-    intervalStartPosition = pos;
-
-    float sampleRate = fileReader->getCurrentSampleRate();
-    int64 totalSamples = (stopMs - startMs) / 1000.0f * sampleRate;
-    float totalTimeInSeconds = float (totalSamples) / sampleRate;
+    const auto totalTimeInSeconds =
+        jmax (0.0, getIntervalDurationInSeconds());
 
     if (totalTimeInSeconds >= MAX_ZOOM_DURATION_IN_SECONDS)
-        intervalWidth = MAX_ZOOM_DURATION_IN_SECONDS / totalTimeInSeconds * float (getWidth());
+        intervalWidth =
+            roundToInt (
+                MAX_ZOOM_DURATION_IN_SECONDS
+                / totalTimeInSeconds
+                * getWidth());
     else
         intervalWidth = getWidth();
 
-    // Prevent interval from going out of bounds
-    if (intervalStartPosition + intervalWidth > getWidth())
-    {
-        intervalStartPosition = getWidth() - intervalWidth;
-        fileReader->getScrubberInterface()->updatePlaybackTimes();
-    }
+    const auto maximumStartPosition =
+        jmax (0, getWidth() - intervalWidth);
+    const auto newPosition =
+        jlimit (
+            0,
+            maximumStartPosition,
+            pos);
+
+    if (intervalStartPosition == newPosition)
+        return;
+
+    intervalStartPosition = newPosition;
+    repaint();
+
+    if (auto* handler =
+            getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::valueChanged);
 }
 
 double FullTimeline::getIntervalDurationInSeconds()
 {
     return ((stopMs - startMs) / 1000.0f);
+}
+
+double FullTimeline::getNormalizedPosition() const
+{
+    const auto maximumStartPosition =
+        jmax (0, getWidth() - intervalWidth);
+
+    return maximumStartPosition > 0
+               ? static_cast<double> (
+                     intervalStartPosition)
+                     / maximumStartPosition
+               : 0.0;
+}
+
+void FullTimeline::setNormalizedPosition (
+    double position)
+{
+    setIntervalPosition (
+        intervalStartPosition);
+
+    const auto maximumStartPosition =
+        jmax (0, getWidth() - intervalWidth);
+    setIntervalPosition (
+        roundToInt (
+            jlimit (0.0, 1.0, position)
+            * maximumStartPosition));
+
+    if (auto* scrubber =
+            getScrubberInterfaceIfAvailable (
+                fileReader))
+        scrubber->updateTimeLabels();
+
+    if (auto* editor =
+            fileReader->getEditor())
+        editor->repaint();
+
+    seekToIntervalStart();
+}
+
+std::unique_ptr<AccessibilityHandler>
+FullTimeline::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::slider,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces {
+            std::make_unique<
+                WritableNormalizedValue> (
+                [safeTimeline =
+                     Component::SafePointer<
+                         FullTimeline> (this)]
+                {
+                    return safeTimeline != nullptr
+                               ? safeTimeline
+                                     ->getNormalizedPosition()
+                               : 0.0;
+                },
+                [safeTimeline =
+                     Component::SafePointer<
+                         FullTimeline> (this)] (
+                    double position)
+                {
+                    if (safeTimeline != nullptr)
+                        safeTimeline
+                            ->setNormalizedPosition (
+                                position);
+                },
+                [safeTimeline =
+                     Component::SafePointer<
+                         FullTimeline> (this)]
+                {
+                    if (safeTimeline == nullptr)
+                        return 1.0;
+
+                    const auto maximumTravel =
+                        jmax (
+                            0,
+                            safeTimeline->getWidth()
+                                - safeTimeline
+                                      ->getIntervalWidth());
+                    return maximumTravel > 0
+                               ? 1.0
+                                     / maximumTravel
+                               : 1.0;
+                }) });
 }
 
 void FullTimeline::mouseDown (const MouseEvent& event)
@@ -172,22 +333,154 @@ void FullTimeline::mouseDrag (const MouseEvent& event)
     if (intervalIsSelected)
     {
         if (event.x >= intervalWidth / 2 && event.x < getWidth() - intervalWidth / 2)
-            intervalStartPosition = event.x - intervalWidth / 2;
+            setIntervalPosition (
+                event.x
+                - intervalWidth / 2);
     }
 
     repaint();
-    fileReader->getScrubberInterface()->updateTimeLabels();
-    fileReader->getEditor()->repaint();
+    if (auto* scrubber =
+            getScrubberInterfaceIfAvailable (
+                fileReader))
+        scrubber->updateTimeLabels();
+
+    if (auto* editor =
+            fileReader->getEditor())
+        editor->repaint();
 }
 
 void FullTimeline::mouseUp (const MouseEvent& event)
 {
     if (intervalIsSelected)
-    {
-        int64 currentSample = float(getStartInterval()) / float(getWidth()) * fileReader->getCurrentNumTotalSamples() + fileReader->getPlaybackStart();
-        fileReader->setCurrentSample (currentSample);
-    }
+        seekToIntervalStart();
+
     intervalIsSelected = false;
+}
+
+void FullTimeline::seekToIntervalStart()
+{
+    if (fileReader == nullptr
+        || getWidth() <= 0
+        || fileReader
+                   ->getCurrentNumTotalSamples()
+               <= 0
+        || fileReader->getCurrentSampleRate()
+               <= 0.0f)
+        return;
+
+    const auto currentSample =
+        static_cast<int64> (
+            static_cast<double> (
+                getStartInterval())
+            / getWidth()
+            * fileReader
+                  ->getCurrentNumTotalSamples())
+        + fileReader->getPlaybackStart();
+    fileReader->setCurrentSample (
+        currentSample);
+}
+
+void ZoomTimeline::setSliderPosition (
+    int position)
+{
+    const auto maximumPosition =
+        jmax (0, getWidth() - sliderWidth);
+    const auto newPosition =
+        jlimit (
+            0,
+            maximumPosition,
+            position);
+
+    if (sliderPosition == newPosition)
+        return;
+
+    sliderPosition =
+        static_cast<float> (newPosition);
+    repaint();
+
+    if (auto* handler =
+            getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::valueChanged);
+}
+
+double ZoomTimeline::getNormalizedPosition() const
+{
+    const auto maximumPosition =
+        jmax (0, getWidth() - sliderWidth);
+
+    return maximumPosition > 0
+               ? sliderPosition
+                     / maximumPosition
+               : 0.0;
+}
+
+void ZoomTimeline::setNormalizedPosition (
+    double position)
+{
+    const auto maximumPosition =
+        jmax (0, getWidth() - sliderWidth);
+    setSliderPosition (
+        roundToInt (
+            jlimit (0.0, 1.0, position)
+            * maximumPosition));
+
+    if (fileReader->getCurrentSampleRate()
+            > 0.0f)
+        if (auto* scrubber =
+                getScrubberInterfaceIfAvailable (
+                    fileReader))
+            scrubber->setCurrentSample (
+                getSliderPosition());
+}
+
+std::unique_ptr<AccessibilityHandler>
+ZoomTimeline::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::slider,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces {
+            std::make_unique<
+                WritableNormalizedValue> (
+                [safeTimeline =
+                     Component::SafePointer<
+                         ZoomTimeline> (this)]
+                {
+                    return safeTimeline != nullptr
+                               ? safeTimeline
+                                     ->getNormalizedPosition()
+                               : 0.0;
+                },
+                [safeTimeline =
+                     Component::SafePointer<
+                         ZoomTimeline> (this)] (
+                    double position)
+                {
+                    if (safeTimeline != nullptr)
+                        safeTimeline
+                            ->setNormalizedPosition (
+                                position);
+                },
+                [safeTimeline =
+                     Component::SafePointer<
+                         ZoomTimeline> (this)]
+                {
+                    if (safeTimeline == nullptr)
+                        return 1.0;
+
+                    const auto maximumTravel =
+                        jmax (
+                            0,
+                            safeTimeline->getWidth()
+                                - safeTimeline
+                                      ->sliderWidth);
+                    return maximumTravel > 0
+                               ? 1.0
+                                     / maximumTravel
+                               : 1.0;
+                }) });
 }
 
 void ZoomTimeline::paint (Graphics& g)
@@ -272,7 +565,9 @@ void ZoomTimeline::mouseDrag (const MouseEvent& event)
 {
     if (sliderIsSelected)
     {
-        sliderPosition = event.x - sliderWidth / 2;
+        setSliderPosition (
+            event.x
+            - sliderWidth / 2);
     }
     /*
     else if (rightSliderIsSelected)
@@ -293,13 +588,6 @@ void ZoomTimeline::mouseDrag (const MouseEvent& event)
     }
     */
 
-    // Prevent slider going out of timeline bounds
-    if (sliderPosition < 0)
-        sliderPosition = 0;
-
-    if (sliderPosition > getWidth() - sliderWidth)
-        sliderPosition = getWidth() - sliderWidth;
-
     repaint();
 }
 
@@ -307,7 +595,11 @@ void ZoomTimeline::mouseUp (const MouseEvent& event)
 {
     if (sliderIsSelected)
     {
-        fileReader->getScrubberInterface()->setCurrentSample (sliderPosition);
+        if (auto* scrubber =
+                getScrubberInterfaceIfAvailable (
+                    fileReader))
+            scrubber->setCurrentSample (
+                getSliderPosition());
     }
     sliderIsSelected = false;
 }
@@ -443,10 +735,20 @@ ScrubberInterface::ScrubberInterface (FileReader* fileReader_)
 
     int padding = 30;
     zoomTimeline = std::make_unique<ZoomTimeline> (fileReader);
+    applySemanticMetadata (
+        *zoomTimeline,
+        scrubberId + ".zoom_timeline",
+        "Playback position in zoom window",
+        "Move the file-reader playhead within the current zoom window.");
     zoomTimeline->setBounds (padding, 46, scrubInterfaceWidth - 2 * padding, 20);
     addAndMakeVisible (zoomTimeline.get());
 
     fullTimeline = std::make_unique<FullTimeline> (fileReader);
+    applySemanticMetadata (
+        *fullTimeline,
+        scrubberId + ".full_timeline",
+        "Zoom window position",
+        "Move the 30-second zoom window through the configured playback range.");
     fullTimeline->setBounds (padding, 76, scrubInterfaceWidth - 2 * padding, 20);
     addAndMakeVisible (fullTimeline.get());
 
@@ -463,26 +765,42 @@ ScrubberInterface::createAccessibilityHandler()
 
 void ScrubberInterface::setCurrentSample (int zoomTimelinePos)
 {
+    const auto sampleRate =
+        fileReader->getCurrentSampleRate();
+
+    if (sampleRate <= 0.0f
+        || fullTimeline->getWidth() <= 0
+        || zoomTimeline->getWidth() <= 0)
+        return;
+
     // Compute the new current sample number based on the full timeline and zoom timeline slider positions
-    int64 totalSamples = fullTimeline->getIntervalDurationInSeconds() * fileReader->getCurrentSampleRate();
+    int64 totalSamples = fullTimeline->getIntervalDurationInSeconds() * sampleRate;
     TimeParameter* start = static_cast<TimeParameter*> (fileReader->getParameter ("start_time"));
-    int64 newCurrentSample = start->getTimeValue()->getTimeInMilliseconds() / 1000.0f * fileReader->getCurrentSampleRate();
+    int64 newCurrentSample = start->getTimeValue()->getTimeInMilliseconds() / 1000.0f * sampleRate;
     newCurrentSample += float (getFullTimelineStartPosition()) / fullTimeline->getWidth() * totalSamples;
-    float totalTimeInSeconds = float (totalSamples) / fileReader->getCurrentSampleRate();
+    float totalTimeInSeconds = float (totalSamples) / sampleRate;
     float intervalWidth = totalTimeInSeconds >= MAX_ZOOM_DURATION_IN_SECONDS ? MAX_ZOOM_DURATION_IN_SECONDS : totalTimeInSeconds;
-    newCurrentSample += float (zoomTimelinePos) / zoomTimeline->getWidth() * intervalWidth * fileReader->getCurrentSampleRate();
+    newCurrentSample += float (zoomTimelinePos) / zoomTimeline->getWidth() * intervalWidth * sampleRate;
     fileReader->setCurrentSample (newCurrentSample);
 }
 
 void ScrubberInterface::updatePlaybackTimes()
 {
-    int64 totalSamples = fullTimeline->getIntervalDurationInSeconds() * fileReader->getCurrentSampleRate();
+    const auto sampleRate =
+        fileReader->getCurrentSampleRate();
+
+    if (sampleRate <= 0.0f
+        || fullTimeline->getWidth() <= 0
+        || zoomTimeline->getWidth() <= 0)
+        return;
+
+    int64 totalSamples = fullTimeline->getIntervalDurationInSeconds() * sampleRate;
 
     TimeParameter* start = static_cast<TimeParameter*> (fileReader->getParameter ("start_time"));
 
-    int64 newStartSample = start->getTimeValue()->getTimeInMilliseconds() / 1000.0f * fileReader->getCurrentSampleRate();
+    int64 newStartSample = start->getTimeValue()->getTimeInMilliseconds() / 1000.0f * sampleRate;
     newStartSample += float (getFullTimelineStartPosition()) / fullTimeline->getWidth() * totalSamples;
-    float totalTimeInSeconds = float (totalSamples) / fileReader->getCurrentSampleRate();
+    float totalTimeInSeconds = float (totalSamples) / sampleRate;
     float intervalWidth = totalTimeInSeconds >= MAX_ZOOM_DURATION_IN_SECONDS ? MAX_ZOOM_DURATION_IN_SECONDS : totalTimeInSeconds;
     newStartSample += float (getZoomTimelineStartPosition()) / zoomTimeline->getWidth() * intervalWidth;
     fileReader->setPlaybackStart (newStartSample);
@@ -580,7 +898,11 @@ void ScrubberInterface::updateTimeLabels()
     // Get current playhead time from currentSample
     float sampleRate = fileReader->getCurrentSampleRate();
     int64 currentSample = fileReader->getPlayheadPosition();
-    float currentTime = currentSample / sampleRate * 1000.0f;
+    float currentTime =
+        sampleRate > 0.0f
+            ? currentSample / sampleRate
+                  * 1000.0f
+            : static_cast<float> (start);
     TimeParameter::TimeValue currentTimeValue = TimeParameter::TimeValue (currentTime);
     fullMiddleTimeLabel->setText (currentTimeValue.toString(), juce::sendNotificationAsync);
 }

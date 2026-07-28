@@ -62,11 +62,15 @@ protected:
     void mouseUp (const MouseEvent& event) override = 0;
 };
 
-class FullTimeline : public Timeline
+class TESTABLE FullTimeline : public Timeline
 {
 public:
     FullTimeline (FileReader* fr)
-        : Timeline (fr), intervalStartPosition (0)
+        : Timeline (fr),
+          intervalStartPosition (0),
+          intervalWidth (0),
+          intervalIsSelected (false),
+          leftSliderIsSelected (false)
     {
         startTimer (50);
     }
@@ -77,6 +81,11 @@ public:
     double getIntervalDurationInSeconds();
 
     void setIntervalPosition (int pos);
+    double getNormalizedPosition() const;
+    void setNormalizedPosition (double position);
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
     void timerCallback() override { repaint(); };
 
@@ -89,11 +98,12 @@ private:
     void mouseDown (const MouseEvent& event) override;
     void mouseDrag (const MouseEvent& event) override;
     void mouseUp (const MouseEvent& event) override;
+    void seekToIntervalStart();
 
     bool leftSliderIsSelected;
 };
 
-class ZoomTimeline : public Timeline
+class TESTABLE ZoomTimeline : public Timeline
 {
 public:
     ZoomTimeline (FileReader* fr)
@@ -107,6 +117,12 @@ public:
     ~ZoomTimeline() override {};
 
     int getSliderPosition() { return sliderPosition; }
+    void setSliderPosition (int position);
+    double getNormalizedPosition() const;
+    void setNormalizedPosition (double position);
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
     void timerCallback() override { repaint(); };
 
