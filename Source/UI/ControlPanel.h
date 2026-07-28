@@ -164,10 +164,21 @@ public:
     RecordButton();
 
     /** Destructor*/
-    ~RecordButton() {}
+    ~RecordButton() override;
+
+    /** Keeps UI Automation toggle actions on the JUCE message thread. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
     /** Re-makes images with new colours */
     void updateImages (bool recordingIsActive);
+
+protected:
+    void buttonStateChanged() override;
+
+private:
+    std::shared_ptr<
+        MessageThreadToggleButtonAccessibilityState>
+        accessibilityState;
 };
 
 /**

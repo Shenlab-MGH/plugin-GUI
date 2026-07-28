@@ -11,6 +11,12 @@ public:
     using PlayButton::createAccessibilityHandler;
 };
 
+class InspectableRecordButton final : public RecordButton
+{
+public:
+    using RecordButton::createAccessibilityHandler;
+};
+
 class ThreadRecordingButtonListener final : public Button::Listener
 {
 public:
@@ -363,6 +369,141 @@ TEST (ControlPanelAccessibilityTests,
          ++attempt)
     {
         messageManager->runDispatchLoopUntil (10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    SUCCEED();
+}
+
+TEST (ControlPanelAccessibilityTests,
+      RecordingToggleFromWorkerRunsOnMessageThread)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    InspectableRecordButton recording;
+    ThreadRecordingButtonListener listener;
+    recording.addListener (&listener);
+
+    auto handler =
+        recording.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    EXPECT_EQ (
+        listener.callCount.load(),
+        0);
+    EXPECT_FALSE (
+        recording.getToggleState());
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        listener.callCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener.usedMessageThread.load());
+    EXPECT_TRUE (
+        recording.getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+
+    recording.setToggleState (
+        false,
+        dontSendNotification);
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+}
+
+TEST (ControlPanelAccessibilityTests,
+      QueuedRecordingToggleDoesNotOutliveButton)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    auto recording =
+        std::make_unique<
+            InspectableRecordButton>();
+    auto handler =
+        recording
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                actions.invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    handler.reset();
+    recording.reset();
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
     }
     worker.join();
 

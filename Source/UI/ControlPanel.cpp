@@ -57,7 +57,7 @@ struct MessageThreadToggleButtonAccessibilityState
     }
 
     void attach (
-        PlayButton* buttonToUse)
+        Button* buttonToUse)
     {
         jassert (
             MessageManager::getInstance()
@@ -73,7 +73,7 @@ struct MessageThreadToggleButtonAccessibilityState
         button = nullptr;
     }
 
-    PlayButton* getButtonOnMessageThread() const
+    Button* getButtonOnMessageThread() const
     {
         jassert (
             MessageManager::getInstance()
@@ -83,7 +83,7 @@ struct MessageThreadToggleButtonAccessibilityState
 
 private:
     std::atomic<bool> publishedState;
-    PlayButton* button = nullptr;
+    Button* button = nullptr;
 };
 
 namespace
@@ -425,8 +425,14 @@ void PlayButton::updateImages (bool acquisitionIsActive)
 }
 
 RecordButton::RecordButton()
-    : DrawableButton ("Record Button", DrawableButton::ImageRaw)
+    : DrawableButton ("Record Button", DrawableButton::ImageRaw),
+      accessibilityState (
+          std::make_shared<
+              MessageThreadToggleButtonAccessibilityState> (
+              false))
 {
+    accessibilityState->attach (
+        this);
     setColour (DrawableButton::backgroundColourId, Colours::darkgrey.withAlpha (0.0f));
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
@@ -437,6 +443,28 @@ RecordButton::RecordButton()
                            "Start or stop writing data to disk.");
 
     updateImages (false);
+}
+
+RecordButton::~RecordButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+RecordButton::createAccessibilityHandler()
+{
+    return std::make_unique<
+        MessageThreadToggleButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void RecordButton::buttonStateChanged()
+{
+    DrawableButton::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
 }
 
 void RecordButton::updateImages (bool recordingIsActive)
