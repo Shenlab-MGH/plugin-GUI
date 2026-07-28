@@ -48,6 +48,21 @@ int resolveProcessorInsertionPoint (
 const int BORDER_SIZE = 6;
 const int TAB_SIZE = 30;
 
+namespace
+{
+class SignalChainViewport final : public Viewport
+{
+public:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override
+    {
+        return std::make_unique<AccessibilityHandler> (
+            *this,
+            AccessibilityRole::group);
+    }
+};
+} // namespace
+
 EditorViewport::EditorViewport (SignalChainTabComponent* s_)
     : message ("Drag-and-drop some rows from the top-left box onto this component!"),
       somethingIsBeingDraggedOver (false),
@@ -1290,6 +1305,14 @@ void SignalChainScrollButton::paintButton (Graphics& g, bool isMouseOverButton, 
 
 SignalChainTabComponent::SignalChainTabComponent()
 {
+    setFocusContainerType (
+        FocusContainerType::focusContainer);
+    applySemanticMetadata (
+        *this,
+        "oe.signal_chain.navigation",
+        "Signal chain navigation",
+        "Select a signal chain and navigate its editor viewport.");
+
     topTab = 0;
 
     upButton = std::make_unique<SignalChainScrollButton> (UP);
@@ -1301,7 +1324,27 @@ SignalChainTabComponent::SignalChainTabComponent()
     addAndMakeVisible (upButton.get());
     addAndMakeVisible (downButton.get());
 
-    viewport = std::make_unique<Viewport>();
+    viewport = std::make_unique<SignalChainViewport>();
+    viewport->setFocusContainerType (
+        FocusContainerType::focusContainer);
+    applySemanticMetadata (
+        *viewport,
+        "oe.signal_chain.viewport",
+        "Signal chain editor viewport",
+        "Scroll through processors in the selected signal chain.");
+
+    applySemanticMetadata (
+        viewport->getHorizontalScrollBar(),
+        "oe.signal_chain.viewport.horizontal_scrollbar",
+        "Signal chain horizontal scroll",
+        "Scroll horizontally through processors in the selected signal chain.");
+
+    applySemanticMetadata (
+        viewport->getVerticalScrollBar(),
+        "oe.signal_chain.viewport.vertical_scrollbar",
+        "Signal chain vertical scroll",
+        "Scroll vertically through the selected signal chain.");
+
     viewport->setScrollBarsShown (false, true, false, true);
     viewport->setScrollBarThickness (12);
     addAndMakeVisible (viewport.get());
@@ -1325,6 +1368,14 @@ SignalChainTabComponent::SignalChainTabComponent()
 
 SignalChainTabComponent::~SignalChainTabComponent()
 {
+}
+
+std::unique_ptr<AccessibilityHandler>
+SignalChainTabComponent::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::group);
 }
 
 void SignalChainTabComponent::setEditorViewport (EditorViewport* ev)

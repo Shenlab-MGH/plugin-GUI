@@ -68,9 +68,9 @@ TESTABLE int resolveProcessorInsertionPoint (
 
 */
 
-class EditorViewport : public Component,
-                       public DragAndDropTarget,
-                       public Label::Listener
+class TESTABLE EditorViewport : public Component,
+                                public DragAndDropTarget,
+                                public Label::Listener
 {
 public:
     /** Constructor. Adds the buttons for browsing through the signal chains.*/
@@ -335,8 +335,8 @@ private:
 
 */
 
-class SignalChainTabComponent : public Component,
-                                public Button::Listener
+class TESTABLE SignalChainTabComponent : public Component,
+                                         public Button::Listener
 {
 public:
     SignalChainTabComponent();
@@ -352,6 +352,9 @@ public:
 
     /** Draws the outline of the EditorViewport. */
     void paintOverChildren (Graphics& g) override;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
     /** Called when one of the buttons the EditorViewport listens to has been clicked.*/
     void buttonClicked (Button* button);
