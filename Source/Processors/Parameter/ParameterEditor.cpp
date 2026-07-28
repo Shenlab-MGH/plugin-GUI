@@ -27,9 +27,247 @@
 #include "../GenericProcessor/GenericProcessor.h"
 #include "../RecordNode/RecordNode.h"
 #include "../../UI/SemanticComponent.h"
+#include <mutex>
+
+struct MessageThreadComboBoxAccessibilityState
+{
+    void attach (MessageThreadComboBox* comboBoxToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        comboBox = comboBoxToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        comboBox = nullptr;
+    }
+
+    MessageThreadComboBox*
+    getComboBoxOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return comboBox;
+    }
+
+    void synchronise (
+        String newValue,
+        String newTitle,
+        String newDescription,
+        String newHelp,
+        bool isExpanded,
+        bool isEnabled,
+        bool hasFocus)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            value = std::move (newValue);
+            title = std::move (newTitle);
+            description =
+                std::move (newDescription);
+            help = std::move (newHelp);
+        }
+
+        expanded.store (isExpanded);
+        enabled.store (isEnabled);
+        focused.store (hasFocus);
+    }
+
+    String getValue() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return value;
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isExpanded() const
+    {
+        return expanded.load();
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+    bool hasFocus() const
+    {
+        return focused.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String value;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> expanded { false };
+    std::atomic<bool> enabled { true };
+    std::atomic<bool> focused { false };
+    MessageThreadComboBox* comboBox = nullptr;
+};
 
 namespace
 {
+class MessageThreadComboBoxAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit MessageThreadComboBoxAccessibilityValue (
+        std::shared_ptr<
+            MessageThreadComboBoxAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getValue();
+    }
+
+private:
+    std::shared_ptr<
+        MessageThreadComboBoxAccessibilityState>
+        state;
+};
+
+class MessageThreadComboBoxAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    MessageThreadComboBoxAccessibilityHandler (
+        MessageThreadComboBox& comboBox,
+        std::shared_ptr<
+            MessageThreadComboBoxAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              comboBox,
+              AccessibilityRole::comboBox,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      MessageThreadComboBoxAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable()
+                .withExpandable();
+        current = state->isExpanded()
+                      ? current.withExpanded()
+                      : current.withCollapsed();
+        return state->hasFocus()
+                   ? current.withFocused()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            MessageThreadComboBoxAccessibilityState>&
+            state)
+    {
+        const auto showMenu =
+            [state]
+            {
+                auto* messageManager =
+                    MessageManager::
+                        getInstanceWithoutCreating();
+                if (messageManager == nullptr)
+                    return;
+
+                messageManager->callSync (
+                    [state]
+                    {
+                        auto* comboBox =
+                            state
+                                ->getComboBoxOnMessageThread();
+                        if (comboBox == nullptr
+                            || ! comboBox->isEnabled())
+                        {
+                            return;
+                        }
+
+                        comboBox->showPopup();
+                    });
+            };
+
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::press,
+                showMenu)
+            .addAction (
+                AccessibilityActionType::showMenu,
+                showMenu);
+    }
+
+    std::shared_ptr<
+        MessageThreadComboBoxAccessibilityState>
+        state;
+};
+
 void applyParameterSemanticMetadata (Component& component, Parameter& parameter)
 {
     const auto title = parameter.getDisplayName().isNotEmpty()
@@ -42,6 +280,93 @@ void applyParameterSemanticMetadata (Component& component, Parameter& parameter)
                            parameter.getDescription());
 }
 } // namespace
+
+MessageThreadComboBox::MessageThreadComboBox()
+    : accessibilityState (
+          std::make_shared<
+              MessageThreadComboBoxAccessibilityState>())
+{
+    accessibilityState->attach (this);
+    addListener (this);
+    synchroniseAccessibilityState();
+}
+
+MessageThreadComboBox::~MessageThreadComboBox()
+{
+    stopTimer();
+    removeListener (this);
+    accessibilityState->detach();
+}
+
+void MessageThreadComboBox::
+    synchroniseAccessibilityState()
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+    accessibilityState->synchronise (
+        getText(),
+        getTitle(),
+        getDescription(),
+        getTooltip(),
+        isPopupActive(),
+        ComboBox::isEnabled(),
+        hasKeyboardFocus (false));
+}
+
+void MessageThreadComboBox::showPopup()
+{
+    ComboBox::showPopup();
+    synchroniseAccessibilityState();
+
+    if (isPopupActive())
+        startTimerHz (20);
+}
+
+std::unique_ptr<AccessibilityHandler>
+MessageThreadComboBox::
+    createAccessibilityHandler()
+{
+    synchroniseAccessibilityState();
+    return std::make_unique<
+        MessageThreadComboBoxAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void MessageThreadComboBox::comboBoxChanged (
+    ComboBox*)
+{
+    synchroniseAccessibilityState();
+}
+
+void MessageThreadComboBox::timerCallback()
+{
+    synchroniseAccessibilityState();
+
+    if (! isPopupActive())
+        stopTimer();
+}
+
+void MessageThreadComboBox::enablementChanged()
+{
+    ComboBox::enablementChanged();
+    synchroniseAccessibilityState();
+}
+
+void MessageThreadComboBox::focusGained (
+    Component::FocusChangeType cause)
+{
+    ComboBox::focusGained (cause);
+    synchroniseAccessibilityState();
+}
+
+void MessageThreadComboBox::focusLost (
+    Component::FocusChangeType cause)
+{
+    ComboBox::focusLost (cause);
+    synchroniseAccessibilityState();
+}
 
 std::unique_ptr<AccessibilityHandler>
 ParameterEditor::createAccessibilityHandler()
@@ -344,7 +669,7 @@ ComboBoxParameterEditor::ComboBoxParameterEditor (Parameter* param, int rowHeigh
     label->setAccessible (false);
     addAndMakeVisible (label.get());
 
-    valueComboBox = std::make_unique<ComboBox>();
+    valueComboBox = std::make_unique<MessageThreadComboBox>();
     valueComboBox->setName (param->getKey());
     valueComboBox->setJustificationType (Justification::centred);
     valueComboBox->addListener (this);
@@ -380,6 +705,8 @@ ComboBoxParameterEditor::ComboBoxParameterEditor (Parameter* param, int rowHeigh
         valueComboBox->setSelectedId (p->getIntValue() + offset, dontSendNotification);
     }
 
+    valueComboBox->synchroniseAccessibilityState();
+
     int width = rowWidthPixels;
 
     setBounds (0, 0, width, rowHeightPixels);
@@ -389,10 +716,13 @@ ComboBoxParameterEditor::ComboBoxParameterEditor (Parameter* param, int rowHeigh
 
     editor = (Component*) valueComboBox.get();
     applyParameterSemanticMetadata (*editor, *param);
+    valueComboBox->synchroniseAccessibilityState();
 }
 
 void ComboBoxParameterEditor::comboBoxChanged (ComboBox* comboBox)
 {
+    valueComboBox->synchroniseAccessibilityState();
+
     if (param != nullptr)
         param->setNextValue (comboBox->getSelectedId() - offset);
 }
@@ -438,6 +768,7 @@ void ComboBoxParameterEditor::updateView()
         valueComboBox->setSelectedId (p->getIntValue() + offset, dontSendNotification);
     }
 
+    valueComboBox->synchroniseAccessibilityState();
     repaint();
 }
 

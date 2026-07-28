@@ -227,6 +227,43 @@ public:
     void paintButton (Graphics& g, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
 };
 
+struct MessageThreadComboBoxAccessibilityState;
+
+/**
+    Combo box whose accessibility provider is safe to call from a UIA worker.
+*/
+class PLUGIN_API MessageThreadComboBox : public ComboBox,
+                                         private ComboBox::Listener,
+                                         private Timer
+{
+public:
+    MessageThreadComboBox();
+    ~MessageThreadComboBox() override;
+
+    /** Publishes the current selected value to accessibility clients. */
+    void synchroniseAccessibilityState();
+
+    /** Opens the choices and publishes expanded/collapsed state. */
+    void showPopup() override;
+
+    /** Uses stable snapshots and message-thread-only menu actions. */
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+private:
+    void comboBoxChanged (ComboBox*) override;
+    void timerCallback() override;
+    void enablementChanged() override;
+    void focusGained (
+        Component::FocusChangeType) override;
+    void focusLost (
+        Component::FocusChangeType) override;
+
+    std::shared_ptr<
+        MessageThreadComboBoxAccessibilityState>
+        accessibilityState;
+};
+
 /**
     Allows parameters to be changed via a check box.
 
@@ -282,7 +319,7 @@ public:
     virtual void resized() override;
 
 private:
-    std::unique_ptr<ComboBox> valueComboBox;
+    std::unique_ptr<MessageThreadComboBox> valueComboBox;
 
     int offset;
 };

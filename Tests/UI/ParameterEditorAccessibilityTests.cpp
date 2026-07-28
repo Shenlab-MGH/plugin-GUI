@@ -1,6 +1,8 @@
 #include "../../Source/Processors/Parameter/ParameterEditor.h"
 #include "../../Source/Processors/Parameter/ParameterOwner.h"
 #include "gtest/gtest.h"
+#include <atomic>
+#include <thread>
 
 namespace
 {
@@ -14,6 +16,42 @@ public:
     {
         parameter->updateValue();
     }
+};
+
+class TrackingMessageThreadComboBox final
+    : public MessageThreadComboBox
+{
+public:
+    explicit TrackingMessageThreadComboBox (
+        std::shared_ptr<std::atomic<int>>
+            externalCountToUse = {})
+        : externalCount (
+              std::move (
+                  externalCountToUse))
+    {
+    }
+
+    void showPopup() override
+    {
+        showPopupUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        showPopupCount.fetch_add (1);
+        if (externalCount != nullptr)
+            externalCount->fetch_add (1);
+        if (onShowPopup != nullptr)
+            onShowPopup();
+    }
+
+    std::atomic<bool>
+        showPopupUsedMessageThread { false };
+    std::atomic<int>
+        showPopupCount { 0 };
+    std::function<void()> onShowPopup;
+
+private:
+    std::shared_ptr<std::atomic<int>>
+        externalCount;
 };
 
 class ParameterEditorAccessibilityTests : public ::testing::Test
@@ -84,6 +122,289 @@ protected:
     std::unique_ptr<MessageManagerLock> messageManagerLock;
 };
 } // namespace
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ComboBoxActionsUseMessageThreadAndHonourDisabledState)
+{
+    TrackingMessageThreadComboBox comboBox;
+    comboBox.addItem ("Binary", 1);
+    comboBox.addItem ("NWB", 2);
+    comboBox.setSelectedId (
+        1,
+        dontSendNotification);
+    comboBox.synchroniseAccessibilityState();
+
+    auto handler =
+        comboBox.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::comboBox);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::showMenu));
+
+    AccessibleState workerState;
+    std::thread stateReader (
+        [&]
+        {
+            workerState =
+                handler->getCurrentState();
+        });
+    stateReader.join();
+    EXPECT_TRUE (
+        workerState.isExpandable());
+    EXPECT_TRUE (
+        workerState.isCollapsed());
+
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::
+                        showMenu));
+        });
+
+    while (! invoked.load())
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    worker.join();
+
+    EXPECT_TRUE (
+        comboBox
+            .showPopupUsedMessageThread
+            .load());
+    EXPECT_EQ (
+        comboBox.showPopupCount.load(),
+        1);
+
+    comboBox.setEnabled (false);
+    EXPECT_FALSE (
+        handler->isEnabled());
+    invoked.store (false);
+    std::thread disabledWorker (
+        [&]
+        {
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::
+                        press));
+        });
+
+    while (! invoked.load())
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    disabledWorker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        comboBox.showPopupCount.load(),
+        1);
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        CopiedComboBoxActionsDoNotOutliveTheControl)
+{
+    auto externalCount =
+        std::make_shared<std::atomic<int>> (
+            0);
+    std::function<bool()> invokeShowMenu;
+
+    {
+        auto comboBox =
+            std::make_unique<
+                TrackingMessageThreadComboBox> (
+                externalCount);
+        auto handler =
+            comboBox
+                ->createAccessibilityHandler();
+        const auto actions =
+            handler->getActions();
+        invokeShowMenu =
+            [actions]() mutable
+            {
+                return actions.invoke (
+                    AccessibilityActionType::
+                        showMenu);
+            };
+    }
+
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            invoked.store (
+                invokeShowMenu());
+        });
+
+    while (! invoked.load())
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        externalCount->load(),
+        0);
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ComboBoxCanBeDestroyedWhileShowMenuRuns)
+{
+    auto comboBox =
+        std::make_unique<
+            TrackingMessageThreadComboBox>();
+    auto handler =
+        comboBox
+            ->createAccessibilityHandler();
+    const auto actions =
+        handler->getActions();
+    comboBox->onShowPopup =
+        [&]
+        {
+            handler.reset();
+            comboBox.reset();
+        };
+
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            invoked.store (
+                actions.invoke (
+                    AccessibilityActionType::
+                        showMenu));
+        });
+
+    while (! invoked.load())
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (comboBox, nullptr);
+    EXPECT_EQ (handler, nullptr);
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        PublishesComboBoxExpandedAndCollapsedState)
+{
+    MessageThreadComboBox comboBox;
+    comboBox.addItem ("Binary", 1);
+    comboBox.setSelectedId (
+        1,
+        dontSendNotification);
+    comboBox.synchroniseAccessibilityState();
+    auto handler =
+        comboBox
+            .createAccessibilityHandler();
+
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isCollapsed());
+
+    comboBox.showPopup();
+    EXPECT_TRUE (
+        comboBox.isPopupActive());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpanded());
+
+    comboBox.hidePopup();
+    comboBox
+        .synchroniseAccessibilityState();
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isCollapsed());
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ExposesRecordEngineSelectionAndExternalUpdates)
+{
+    TestParameterOwner owner;
+    Array<String> engines {
+        "Binary",
+        "NWB"
+    };
+    CategoricalParameter parameter (
+        &owner,
+        Parameter::PROCESSOR_SCOPE,
+        "engine",
+        "Engine",
+        "Recording data format",
+        engines,
+        0);
+    parameter.setKey ("100|engine");
+
+    ComboBoxParameterEditor editor (
+        &parameter);
+    expectSemanticValueControl (
+        editor,
+        "oe.parameter.100_engine",
+        "Engine",
+        "Recording data format");
+
+    auto* comboBox =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            editor.getEditor());
+    ASSERT_NE (comboBox, nullptr);
+    auto handler =
+        comboBox
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::comboBox);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Binary");
+
+    parameter.setNextValue (
+        1,
+        false);
+    editor.updateView();
+
+    String workerValue;
+    String workerTitle;
+    String workerDescription;
+    String workerHelp;
+    std::thread reader (
+        [&]
+        {
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+            workerTitle =
+                handler->getTitle();
+            workerDescription =
+                handler->getDescription();
+            workerHelp =
+                handler->getHelp();
+        });
+    reader.join();
+    EXPECT_EQ (
+        workerValue,
+        "NWB");
+    EXPECT_EQ (
+        workerTitle,
+        "Engine");
+    EXPECT_EQ (
+        workerDescription,
+        "Recording data format");
+    EXPECT_EQ (
+        workerHelp,
+        "Recording data format");
+}
 
 TEST_F (ParameterEditorAccessibilityTests, AppliesSemanticMetadataToEverySharedValueControl)
 {
