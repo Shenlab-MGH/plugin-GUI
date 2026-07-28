@@ -46,7 +46,7 @@
 using namespace LfpViewer;
 
 struct LfpViewer::
-    LfpPauseButtonAccessibilityState
+    LfpOptionButtonAccessibilityState
 {
     void attach (
         Button* buttonToUse)
@@ -153,6 +153,26 @@ struct LfpViewer::
                 sendNotification);
     }
 
+    void performSelectionOnMessageThread()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        auto* currentButton =
+            button.getComponent();
+        if (currentButton == nullptr
+            || ! currentButton
+                     ->isEnabled())
+        {
+            return;
+        }
+
+        currentButton
+            ->setToggleState (
+                true,
+                sendNotification);
+    }
+
 private:
     mutable std::mutex textMutex;
     String title;
@@ -176,7 +196,7 @@ class LfpPauseButtonAccessibilityValue final
 public:
     explicit LfpPauseButtonAccessibilityValue (
         std::shared_ptr<
-            LfpPauseButtonAccessibilityState>
+            LfpOptionButtonAccessibilityState>
             stateToUse)
         : state (
               std::move (
@@ -205,7 +225,7 @@ public:
 
 private:
     std::shared_ptr<
-        LfpPauseButtonAccessibilityState>
+        LfpOptionButtonAccessibilityState>
         state;
 };
 
@@ -216,7 +236,7 @@ public:
     LfpPauseButtonAccessibilityHandler (
         Button& button,
         std::shared_ptr<
-            LfpPauseButtonAccessibilityState>
+            LfpOptionButtonAccessibilityState>
             stateToUse)
         : AccessibilityHandler (
               button,
@@ -281,7 +301,7 @@ private:
     static AccessibilityActions
     createActions (
         const std::shared_ptr<
-            LfpPauseButtonAccessibilityState>&
+            LfpOptionButtonAccessibilityState>&
             state)
     {
         return AccessibilityActions()
@@ -323,7 +343,120 @@ private:
     }
 
     std::shared_ptr<
-        LfpPauseButtonAccessibilityState>
+        LfpOptionButtonAccessibilityState>
+        state;
+};
+
+class LfpChannelTypeButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    LfpChannelTypeButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            LfpOptionButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::
+                  radioButton,
+              createActions (
+                  stateToUse)),
+          state (
+              std::move (
+                  stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable();
+        if (state->isChecked())
+        {
+            current =
+                current.withChecked();
+        }
+        if (state->isFocused())
+        {
+            current =
+                current.withFocused();
+        }
+        return current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription()
+        const override
+    {
+        return state
+            ->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state
+            ->isAvailable();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            LfpOptionButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::
+                    press,
+                [state]
+                {
+                    if (! state
+                              ->isAvailable())
+                    {
+                        return;
+                    }
+
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager
+                        == nullptr)
+                    {
+                        return;
+                    }
+
+                    if (messageManager
+                            ->isThisTheMessageThread())
+                    {
+                        state
+                            ->performSelectionOnMessageThread();
+                        return;
+                    }
+
+                    MessageManager::callSync (
+                        [state]
+                        {
+                            state
+                                ->performSelectionOnMessageThread();
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        LfpOptionButtonAccessibilityState>
         state;
 };
 
@@ -390,7 +523,7 @@ LfpPauseButton::LfpPauseButton (
           std::move (label)),
       accessibilityState (
           std::make_shared<
-              LfpPauseButtonAccessibilityState>())
+              LfpOptionButtonAccessibilityState>())
 {
     accessibilityState->attach (
         this);
@@ -461,6 +594,93 @@ void LfpPauseButton::focusGained (
 
 void LfpPauseButton::focusLost (
     FocusChangeType cause)
+{
+    UtilityButton::focusLost (
+        cause);
+    refreshAccessibilityState();
+}
+
+LfpChannelTypeButton::
+    LfpChannelTypeButton (
+        String label)
+    : UtilityButton (
+          std::move (label)),
+      accessibilityState (
+          std::make_shared<
+              LfpOptionButtonAccessibilityState>())
+{
+    accessibilityState->attach (
+        this);
+    setClickingTogglesState (
+        true);
+    refreshAccessibilityState();
+}
+
+LfpChannelTypeButton::
+    ~LfpChannelTypeButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+LfpChannelTypeButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        LfpChannelTypeButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void LfpChannelTypeButton::
+    refreshAccessibilityState()
+{
+    auto title = getTitle();
+    if (title.isEmpty())
+        title = getName();
+    auto help = getHelpText();
+    if (help.isEmpty())
+        help = getDescription();
+
+    accessibilityState
+        ->synchronise (
+            std::move (title),
+            getDescription(),
+            std::move (help),
+            getToggleState(),
+            Component::isEnabled(),
+            hasKeyboardFocus (
+                false));
+}
+
+void LfpChannelTypeButton::
+    buttonStateChanged()
+{
+    UtilityButton::
+        buttonStateChanged();
+    refreshAccessibilityState();
+}
+
+void LfpChannelTypeButton::
+    enablementChanged()
+{
+    UtilityButton::
+        enablementChanged();
+    refreshAccessibilityState();
+}
+
+void LfpChannelTypeButton::
+    focusGained (
+        FocusChangeType cause)
+{
+    UtilityButton::focusGained (
+        cause);
+    refreshAccessibilityState();
+}
+
+void LfpChannelTypeButton::
+    focusLost (
+        FocusChangeType cause)
 {
     UtilityButton::focusLost (
         cause);
@@ -598,8 +818,39 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     rangeUnits.add (CharPointer_UTF8 ("\xC2\xB5V"));
     typeNames.add ("DATA");
 
-    UtilityButton* tbut;
-    tbut = new UtilityButton ("DATA");
+    LfpChannelTypeButton* tbut;
+    tbut =
+        new LfpChannelTypeButton (
+            "DATA");
+    const auto applyChannelTypeMetadata =
+        [&] (
+            LfpChannelTypeButton& button,
+            StringRef typeName)
+    {
+        const auto type =
+            String (typeName);
+        applyLfpDisplayControlMetadata (
+            button,
+            *processor,
+            displayNumber,
+            "channel_type."
+                + type
+                      .toLowerCase(),
+            "LFP display "
+                + String (displayNumber)
+                + " channel type "
+                + type,
+            "Select "
+                + type
+                + " channels as the target for the voltage range control in LFP display "
+                + String (displayNumber)
+                + ".");
+        button
+            .refreshAccessibilityState();
+    };
+    applyChannelTypeMetadata (
+        *tbut,
+        "DATA");
     tbut->setEnabledState (true);
     tbut->setCorners (false, false, false, false);
     tbut->addListener (this);
@@ -626,7 +877,12 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     rangeUnits.add ("mV");
     typeNames.add ("AUX");
 
-    tbut = new UtilityButton ("AUX");
+    tbut =
+        new LfpChannelTypeButton (
+            "AUX");
+    applyChannelTypeMetadata (
+        *tbut,
+        "AUX");
     tbut->setEnabledState (true);
     tbut->setCorners (false, false, false, false);
     tbut->addListener (this);
@@ -651,7 +907,12 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     rangeUnits.add ("V");
     typeNames.add ("ADC");
 
-    tbut = new UtilityButton ("ADC");
+    tbut =
+        new LfpChannelTypeButton (
+            "ADC");
+    applyChannelTypeMetadata (
+        *tbut,
+        "ADC");
     tbut->setEnabledState (true);
     tbut->setCorners (false, false, false, false);
     tbut->addListener (this);

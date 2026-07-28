@@ -34,6 +34,7 @@
 #include <TestFixtures.h>
 #include <array>
 #include <atomic>
+#include <cstdlib>
 #include <thread>
 
 #if JUCE_WINDOWS
@@ -136,6 +137,47 @@ public:
         callbackUsedMessageThread { false };
 };
 
+class LfpDestroyCanvasButtonListener final
+    : public Button::Listener
+{
+public:
+    explicit LfpDestroyCanvasButtonListener (
+        std::unique_ptr<
+            LfpViewer::
+                LfpDisplayCanvas>&
+            canvasToDestroy)
+        : canvas (
+              canvasToDestroy)
+    {
+    }
+
+    void buttonClicked (Button*) override
+    {
+        canvas.reset();
+    }
+
+private:
+    std::unique_ptr<
+        LfpViewer::
+            LfpDisplayCanvas>&
+        canvas;
+};
+
+void joinLfpWorkerOrAbort (
+    std::thread& worker,
+    const std::atomic<bool>&
+        workerReturned)
+{
+    if (! workerReturned.load())
+    {
+        ADD_FAILURE()
+            << "LFP worker did not return before its message-loop watchdog expired";
+        std::abort();
+    }
+
+    worker.join();
+}
+
 #if JUCE_WINDOWS
 enum class LfpWindowsUiaAction
 {
@@ -153,6 +195,8 @@ enum class LfpWindowsUiaAction
 struct LfpWindowsUiaInvokeResult
 {
     HRESULT invokeResult = E_PENDING;
+    HRESULT invokePatternResult =
+        E_PENDING;
     HRESULT togglePatternResult =
         E_PENDING;
     HRESULT selectionItemPatternResult =
@@ -161,6 +205,7 @@ struct LfpWindowsUiaInvokeResult
         E_PENDING;
     HRESULT valuePatternResult =
         E_PENDING;
+    bool invokePatternAvailable = false;
     bool togglePatternAvailable = false;
     bool selectionItemPatternAvailable =
         false;
@@ -303,6 +348,18 @@ invokeLfpWindowsUiaControl (
         output.help = text;
     }
     SysFreeString (text);
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationInvokePattern>
+        invokePattern;
+    output.invokePatternResult =
+        element
+            ->GetCurrentPatternAs (
+                UIA_InvokePatternId,
+                IID_PPV_ARGS (
+                    &invokePattern));
+    output.invokePatternAvailable =
+        invokePattern != nullptr;
 
     Microsoft::WRL::ComPtr<
         IUIAutomationTogglePattern>
@@ -544,20 +601,21 @@ invokeLfpWindowsUiaControl (
                 E_NOINTERFACE);
         }
 
-        return finish (
+        result =
             selectionItemPattern
-                ->Select());
+                ->Select();
+        if (SUCCEEDED (result))
+        {
+            result =
+                selectionItemPattern
+                    ->get_CurrentIsSelected (
+                        &output.selected);
+        }
+        return finish (result);
     }
 
-    Microsoft::WRL::ComPtr<
-        IUIAutomationInvokePattern>
-        invokePattern;
     result =
-        element
-            ->GetCurrentPatternAs (
-                UIA_InvokePatternId,
-                IID_PPV_ARGS (
-                    &invokePattern));
+        output.invokePatternResult;
     if (FAILED (result)
         || invokePattern == nullptr)
     {
@@ -2090,6 +2148,422 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesRangeTypeSelectorsForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const std::array<String, 3>
+        typeNames {
+            "DATA",
+            "AUX",
+            "ADC"
+        };
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        for (int typeIndex = 0;
+             typeIndex < 3;
+             ++typeIndex)
+        {
+            const auto typeName =
+                typeNames[typeIndex];
+            const auto id =
+                prefix
+                + String (displayNumber)
+                + ".channel_type."
+                + typeName
+                      .toLowerCase();
+            auto* component =
+                findLfpDescendantById (
+                    *canvas,
+                    id);
+            ASSERT_NE (
+                component,
+                nullptr)
+                << id;
+            auto* handler =
+                component
+                    ->getAccessibilityHandler();
+            ASSERT_NE (
+                handler,
+                nullptr);
+            EXPECT_EQ (
+                handler->getRole(),
+                AccessibilityRole::
+                    radioButton);
+            EXPECT_EQ (
+                handler->getTitle(),
+                "LFP display "
+                    + String (
+                        displayNumber)
+                    + " "
+                    + "channel type "
+                    + typeName);
+            const auto description =
+                "Select "
+                + typeName
+                + " channels as the target for the voltage range control in LFP display "
+                + String (
+                    displayNumber)
+                + ".";
+            EXPECT_EQ (
+                handler
+                    ->getDescription(),
+                description);
+            EXPECT_EQ (
+                handler->getHelp(),
+                description);
+            EXPECT_EQ (
+                handler
+                    ->getCurrentState()
+                    .isChecked(),
+                typeIndex == 0);
+            EXPECT_TRUE (
+                handler->getActions()
+                    .contains (
+                        AccessibilityActionType::
+                            press));
+            EXPECT_FALSE (
+                handler->getActions()
+                    .contains (
+                        AccessibilityActionType::
+                            toggle));
+            EXPECT_FALSE (
+                handler
+                    ->getCurrentState()
+                    .isCheckable());
+            EXPECT_EQ (
+                handler
+                    ->getValueInterface(),
+                nullptr);
+            EXPECT_EQ (
+                findLfpAncestor<
+                    LfpViewer::
+                        LfpDisplayOptions> (
+                    *component)
+                    ->isVisible(),
+                displayIndex == 0);
+        }
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        RangeTypeSelectionRunsOnMessageThreadAndTracksProgrammaticState)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.";
+    auto* data =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "channel_type.data"));
+    auto* aux =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "channel_type.aux"));
+    auto* adc =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "channel_type.adc"));
+    auto* range =
+        findLfpDescendantById (
+            *canvas,
+            prefix
+                + "voltage_range");
+    ASSERT_NE (data, nullptr);
+    ASSERT_NE (aux, nullptr);
+    ASSERT_NE (adc, nullptr);
+    ASSERT_NE (range, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *aux);
+    ASSERT_NE (
+        options,
+        nullptr);
+    auto* dataHandler =
+        data
+            ->getAccessibilityHandler();
+    auto* auxHandler =
+        aux
+            ->getAccessibilityHandler();
+    auto* adcHandler =
+        adc
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        dataHandler,
+        nullptr);
+    ASSERT_NE (
+        auxHandler,
+        nullptr);
+    ASSERT_NE (
+        adcHandler,
+        nullptr);
+    const auto auxActions =
+        auxHandler->getActions();
+    LfpThreadTrackingButtonListener
+        listener;
+    aux->addListener (
+        &listener);
+
+    std::atomic<bool>
+        workerReturned { false };
+    bool pressed = false;
+    std::thread worker (
+        [&]
+        {
+            pressed =
+                auxActions.invoke (
+                    AccessibilityActionType::
+                        press);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && (! workerReturned.load()
+                 || options
+                            ->getSelectedType()
+                        != ContinuousChannel::
+                               Type::AUX);
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+    aux->removeListener (
+        &listener);
+
+    EXPECT_TRUE (pressed);
+    EXPECT_TRUE (
+        workerReturned.load());
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_FALSE (
+        dataHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        auxHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_FALSE (
+        adcHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        range
+            ->getAccessibilityHandler()
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Auto");
+    EXPECT_EQ (
+        range
+            ->getAccessibilityHandler()
+            ->getHelp(),
+        "Choose the AUX voltage range shown in LFP display 1, in mV, or Auto.");
+
+    options->setSelectedType (
+        ContinuousChannel::Type::
+            ADC);
+    EXPECT_FALSE (
+        dataHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_FALSE (
+        auxHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        adcHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        range
+            ->getAccessibilityHandler()
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "10.0");
+}
+
+TEST_F (LfpDisplayNodeTests,
+        RangeTypeActionsIgnoreDisabledAndDestroyedControls)
+{
+    AccessibilityActions
+        retainedActions;
+    std::atomic<bool>
+        workerReturned { false };
+    {
+        auto canvas =
+            std::make_unique<
+                LfpViewer::
+                    LfpDisplayCanvas> (
+                processor,
+                LfpViewer::
+                    SplitLayouts::SINGLE,
+                false);
+        canvas->updateSettings();
+        canvas->setSize (600, 800);
+        canvas->addToDesktop (0);
+        canvas->setVisible (true);
+
+        const auto prefix =
+            "oe.processor."
+            + String (
+                processor->getNodeId())
+            + ".lfp.display_1.";
+        auto* data =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + "channel_type.data"));
+        auto* aux =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + "channel_type.aux"));
+        ASSERT_NE (data, nullptr);
+        ASSERT_NE (aux, nullptr);
+        auto* options =
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *aux);
+        ASSERT_NE (
+            options,
+            nullptr);
+        retainedActions =
+            aux
+                ->getAccessibilityHandler()
+                ->getActions();
+
+        aux->setEnabled (false);
+        bool disabledActionFound =
+            false;
+        std::thread disabledWorker (
+            [&]
+            {
+                disabledActionFound =
+                    retainedActions
+                        .invoke (
+                            AccessibilityActionType::
+                                press);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned
+                           .load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            disabledWorker,
+            workerReturned);
+        EXPECT_TRUE (
+            disabledActionFound);
+        EXPECT_TRUE (
+            data->getToggleState());
+        EXPECT_FALSE (
+            aux->getToggleState());
+        EXPECT_EQ (
+            options
+                ->getSelectedType(),
+            ContinuousChannel::Type::
+                ELECTRODE);
+    }
+
+    workerReturned.store (
+        false);
+    bool staleActionFound = false;
+    std::thread staleWorker (
+        [&]
+        {
+            staleActionFound =
+                retainedActions
+                    .invoke (
+                        AccessibilityActionType::
+                            press);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned
+                       .load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        workerReturned);
+    EXPECT_TRUE (
+        staleActionFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
         PauseToggleRunsOnMessageThreadAndTracksProgrammaticState)
 {
     auto canvas =
@@ -3018,6 +3492,337 @@ TEST_F (LfpDisplayNodeTests,
         hiddenPaneResult
             .invokeResult,
         E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerSelectsRangeTypeRadioButton)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.";
+    const auto auxId =
+        prefix
+        + "channel_type.aux";
+    auto* data =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "channel_type.data"));
+    auto* aux =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                auxId));
+    auto* adc =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "channel_type.adc"));
+    auto* range =
+        findLfpDescendantById (
+            *canvas,
+            prefix
+                + "voltage_range");
+    ASSERT_NE (data, nullptr);
+    ASSERT_NE (aux, nullptr);
+    ASSERT_NE (adc, nullptr);
+    ASSERT_NE (range, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *aux);
+    ASSERT_NE (
+        options,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto runAction =
+        [&] (
+            StringRef id,
+            LfpWindowsUiaAction action,
+            ContinuousChannel::Type
+                expectedType)
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (id)
+                                .toWideCharPointer()),
+                        action);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && (! workerReturned.load()
+                     || options
+                                ->getSelectedType()
+                            != expectedType);
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        EXPECT_TRUE (
+            workerReturned.load());
+        return actionResult;
+    };
+
+    aux->setEnabled (
+        false);
+    const auto disabledResult =
+        runAction (
+            auxId,
+            LfpWindowsUiaAction::
+                select,
+            ContinuousChannel::Type::
+                ELECTRODE);
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_TRUE (
+        data->getToggleState());
+    EXPECT_FALSE (
+        aux->getToggleState());
+    EXPECT_EQ (
+        options
+            ->getSelectedType(),
+        ContinuousChannel::Type::
+            ELECTRODE);
+    const auto disabledInvokeResult =
+        runAction (
+            auxId,
+            LfpWindowsUiaAction::
+                invoke,
+            ContinuousChannel::Type::
+                ELECTRODE);
+    EXPECT_EQ (
+        disabledInvokeResult
+            .invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_TRUE (
+        data->getToggleState());
+    EXPECT_FALSE (
+        aux->getToggleState());
+    aux->setEnabled (
+        true);
+
+    LfpThreadTrackingButtonListener
+        listener;
+    aux->addListener (
+        &listener);
+    const auto auxResult =
+        runAction (
+            auxId,
+            LfpWindowsUiaAction::
+                select,
+            ContinuousChannel::Type::
+                AUX);
+    aux->removeListener (
+        &listener);
+
+    EXPECT_EQ (
+        auxResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        auxResult.controlType,
+        UIA_RadioButtonControlTypeId);
+    EXPECT_EQ (
+        auxResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        auxResult.name,
+        L"LFP display 1 channel type AUX");
+    EXPECT_EQ (
+        auxResult.help,
+        L"Select AUX channels as the target for the voltage range control in LFP display 1.");
+    EXPECT_EQ (
+        auxResult
+            .selectionItemPatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        auxResult
+            .selectionItemPatternAvailable);
+    EXPECT_EQ (
+        auxResult.selected,
+        TRUE);
+    EXPECT_FALSE (
+        auxResult
+            .togglePatternAvailable);
+    EXPECT_FALSE (
+        auxResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        auxResult
+            .invokePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        auxResult
+            .invokePatternAvailable);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_FALSE (
+        data->getToggleState());
+    EXPECT_TRUE (
+        aux->getToggleState());
+    EXPECT_FALSE (
+        adc->getToggleState());
+    EXPECT_EQ (
+        range
+            ->getAccessibilityHandler()
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Auto");
+    EXPECT_EQ (
+        range
+            ->getAccessibilityHandler()
+            ->getHelp(),
+        "Choose the AUX voltage range shown in LFP display 1, in mV, or Auto.");
+
+    const auto hiddenResult =
+        runAction (
+            prefix
+                .replace (
+                    "display_1.",
+                    "display_2.")
+                + "channel_type.aux",
+            LfpWindowsUiaAction::
+                querySelection,
+            ContinuousChannel::Type::
+                AUX);
+    EXPECT_EQ (
+        hiddenResult.invokeResult,
+        E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaInvokeReportsDestroyedRangeTypeControl)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto id =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.channel_type.aux";
+    auto* aux =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (aux, nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    LfpDestroyCanvasButtonListener
+        listener (canvas);
+    aux->addListener (
+        &listener);
+
+    LfpWindowsUiaInvokeResult
+        actionResult;
+    std::atomic<bool>
+        workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            actionResult =
+                invokeLfpWindowsUiaControl (
+                    window,
+                    std::wstring (
+                        id
+                            .toWideCharPointer()),
+                    LfpWindowsUiaAction::
+                        invoke);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && (! workerReturned.load()
+                 || canvas != nullptr);
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+
+    EXPECT_EQ (
+        canvas,
+        nullptr);
+    EXPECT_EQ (
+        actionResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTAVAILABLE));
 }
 
 TEST_F (LfpDisplayNodeTests,

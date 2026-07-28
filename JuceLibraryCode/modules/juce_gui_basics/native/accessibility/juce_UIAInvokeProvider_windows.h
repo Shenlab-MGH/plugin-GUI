@@ -49,11 +49,17 @@ public:
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
 
         const auto& handler = getHandler();
+        if (! handler.isEnabled())
+            return (HRESULT) UIA_E_ELEMENTNOTENABLED;
 
-        if (handler.getActions().invoke (AccessibilityActionType::press))
+        const auto actions =
+            handler.getActions();
+        if (actions.invoke (AccessibilityActionType::press))
         {
-            if (isElementValid())
-                sendAccessibilityAutomationEvent (handler, UIA_Invoke_InvokedEventId);
+            if (! isElementValid())
+                return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+
+            sendAccessibilityAutomationEvent (getHandler(), UIA_Invoke_InvokedEventId);
 
             return S_OK;
         }

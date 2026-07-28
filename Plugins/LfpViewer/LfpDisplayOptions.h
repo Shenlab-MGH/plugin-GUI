@@ -38,7 +38,7 @@
 namespace LfpViewer
 {
 
-struct LfpPauseButtonAccessibilityState;
+struct LfpOptionButtonAccessibilityState;
 
 /** A pause control with worker-safe UI Automation state and actions. */
 class TESTABLE LfpPauseButton : public UtilityButton
@@ -63,7 +63,35 @@ private:
         FocusChangeType cause) override;
 
     std::shared_ptr<
-        LfpPauseButtonAccessibilityState>
+        LfpOptionButtonAccessibilityState>
+        accessibilityState;
+};
+
+/** A channel-type radio control with worker-safe UI Automation state and actions. */
+class TESTABLE LfpChannelTypeButton : public UtilityButton
+{
+public:
+    explicit LfpChannelTypeButton (
+        String label);
+    ~LfpChannelTypeButton() override;
+
+    /** Publishes the current state for accessibility providers. */
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+private:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (
+        FocusChangeType cause) override;
+    void focusLost (
+        FocusChangeType cause) override;
+
+    std::shared_ptr<
+        LfpOptionButtonAccessibilityState>
         accessibilityState;
 };
 

@@ -55,11 +55,18 @@ public:
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
 
         const auto& handler = getHandler();
+        if (! handler.isEnabled())
+            return (HRESULT) UIA_E_ELEMENTNOTENABLED;
 
         if (isRadioButton)
         {
-            handler.getActions().invoke (AccessibilityActionType::press);
-            sendAccessibilityAutomationEvent (handler, UIA_SelectionItem_ElementSelectedEventId);
+            if (! handler.getActions().invoke (AccessibilityActionType::press))
+                return (HRESULT) UIA_E_NOTSUPPORTED;
+
+            if (! isElementValid())
+                return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+
+            sendAccessibilityAutomationEvent (getHandler(), UIA_SelectionItem_ElementSelectedEventId);
 
             return S_OK;
         }
@@ -113,7 +120,9 @@ public:
         if (! isElementValid())
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
 
-        AddToSelection();
+        const auto result = AddToSelection();
+        if (FAILED (result))
+            return result;
 
         if (isElementValid() && ! isRadioButton)
         {
