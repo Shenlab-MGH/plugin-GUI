@@ -140,13 +140,13 @@ public:
     float getRange();
 
     /** Sets whether this channel display should be inverted */
-    void setInputInverted (bool);
+    TESTABLE void setInputInverted (bool);
 
     /** Returns whether this channel display is inverted */
-    bool getInputInverted();
+    TESTABLE bool getInputInverted();
 
     /** Sets whether this channel display can be inverted */
-    void setCanBeInverted (bool);
+    TESTABLE void setCanBeInverted (bool);
 
     /** Switches between pixel-wise and histogram drawing methods */
     void setDrawMethod (bool);
@@ -155,7 +155,7 @@ public:
     PopupMenu getOptions();
 
     /** Changes a parameter based on ID*/
-    void changeParameter (const int id);
+    TESTABLE void changeParameter (const int id);
 
     /** Sets whether this channel is enabled */
     void setEnabledState (bool);

@@ -1798,17 +1798,31 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     extendedOptions->addAndMakeVisible (signalProcessingGroup.get());
 
     // invert signal
-    invertInputButton = std::make_unique<UtilityButton> ("OFF");
+    invertInputButton = std::make_unique<LfpOptionToggleButton> ("OFF");
     invertInputButton->setRadius (5.0f);
     invertInputButton->setEnabledState (true);
     invertInputButton->setCorners (true, true, true, true);
     invertInputButton->addListener (this);
-    invertInputButton->setClickingTogglesState (true);
     invertInputButton->setToggleState (false, sendNotification);
+    const auto invertSignalDescription =
+        "Set displayed signal polarity to inverted or normal for all invertible channels in LFP display "
+        + String (displayNumber)
+        + ". This changes visualization only; acquisition and recording data are unaffected.";
+    applyLfpDisplayControlMetadata (
+        *invertInputButton,
+        *processor,
+        displayNumber,
+        "invert_signal",
+        "LFP display "
+            + String (displayNumber)
+            + " invert signal polarity",
+        invertSignalDescription);
+    invertInputButton->refreshAccessibilityState();
     extendedOptions->addAndMakeVisible (invertInputButton.get());
 
     invertInputLabel = std::make_unique<Label> ("InvertInputLabel", "Invert signal:");
     invertInputLabel->setFont (labelFont);
+    invertInputLabel->setAccessible (false);
     extendedOptions->addAndMakeVisible (invertInputLabel.get());
 
     // subtract offset
@@ -2290,6 +2304,9 @@ void LfpDisplayOptions::setInputInverted (bool state)
     {
         invertInputButton->setLabel ("OFF");
     }
+
+    invertInputButton
+        ->refreshAccessibilityState();
 }
 
 void LfpDisplayOptions::setMedianOffset (bool state)

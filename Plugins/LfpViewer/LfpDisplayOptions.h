@@ -405,7 +405,7 @@ private:
     std::unique_ptr<UtilityButton> medianOffsetPlottingButton;
     std::unique_ptr<Label> medianOffsetPlottingLabel;
 
-    std::unique_ptr<UtilityButton> invertInputButton;
+    std::unique_ptr<LfpOptionToggleButton> invertInputButton;
     std::unique_ptr<Label> invertInputLabel;
 
     // TRIGGERED DISPLAY SECTION
