@@ -38,6 +38,7 @@ enum Select
 
 class PopupChannelSelector;
 struct ChannelButtonAccessibilityState;
+struct SelectButtonAccessibilityState;
 
 /**
 *
@@ -91,11 +92,18 @@ public:
     SelectButton (const String& name);
 
     /** Destructor */
-    ~SelectButton() {}
+    ~SelectButton() override;
+
+    /** Creates a message-thread-safe command-button accessibility handler. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
 private:
     /** Draws the button*/
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
+
+    std::shared_ptr<
+        SelectButtonAccessibilityState>
+        accessibilityState;
 };
 
 /**

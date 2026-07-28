@@ -80,6 +80,37 @@ private:
     Button* button = nullptr;
 };
 
+struct SelectButtonAccessibilityState
+{
+    void attach (
+        Button* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+    }
+
+    Button* getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+private:
+    Button* button = nullptr;
+};
+
 namespace
 {
 class ChannelButtonAccessibilityValue final
@@ -194,6 +225,58 @@ private:
         ChannelButtonAccessibilityState>
         state;
 };
+
+class SelectButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    SelectButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            SelectButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::button,
+              createActions (stateToUse)),
+          state (std::move (stateToUse))
+    {
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            SelectButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::press,
+                [state]
+                {
+                    MessageManager::callSync (
+                        [state]
+                        {
+                            auto* button =
+                                state
+                                    ->getButtonOnMessageThread();
+                            if (button == nullptr
+                                || ! button->isEnabled())
+                            {
+                                return;
+                            }
+
+                            button->setToggleState (
+                                ! button->getToggleState(),
+                                sendNotification);
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        SelectButtonAccessibilityState>
+        state;
+};
 } // namespace
 
 ChannelButton::ChannelButton (int _id, PopupChannelSelector* _parent) : Button (String (_id)),
@@ -274,9 +357,30 @@ void ChannelButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDow
     g.drawText (String (id + 1), 0, 0, getWidth(), getHeight(), Justification::centred);
 }
 
-SelectButton::SelectButton (const String& name) : Button (name)
+SelectButton::SelectButton (
+    const String& name)
+    : Button (name),
+      accessibilityState (
+          std::make_shared<
+              SelectButtonAccessibilityState>())
 {
+    accessibilityState->attach (
+        this);
     setClickingTogglesState (true);
+}
+
+SelectButton::~SelectButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+SelectButton::createAccessibilityHandler()
+{
+    return std::make_unique<
+        SelectButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
 }
 
 void SelectButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -796,8 +900,8 @@ void PopupChannelSelector::buttonClicked (Button* button)
                 activeChannels.add (channelButtons[i]->getId());
             }
 
-            listener->channelStateChanged (activeChannels);
             button->setToggleState (true, NotificationType::dontSendNotification);
+            listener->channelStateChanged (activeChannels);
         }
         else if (button->getButtonText() == String ("NONE"))
         {

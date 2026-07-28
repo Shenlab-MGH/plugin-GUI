@@ -190,6 +190,18 @@ TEST_F (PopupChannelSelectorAccessibilityTests, PublishesEverySelectionControl)
     auto* selectAll = findDescendantById (selector, prefix + ".select_all");
     ASSERT_NE (selectAll, nullptr);
     EXPECT_EQ (selectAll->getTitle(), "Select all channels");
+    auto selectAllHandler =
+        selectAll->createAccessibilityHandler();
+    ASSERT_NE (selectAllHandler, nullptr);
+    EXPECT_EQ (
+        selectAllHandler->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        selectAllHandler->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_FALSE (
+        selectAllHandler->getActions().contains (
+            AccessibilityActionType::toggle));
 
     auto* selectNone = findDescendantById (selector, prefix + ".select_none");
     ASSERT_NE (selectNone, nullptr);
@@ -206,6 +218,287 @@ TEST_F (PopupChannelSelectorAccessibilityTests, PublishesEverySelectionControl)
     ASSERT_NE (rangeHandler, nullptr);
     ASSERT_NE (rangeHandler->getValueInterface(), nullptr);
     EXPECT_FALSE (rangeHandler->getValueInterface()->isReadOnly());
+}
+
+TEST_F (PopupChannelSelectorAccessibilityTests, WorkerBulkCommandsRunOnMessageThread)
+{
+    TextButton anchor ("Channels");
+    applySemanticMetadata (
+        anchor,
+        "oe.processor.100.parameter.channels",
+        "Recorded channels",
+        "Choose channels to record.");
+    TestChannelListener listener;
+    PopupChannelSelector selector (
+        &anchor,
+        &listener,
+        initialStates(),
+        channelNames(),
+        "Recorded channels");
+    const String prefix =
+        "oe.processor.100.parameter.channels.popup";
+    auto* selectNone =
+        findDescendantById (
+            selector,
+            prefix + ".select_none");
+    auto* selectAll =
+        findDescendantById (
+            selector,
+            prefix + ".select_all");
+    auto* selectRange =
+        findDescendantById (
+            selector,
+            prefix + ".select_range");
+    auto* range =
+        dynamic_cast<TextEditor*> (
+            findDescendantById (
+                selector,
+                prefix + ".range"));
+    ASSERT_NE (selectNone, nullptr);
+    ASSERT_NE (selectAll, nullptr);
+    ASSERT_NE (selectRange, nullptr);
+    ASSERT_NE (range, nullptr);
+    auto noneHandler =
+        selectNone
+            ->createAccessibilityHandler();
+    auto allHandler =
+        selectAll
+            ->createAccessibilityHandler();
+    auto rangeHandler =
+        selectRange
+            ->createAccessibilityHandler();
+    ASSERT_NE (noneHandler, nullptr);
+    ASSERT_NE (allHandler, nullptr);
+    ASSERT_NE (rangeHandler, nullptr);
+
+    for (int repeat = 0;
+         repeat < 2;
+         ++repeat)
+    {
+        listener
+            .changeUsedMessageThread
+            .store (false);
+        EXPECT_TRUE (
+            invokeFromWorker (
+                noneHandler->getActions(),
+                AccessibilityActionType::press));
+        EXPECT_EQ (
+            listener.changeCount,
+            repeat + 1);
+        EXPECT_TRUE (
+            listener
+                .changeUsedMessageThread
+                .load());
+        EXPECT_TRUE (
+            listener.selectedChannels
+                .isEmpty());
+    }
+    for (int channel = 0;
+         channel < listener.channelCount;
+         ++channel)
+    {
+        auto handler =
+            selector.getButtonForId (
+                        channel)
+                ->createAccessibilityHandler();
+        EXPECT_FALSE (
+            handler->getCurrentState()
+                .isChecked());
+    }
+
+    for (int repeat = 0;
+         repeat < 2;
+         ++repeat)
+    {
+        listener
+            .changeUsedMessageThread
+            .store (false);
+        EXPECT_TRUE (
+            invokeFromWorker (
+                allHandler->getActions(),
+                AccessibilityActionType::press));
+        EXPECT_EQ (
+            listener.changeCount,
+            repeat + 3);
+        EXPECT_TRUE (
+            listener
+                .changeUsedMessageThread
+                .load());
+        EXPECT_EQ (
+            listener.selectedChannels.size(),
+            listener.channelCount);
+    }
+
+    range->setText (
+        "2:2:7",
+        dontSendNotification);
+    for (int repeat = 0;
+         repeat < 2;
+         ++repeat)
+    {
+        listener
+            .changeUsedMessageThread
+            .store (false);
+        EXPECT_TRUE (
+            invokeFromWorker (
+                rangeHandler->getActions(),
+                AccessibilityActionType::press));
+        EXPECT_EQ (
+            listener.changeCount,
+            repeat + 5);
+        EXPECT_TRUE (
+            listener
+                .changeUsedMessageThread
+                .load());
+        EXPECT_EQ (
+            listener.selectedChannels,
+            Array<int> ({ 1, 3, 5 }));
+    }
+}
+
+TEST_F (PopupChannelSelectorAccessibilityTests, DisabledAndStaleBulkCommandsAreNoOps)
+{
+    TextButton anchor ("Channels");
+    applySemanticMetadata (
+        anchor,
+        "oe.processor.100.parameter.channels",
+        "Recorded channels",
+        "Choose channels to record.");
+    TestChannelListener listener;
+    auto selector =
+        std::make_unique<
+            PopupChannelSelector> (
+            &anchor,
+            &listener,
+            initialStates(),
+            channelNames(),
+            "Recorded channels");
+    auto* selectNone =
+        findDescendantById (
+            *selector,
+            "oe.processor.100.parameter.channels.popup.select_none");
+    ASSERT_NE (selectNone, nullptr);
+    auto handler =
+        selectNone
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    selectNone->setEnabled (false);
+    EXPECT_TRUE (
+        invokeFromWorker (
+            handler->getActions(),
+            AccessibilityActionType::press));
+    EXPECT_EQ (listener.changeCount, 0);
+    EXPECT_EQ (
+        listener.selectedChannels,
+        Array<int> ({ 0 }));
+
+    const auto staleActions =
+        handler->getActions();
+    handler.reset();
+    selector.reset();
+    EXPECT_TRUE (
+        invokeFromWorker (
+            staleActions,
+            AccessibilityActionType::press));
+    EXPECT_EQ (listener.changeCount, 0);
+}
+
+TEST_F (PopupChannelSelectorAccessibilityTests, ListenerCanDestroyPopupDuringWorkerBulkCommand)
+{
+    TextButton anchor ("Channels");
+    applySemanticMetadata (
+        anchor,
+        "oe.processor.100.parameter.channels",
+        "Recorded channels",
+        "Choose channels to record.");
+    TestChannelListener listener;
+    auto selector =
+        std::make_unique<
+            PopupChannelSelector> (
+            &anchor,
+            &listener,
+            initialStates(),
+            channelNames(),
+            "Recorded channels");
+    auto* selectNone =
+        findDescendantById (
+            *selector,
+            "oe.processor.100.parameter.channels.popup.select_none");
+    ASSERT_NE (selectNone, nullptr);
+    auto handler =
+        selectNone
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
+    handler.reset();
+    listener.onChange =
+        [&selector]
+        {
+            selector.reset();
+        };
+
+    EXPECT_TRUE (
+        invokeFromWorker (
+            actions,
+            AccessibilityActionType::press));
+    EXPECT_EQ (selector, nullptr);
+    EXPECT_EQ (listener.changeCount, 1);
+    EXPECT_TRUE (
+        listener
+            .changeUsedMessageThread
+            .load());
+
+    listener.onChange = {};
+    EXPECT_TRUE (
+        invokeFromWorker (
+            actions,
+            AccessibilityActionType::press));
+    EXPECT_EQ (listener.changeCount, 1);
+}
+
+TEST_F (PopupChannelSelectorAccessibilityTests, ListenerCanDestroyPopupDuringWorkerSelectAll)
+{
+    TextButton anchor ("Channels");
+    applySemanticMetadata (
+        anchor,
+        "oe.processor.100.parameter.channels",
+        "Recorded channels",
+        "Choose channels to record.");
+    TestChannelListener listener;
+    auto selector =
+        std::make_unique<
+            PopupChannelSelector> (
+            &anchor,
+            &listener,
+            initialStates(),
+            channelNames(),
+            "Recorded channels");
+    auto* selectAll =
+        findDescendantById (
+            *selector,
+            "oe.processor.100.parameter.channels.popup.select_all");
+    ASSERT_NE (selectAll, nullptr);
+    auto handler =
+        selectAll
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions =
+        handler->getActions();
+    handler.reset();
+    listener.onChange =
+        [&selector]
+        {
+            selector.reset();
+        };
+
+    EXPECT_TRUE (
+        invokeFromWorker (
+            actions,
+            AccessibilityActionType::press));
+    EXPECT_EQ (selector, nullptr);
+    EXPECT_EQ (listener.changeCount, 1);
 }
 
 TEST_F (PopupChannelSelectorAccessibilityTests, WorkerToggleUpdatesSelectionOnMessageThread)
