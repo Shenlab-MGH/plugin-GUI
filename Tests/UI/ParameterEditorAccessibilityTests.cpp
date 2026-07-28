@@ -5,6 +5,11 @@
 #include <atomic>
 #include <thread>
 
+#if JUCE_WINDOWS
+#include <UIAutomation.h>
+#include <wrl/client.h>
+#endif
+
 namespace
 {
 class TestParameterOwner final : public ParameterOwner
@@ -54,6 +59,210 @@ private:
     std::shared_ptr<std::atomic<int>>
         externalCount;
 };
+
+class TrackingComboBoxValueListener final
+    : public ComboBox::Listener
+{
+public:
+    void comboBoxChanged (
+        ComboBox* comboBox) override
+    {
+        callbackCount.fetch_add (1);
+        callbackUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        if (onChange != nullptr)
+            onChange (comboBox);
+    }
+
+    std::function<void(ComboBox*)>
+        onChange;
+    std::atomic<int>
+        callbackCount { 0 };
+    std::atomic<bool>
+        callbackUsedMessageThread { false };
+};
+
+#if JUCE_WINDOWS
+struct WindowsComboBoxValueResult
+{
+    HRESULT patternResult = E_PENDING;
+    HRESULT setValueResult = E_PENDING;
+    HRESULT valueResult = E_PENDING;
+    HRESULT readOnlyResult = E_PENDING;
+    BOOL readOnly = TRUE;
+    std::wstring value;
+};
+
+WindowsComboBoxValueResult
+setWindowsComboBoxValue (
+    HWND window,
+    const std::wstring& automationId,
+    const std::wstring& newValue)
+{
+    WindowsComboBoxValueResult output;
+    const auto comResult =
+        CoInitializeEx (
+            nullptr,
+            COINIT_MULTITHREADED);
+    if (FAILED (comResult))
+    {
+        output.setValueResult =
+            comResult;
+        return output;
+    }
+
+    const auto finish =
+        [&]
+        {
+            CoUninitialize();
+            return output;
+        };
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomation>
+        automation;
+    auto result =
+        CoCreateInstance (
+            CLSID_CUIAutomation,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS (
+                &automation));
+    if (FAILED (result))
+    {
+        output.setValueResult =
+            result;
+        return finish();
+    }
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>
+        rootElement;
+    result =
+        automation
+            ->ElementFromHandle (
+                window,
+                &rootElement);
+    if (FAILED (result)
+        || rootElement == nullptr)
+    {
+        output.setValueResult =
+            FAILED (result)
+                ? result
+                : E_FAIL;
+        return finish();
+    }
+
+    VARIANT expectedId;
+    VariantInit (
+        &expectedId);
+    expectedId.vt = VT_BSTR;
+    expectedId.bstrVal =
+        SysAllocString (
+            automationId.c_str());
+    if (expectedId.bstrVal
+        == nullptr)
+    {
+        output.setValueResult =
+            E_OUTOFMEMORY;
+        return finish();
+    }
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationCondition>
+        idCondition;
+    result =
+        automation
+            ->CreatePropertyCondition (
+                UIA_AutomationIdPropertyId,
+                expectedId,
+                &idCondition);
+    VariantClear (
+        &expectedId);
+    if (FAILED (result))
+    {
+        output.setValueResult =
+            result;
+        return finish();
+    }
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>
+        element;
+    result =
+        rootElement
+            ->FindFirst (
+                TreeScope_Subtree,
+                idCondition.Get(),
+                &element);
+    if (FAILED (result)
+        || element == nullptr)
+    {
+        output.setValueResult =
+            FAILED (result)
+                ? result
+                : E_FAIL;
+        return finish();
+    }
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationValuePattern>
+        valuePattern;
+    output.patternResult =
+        element
+            ->GetCurrentPatternAs (
+                UIA_ValuePatternId,
+                IID_PPV_ARGS (
+                    &valuePattern));
+    if (valuePattern == nullptr)
+    {
+        output.setValueResult =
+            FAILED (
+                output.patternResult)
+                ? output.patternResult
+                : E_NOINTERFACE;
+        return finish();
+    }
+
+    auto valueToSet =
+        SysAllocString (
+            newValue.c_str());
+    if (valueToSet == nullptr)
+    {
+        output.setValueResult =
+            E_OUTOFMEMORY;
+        return finish();
+    }
+    output.setValueResult =
+        valuePattern
+            ->SetValue (
+                valueToSet);
+    SysFreeString (
+        valueToSet);
+
+    output.readOnlyResult =
+        valuePattern
+            ->get_CurrentIsReadOnly (
+                &output.readOnly);
+
+    BSTR currentValue = nullptr;
+    output.valueResult =
+        valuePattern
+            ->get_CurrentValue (
+                &currentValue);
+    if (SUCCEEDED (
+            output.valueResult)
+        && currentValue != nullptr)
+    {
+        output.value =
+            currentValue;
+    }
+    SysFreeString (
+        currentValue);
+    return finish();
+}
+#endif
 
 class ParameterEditorAccessibilityTests : public ::testing::Test
 {
@@ -469,6 +678,404 @@ TEST_F (ParameterEditorAccessibilityTests,
 }
 
 TEST_F (ParameterEditorAccessibilityTests,
+        EditableComboBoxValueWritesUseMessageThreadAndHonourState)
+{
+    MessageThreadComboBox comboBox;
+    comboBox.addItem ("0.5", 1);
+    comboBox.setSelectedId (
+        1,
+        dontSendNotification);
+    comboBox.synchroniseAccessibilityState();
+    TrackingComboBoxValueListener
+        listener;
+    comboBox.addListener (
+        &listener);
+
+    auto handler =
+        comboBox
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    auto* value =
+        handler
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+    EXPECT_TRUE (
+        value->isReadOnly());
+
+    comboBox.setEditableText (
+        true);
+    EXPECT_FALSE (
+        value->isReadOnly());
+
+    static_cast<ComboBox&> (
+        comboBox)
+        .setEditableText (
+            false);
+    EXPECT_TRUE (
+        value->isReadOnly());
+    static_cast<ComboBox&> (
+        comboBox)
+        .setEditableText (
+            true);
+    EXPECT_FALSE (
+        value->isReadOnly());
+
+    const auto setValueFromWorker =
+        [&] (const String& text)
+    {
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                value->setValueAsString (
+                    text);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+        EXPECT_TRUE (
+            workerReturned.load());
+    };
+
+    setValueFromWorker (
+        "0.75");
+    EXPECT_EQ (
+        comboBox.getText(),
+        "0.75");
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "0.75");
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+
+    listener.onChange =
+        [] (ComboBox* changed)
+        {
+            if (changed->getText()
+                == "0")
+            {
+                changed->setText (
+                    "0.05",
+                    dontSendNotification);
+            }
+        };
+    setValueFromWorker (
+        "0");
+    EXPECT_EQ (
+        comboBox.getText(),
+        "0.05");
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "0.05");
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        2);
+
+    comboBox.setEnabled (
+        false);
+    setValueFromWorker (
+        "1.25");
+    EXPECT_EQ (
+        comboBox.getText(),
+        "0.05");
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        2);
+
+    comboBox.removeListener (
+        &listener);
+}
+
+#if JUCE_WINDOWS
+TEST_F (ParameterEditorAccessibilityTests,
+        WindowsValuePatternWritesEditableComboBoxAndReportsStateFailures)
+{
+    Component host;
+    host.setSize (320, 120);
+    host.addToDesktop (0);
+    host.setVisible (true);
+    ASSERT_TRUE (host.isShowing());
+
+    MessageThreadComboBox comboBox;
+    comboBox.setComponentID (
+        "oe.test.editable_combo");
+    comboBox.setTitle (
+        "Editable test value");
+    comboBox.setDescription (
+        "Set an editable test value.");
+    comboBox.setHelpText (
+        "Set an editable test value.");
+    comboBox.setEditableText (
+        true);
+    comboBox.setText (
+        "0.5",
+        dontSendNotification);
+    comboBox.setBounds (
+        10,
+        10,
+        200,
+        24);
+    host.addAndMakeVisible (
+        comboBox);
+    comboBox.synchroniseAccessibilityState();
+
+    TrackingComboBoxValueListener
+        listener;
+    listener.onChange =
+        [] (ComboBox* changed)
+        {
+            if (changed->getText()
+                == "0")
+            {
+                changed->setText (
+                    "0.05",
+                    dontSendNotification);
+            }
+        };
+    comboBox.addListener (
+        &listener);
+
+    const auto window =
+        static_cast<HWND> (
+            host.getWindowHandle());
+    ASSERT_NE (window, nullptr);
+    const std::wstring id (
+        comboBox
+            .getComponentID()
+            .toWideCharPointer());
+
+    const auto setFromWindows =
+        [&] (
+            const std::wstring& newValue)
+    {
+        WindowsComboBoxValueResult
+            result;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result =
+                    setWindowsComboBoxValue (
+                        window,
+                        id,
+                        newValue);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 200
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+        EXPECT_TRUE (
+            workerReturned.load());
+        return result;
+    };
+
+    const auto writeResult =
+        setFromWindows (
+            L"0");
+    EXPECT_EQ (
+        writeResult.patternResult,
+        S_OK);
+    EXPECT_EQ (
+        writeResult.setValueResult,
+        S_OK);
+    EXPECT_EQ (
+        writeResult.readOnlyResult,
+        S_OK);
+    EXPECT_EQ (
+        writeResult.readOnly,
+        FALSE);
+    EXPECT_EQ (
+        writeResult.valueResult,
+        S_OK);
+    EXPECT_EQ (
+        writeResult.value,
+        L"0.05");
+    EXPECT_EQ (
+        comboBox.getText(),
+        "0.05");
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+
+    comboBox.setEnabled (
+        false);
+    const auto disabledResult =
+        setFromWindows (
+            L"1.0");
+    EXPECT_EQ (
+        disabledResult.patternResult,
+        S_OK);
+    EXPECT_EQ (
+        disabledResult.setValueResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_EQ (
+        comboBox.getText(),
+        "0.05");
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+
+    comboBox.setEnabled (
+        true);
+    static_cast<ComboBox&> (
+        comboBox)
+        .setEditableText (
+            false);
+    const auto readOnlyResult =
+        setFromWindows (
+            L"1.0");
+    EXPECT_EQ (
+        readOnlyResult.patternResult,
+        S_OK);
+    EXPECT_EQ (
+        readOnlyResult.setValueResult,
+        static_cast<HRESULT> (
+            UIA_E_INVALIDOPERATION));
+    EXPECT_EQ (
+        readOnlyResult.readOnlyResult,
+        S_OK);
+    EXPECT_EQ (
+        readOnlyResult.readOnly,
+        TRUE);
+    EXPECT_EQ (
+        comboBox.getText(),
+        "0.05");
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+
+    comboBox.removeListener (
+        &listener);
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        WindowsValuePatternSurvivesComboBoxDestructionDuringWrite)
+{
+    Component host;
+    host.setSize (320, 120);
+    host.addToDesktop (0);
+    host.setVisible (true);
+    ASSERT_TRUE (host.isShowing());
+
+    auto comboBox =
+        std::make_unique<
+            MessageThreadComboBox>();
+    comboBox->setComponentID (
+        "oe.test.destroyed_editable_combo");
+    comboBox->setTitle (
+        "Destroyable editable test value");
+    comboBox->setEditableText (
+        true);
+    comboBox->setText (
+        "0.5",
+        dontSendNotification);
+    comboBox->setBounds (
+        10,
+        10,
+        200,
+        24);
+    host.addAndMakeVisible (
+        *comboBox);
+    comboBox
+        ->synchroniseAccessibilityState();
+
+    TrackingComboBoxValueListener
+        listener;
+    listener.onChange =
+        [&] (ComboBox*)
+        {
+            comboBox.reset();
+        };
+    comboBox->addListener (
+        &listener);
+
+    const auto window =
+        static_cast<HWND> (
+            host.getWindowHandle());
+    ASSERT_NE (window, nullptr);
+    const std::wstring id =
+        L"oe.test.destroyed_editable_combo";
+
+    WindowsComboBoxValueResult
+        result;
+    std::atomic<bool>
+        workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            result =
+                setWindowsComboBoxValue (
+                    window,
+                    id,
+                    L"1.0");
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 200
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (
+        workerReturned.load());
+    EXPECT_EQ (
+        result.patternResult,
+        S_OK);
+    EXPECT_EQ (
+        result.setValueResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTAVAILABLE));
+    EXPECT_EQ (
+        comboBox,
+        nullptr);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+}
+#endif
+
+TEST_F (ParameterEditorAccessibilityTests,
         ExposesRecordEngineSelectionAndExternalUpdates)
 {
     TestParameterOwner owner;
@@ -509,6 +1116,9 @@ TEST_F (ParameterEditorAccessibilityTests,
     ASSERT_NE (
         handler->getValueInterface(),
         nullptr);
+    EXPECT_TRUE (
+        handler->getValueInterface()
+            ->isReadOnly());
     EXPECT_EQ (
         handler->getValueInterface()
             ->getCurrentValueAsString(),

@@ -64,6 +64,7 @@ struct MessageThreadComboBoxAccessibilityState
         String newHelp,
         bool isExpanded,
         bool isEnabled,
+        bool isEditable,
         bool hasFocus)
     {
         {
@@ -78,6 +79,7 @@ struct MessageThreadComboBoxAccessibilityState
 
         expanded.store (isExpanded);
         enabled.store (isEnabled);
+        editable.store (isEditable);
         focused.store (hasFocus);
     }
 
@@ -119,6 +121,11 @@ struct MessageThreadComboBoxAccessibilityState
         return enabled.load();
     }
 
+    bool isEditable() const
+    {
+        return editable.load();
+    }
+
     bool hasFocus() const
     {
         return focused.load();
@@ -132,6 +139,7 @@ private:
     String help;
     std::atomic<bool> expanded { false };
     std::atomic<bool> enabled { true };
+    std::atomic<bool> editable { false };
     std::atomic<bool> focused { false };
     MessageThreadComboBox* comboBox = nullptr;
 };
@@ -150,11 +158,89 @@ public:
     {
     }
 
-    bool isReadOnly() const override { return true; }
-    void setValueAsString (
-        const String&) override
+    bool isReadOnly() const override
     {
-        jassertfalse;
+        auto* messageManager =
+            MessageManager::
+                getInstanceWithoutCreating();
+        if (messageManager == nullptr)
+            return ! state->isEditable();
+
+        const auto readEditableState =
+            [state = state]
+            {
+                auto* comboBox =
+                    state
+                        ->getComboBoxOnMessageThread();
+                if (comboBox == nullptr)
+                    return false;
+
+                comboBox
+                    ->synchroniseAccessibilityState();
+                return comboBox
+                    ->isTextEditable();
+            };
+
+        if (messageManager
+                ->isThisTheMessageThread())
+        {
+            return ! readEditableState();
+        }
+
+        return ! MessageManager::callSync (
+                      readEditableState)
+                      .value_or (false);
+    }
+
+    void setValueAsString (
+        const String& newValue) override
+    {
+        if (! state->isEnabled())
+        {
+            return;
+        }
+
+        auto* messageManager =
+            MessageManager::
+                getInstanceWithoutCreating();
+        if (messageManager == nullptr)
+            return;
+
+        messageManager->callSync (
+            [state = state,
+             newValue]
+            {
+                auto* comboBox =
+                    state
+                        ->getComboBoxOnMessageThread();
+                if (comboBox == nullptr)
+                {
+                    return;
+                }
+                if (! comboBox
+                         ->isEnabled()
+                    || ! comboBox
+                            ->isTextEditable())
+                {
+                    comboBox
+                        ->synchroniseAccessibilityState();
+                    return;
+                }
+
+                Component::SafePointer<
+                    MessageThreadComboBox>
+                    safeComboBox (
+                        comboBox);
+                comboBox->setText (
+                    newValue,
+                    sendNotificationSync);
+                if (safeComboBox
+                    != nullptr)
+                {
+                    safeComboBox
+                        ->synchroniseAccessibilityState();
+                }
+            });
     }
     String getCurrentValueAsString()
         const override
@@ -630,6 +716,14 @@ MessageThreadComboBox::~MessageThreadComboBox()
     accessibilityState->detach();
 }
 
+void MessageThreadComboBox::setEditableText (
+    bool isEditable)
+{
+    ComboBox::setEditableText (
+        isEditable);
+    synchroniseAccessibilityState();
+}
+
 void MessageThreadComboBox::
     synchroniseAccessibilityState()
 {
@@ -645,6 +739,7 @@ void MessageThreadComboBox::
             : getTooltip(),
         isPopupActive(),
         ComboBox::isEnabled(),
+        isTextEditable(),
         hasKeyboardFocus (false));
 }
 

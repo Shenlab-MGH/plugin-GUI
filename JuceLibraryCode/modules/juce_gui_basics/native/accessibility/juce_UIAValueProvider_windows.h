@@ -47,19 +47,57 @@ public:
     {
         if (! isElementValid())
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+        if (val == nullptr)
+            return E_INVALIDARG;
 
         const auto& handler = getHandler();
-        auto& valueInterface = *handler.getValueInterface();
+        if (! handler.isEnabled())
+            return (HRESULT) UIA_E_ELEMENTNOTENABLED;
 
-        if (valueInterface.isReadOnly())
+        auto* valueInterface =
+            handler.getValueInterface();
+        if (valueInterface == nullptr)
             return (HRESULT) UIA_E_NOTSUPPORTED;
 
-        valueInterface.setValueAsString (String (val));
+        if (valueInterface->isReadOnly())
+            return (HRESULT) UIA_E_INVALIDOPERATION;
+
+        valueInterface
+            ->setValueAsString (
+                String (val));
+
+        if (! isElementValid())
+            return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+
+        const auto& updatedHandler =
+            getHandler();
+        if (! updatedHandler.isEnabled())
+            return (HRESULT) UIA_E_ELEMENTNOTENABLED;
+
+        auto* updatedValueInterface =
+            updatedHandler
+                .getValueInterface();
+        if (updatedValueInterface
+            == nullptr)
+        {
+            return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        if (updatedValueInterface
+                ->isReadOnly())
+        {
+            return (HRESULT) UIA_E_INVALIDOPERATION;
+        }
 
         VARIANT newValue;
-        VariantHelpers::setString (valueInterface.getCurrentValueAsString(), &newValue);
+        VariantHelpers::setString (
+            updatedValueInterface
+                ->getCurrentValueAsString(),
+            &newValue);
 
-        sendAccessibilityPropertyChangedEvent (handler, UIA_ValueValuePropertyId, newValue);
+        sendAccessibilityPropertyChangedEvent (
+            updatedHandler,
+            UIA_ValueValuePropertyId,
+            newValue);
 
         return S_OK;
     }

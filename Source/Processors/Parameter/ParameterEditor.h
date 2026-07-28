@@ -243,6 +243,9 @@ public:
     /** Publishes the current selected value to accessibility clients. */
     void synchroniseAccessibilityState();
 
+    /** Sets whether text values are writable and refreshes the provider state. */
+    void setEditableText (bool isEditable);
+
     /** Opens the choices and publishes expanded/collapsed state. */
     void showPopup() override;
 
