@@ -865,7 +865,9 @@ void RecordPathParameterEditor::updateView()
             accessibleValue);
         clearButton->setVisible (
             value != "None" && button->isEnabled());
-        if (! ((PathParameter*) param)->isValid())
+        const auto isValid =
+            ((PathParameter*) param)->isValid();
+        if (! isValid)
         {
             button->setColour (TextButton::textColourOnId, Colours::red);
             button->setColour (TextButton::textColourOffId, Colours::red);
@@ -878,13 +880,32 @@ void RecordPathParameterEditor::updateView()
         }
         //Alternatively:
         //button->setButtonText(File(param->getValueAsString()).getFileName());
+        String statusHelp;
         if (value == "None")
         {
-            button->setTooltip ("Override default path");
+            statusHelp =
+                "Using the default recording directory. Press to choose an override.";
+        }
+        else if (isValid)
+        {
+            statusHelp =
+                "Valid recording directory: "
+                + value;
         }
         else
         {
-            button->setTooltip (value);
+            statusHelp =
+                "Invalid recording directory: "
+                + value;
+        }
+
+        button->setTooltip (
+            statusHelp);
+        if (button->getHelpText()
+            != statusHelp)
+        {
+            button->setHelpText (
+                statusHelp);
         }
     }
 }

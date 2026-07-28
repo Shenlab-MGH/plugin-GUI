@@ -318,6 +318,12 @@ TEST_F (RecordNodeEditorAccessibilityTests,
 
     auto* browse = editor.getEditor();
     ASSERT_NE (browse, nullptr);
+    auto* browseButton =
+        dynamic_cast<TextButton*> (
+            browse);
+    ASSERT_NE (
+        browseButton,
+        nullptr);
     EXPECT_EQ (
         browse->getComponentID(),
         "oe.parameter.100_directory");
@@ -343,6 +349,87 @@ TEST_F (RecordNodeEditorAccessibilityTests,
         browseHandler->getValueInterface()
             ->getCurrentValueAsString(),
         directory.getFullPathName());
+    EXPECT_EQ (
+        browseHandler->getHelp(),
+        "Valid recording directory: "
+            + directory.getFullPathName());
+    EXPECT_EQ (
+        browseButton->getTooltip(),
+        browseHandler->getHelp());
+
+    const auto invalidDirectory =
+        directory
+            .getNonexistentChildFile (
+                "open-ephys-invalid-recording-directory",
+                {},
+                false);
+    XmlElement savedParameters (
+        "PARAMETERS");
+    savedParameters.setAttribute (
+        "directory",
+        invalidDirectory
+            .getFullPathName());
+    parameter.fromXml (
+        &savedParameters);
+    editor.updateView();
+    EXPECT_EQ (
+        browseHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        invalidDirectory
+            .getFullPathName());
+    EXPECT_EQ (
+        browseHandler->getHelp(),
+        "Invalid recording directory: "
+            + invalidDirectory
+                  .getFullPathName());
+    EXPECT_EQ (
+        browseButton->getTooltip(),
+        browseHandler->getHelp());
+
+    const auto watchedDirectory =
+        File::getSpecialLocation (
+            File::tempDirectory)
+            .getChildFile (
+                "open-ephys-watched-recording-directory")
+            .getNonexistentSibling (
+                false);
+    ASSERT_TRUE (
+        watchedDirectory
+            .createDirectory());
+    savedParameters.setAttribute (
+        "directory",
+        watchedDirectory
+            .getFullPathName());
+    parameter.fromXml (
+        &savedParameters);
+    editor.updateView();
+    EXPECT_EQ (
+        browseHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        watchedDirectory
+            .getFullPathName());
+    EXPECT_EQ (
+        browseHandler->getHelp(),
+        "Valid recording directory: "
+            + watchedDirectory
+                  .getFullPathName());
+    ASSERT_TRUE (
+        watchedDirectory
+            .deleteRecursively());
+    editor.updateView();
+    EXPECT_EQ (
+        browseHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        watchedDirectory
+            .getFullPathName());
+    EXPECT_EQ (
+        browseHandler->getHelp(),
+        "Invalid recording directory: "
+            + watchedDirectory
+                  .getFullPathName());
+    EXPECT_EQ (
+        browseButton->getTooltip(),
+        browseHandler->getHelp());
 
     auto* useDefault = findDescendantById (
         editor,
@@ -370,6 +457,13 @@ TEST_F (RecordNodeEditorAccessibilityTests,
         browseHandler->getValueInterface()
             ->getCurrentValueAsString(),
         "default");
+    EXPECT_EQ (
+        browseHandler->getHelp(),
+        String (
+            "Using the default recording directory. Press to choose an override."));
+    EXPECT_EQ (
+        browseButton->getTooltip(),
+        browseHandler->getHelp());
 }
 
 TEST_F (RecordNodeEditorAccessibilityTests,
