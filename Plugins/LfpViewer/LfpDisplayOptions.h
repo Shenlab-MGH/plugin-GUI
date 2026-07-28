@@ -44,6 +44,11 @@ TESTABLE int normaliseLfpColourGroupingId (
     int requestedId,
     int numberOfChoices);
 
+/** Returns a valid channel-skip item id, defaulting malformed values to None. */
+TESTABLE int normaliseLfpChannelSkipId (
+    int requestedId,
+    int numberOfChoices);
+
 struct LfpOptionButtonAccessibilityState;
 struct LfpTtlWordAccessibilityState;
 class LfpTtlWordLabel;
@@ -222,6 +227,10 @@ public:
     void setColourGroupingSelection (
         int itemId);
 
+    /** Applies a channel-skip item id and refreshes display and accessibility state. */
+    void setChannelDisplaySkipSelection (
+        int itemId);
+
     /** Sets whether channel order should be reversed */
     void setChannelsReversed (bool);
 
@@ -380,7 +389,9 @@ private:
         sortByDepthButton;
     std::unique_ptr<Label> sortByDepthLabel;
 
-    std::unique_ptr<ComboBox> channelDisplaySkipSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        channelDisplaySkipSelection;
     std::unique_ptr<Label> channelDisplaySkipLabel;
 
     std::unique_ptr<UtilityButton> showChannelNumberButton;

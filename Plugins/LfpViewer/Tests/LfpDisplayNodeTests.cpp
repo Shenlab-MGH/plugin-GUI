@@ -414,6 +414,30 @@ invokeLfpWindowsUiaControl (
                 TreeScope_Subtree,
                 idCondition.Get(),
                 &element);
+    if (SUCCEEDED (result)
+        && element == nullptr
+        && automationId.find (
+               L".choice.")
+               != std::wstring::npos)
+    {
+        Microsoft::WRL::ComPtr<
+            IUIAutomationElement>
+            desktopElement;
+        result =
+            automation
+                ->GetRootElement (
+                    &desktopElement);
+        if (SUCCEEDED (result)
+            && desktopElement != nullptr)
+        {
+            result =
+                desktopElement
+                    ->FindFirst (
+                        TreeScope_Subtree,
+                        idCondition.Get(),
+                        &element);
+        }
+    }
     if (FAILED (result)
         || element == nullptr)
     {
@@ -4982,6 +5006,155 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesChannelSkipForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const std::array<String, 7>
+        choices {
+            "None",
+            "2",
+            "4",
+            "8",
+            "16",
+            "32",
+            "64"
+        };
+    const std::array<String, 7>
+        choiceIds {
+            "none",
+            "2",
+            "4",
+            "8",
+            "16",
+            "32",
+            "64"
+        };
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".channel_skip";
+        auto* channelSkip =
+            dynamic_cast<
+                MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (
+            channelSkip,
+            nullptr)
+            << id;
+        EXPECT_EQ (
+            channelSkip->getNumItems(),
+            static_cast<int> (
+                choices.size()));
+        for (int choiceIndex = 0;
+             choiceIndex
+             < static_cast<int> (
+                   choices.size());
+             ++choiceIndex)
+        {
+            EXPECT_EQ (
+                channelSkip->getItemText (
+                    choiceIndex),
+                choices[choiceIndex]);
+        }
+
+        int choiceIndex = 0;
+        for (PopupMenu::MenuItemIterator
+                 iterator (
+                     *channelSkip
+                          ->getRootMenu(),
+                     false);
+             iterator.next();)
+        {
+            ASSERT_LT (
+                choiceIndex,
+                static_cast<int> (
+                    choices.size()));
+            EXPECT_EQ (
+                iterator
+                    .getItem()
+                    .accessibilityId,
+                id
+                    + ".choice."
+                    + choiceIds[choiceIndex]);
+            ++choiceIndex;
+        }
+        EXPECT_EQ (
+            choiceIndex,
+            static_cast<int> (
+                choices.size()));
+
+        auto* handler =
+            channelSkip
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (displayNumber)
+                + " channel skip");
+        const auto description =
+            "Choose the visible-channel stride for LFP display "
+            + String (displayNumber)
+            + ": None shows every eligible channel; 2, 4, 8, 16, 32, or 64 shows every Nth eligible channel. This changes display density only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        auto* value =
+            handler->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_FALSE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            "None");
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *channelSkip)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
         ColourGroupingWorkerSelectsByShankOnMessageThread)
 {
     auto canvas =
@@ -5099,6 +5272,532 @@ TEST_F (LfpDisplayNodeTests,
         value
             ->getCurrentValueAsString(),
         "By Shank");
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ChannelSkipWorkerSelectionTracksModelAndProgrammaticState)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.channel_skip";
+    auto* channelSkip =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (channelSkip, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *channelSkip);
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (options, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* value =
+        channelSkip
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    LfpThreadTrackingComboBoxListener listener;
+    channelSkip->addListener (&listener);
+    std::atomic<bool> workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            value->setValueAsString ("64");
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && (! workerReturned.load()
+                 || channelSkip->getSelectedId() != 7);
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (worker, workerReturned);
+    channelSkip->removeListener (&listener);
+
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (listener.callbackUsedMessageThread.load());
+    EXPECT_EQ (channelSkip->getSelectedId(), 7);
+    EXPECT_EQ (value->getCurrentValueAsString(), "64");
+    EXPECT_EQ (display->getChannelDisplaySkipAmount(), 64);
+
+    options->setChannelDisplaySkipSelection (3);
+    EXPECT_EQ (channelSkip->getSelectedId(), 3);
+    EXPECT_EQ (value->getCurrentValueAsString(), "4");
+    EXPECT_EQ (display->getChannelDisplaySkipAmount(), 4);
+
+    channelSkip->setEnabled (false);
+    value->setValueAsString ("8");
+    MessageManager::getInstance()->runDispatchLoopUntil (30);
+    EXPECT_EQ (channelSkip->getSelectedId(), 3);
+    EXPECT_EQ (display->getChannelDisplaySkipAmount(), 4);
+
+    const auto retainedActions =
+        channelSkip
+            ->getAccessibilityHandler()
+            ->getActions();
+    canvas.reset();
+    workerReturned.store (false);
+    bool staleActionFound = false;
+    std::thread staleWorker (
+        [&]
+        {
+            staleActionFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::press);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100 && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (staleWorker, workerReturned);
+    EXPECT_TRUE (staleActionFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ChannelSkipSelectionIdsMapToModelFactorsAndAccessibilityValues)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.channel_skip";
+    auto* channelSkip =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (channelSkip, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* options =
+        findLfpAncestor<LfpViewer::LfpDisplayOptions> (
+            *channelSkip);
+    ASSERT_NE (options, nullptr);
+    auto* value =
+        channelSkip
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    struct ChannelSkipCase
+    {
+        int selectedId;
+        int factor;
+        String value;
+    };
+    const std::array<ChannelSkipCase, 7> cases {
+        ChannelSkipCase { 1, 1, "None" },
+        ChannelSkipCase { 2, 2, "2" },
+        ChannelSkipCase { 3, 4, "4" },
+        ChannelSkipCase { 4, 8, "8" },
+        ChannelSkipCase { 5, 16, "16" },
+        ChannelSkipCase { 6, 32, "32" },
+        ChannelSkipCase { 7, 64, "64" }
+    };
+    for (const auto& testCase : cases)
+    {
+        options->setChannelDisplaySkipSelection (
+            testCase.selectedId);
+        EXPECT_EQ (
+            channelSkip->getSelectedId(),
+            testCase.selectedId);
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            testCase.value);
+        EXPECT_EQ (
+            display->getChannelDisplaySkipAmount(),
+            testCase.factor);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ChannelSkipUsesEligibleChannelIndexBeforeSortAndReverse)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    auto* splitter =
+        findLfpDescendant<LfpViewer::LfpDisplaySplitter> (*canvas);
+    ASSERT_NE (display, nullptr);
+    ASSERT_NE (splitter, nullptr);
+    ASSERT_NE (splitter->displayBuffer, nullptr);
+    ASSERT_EQ (display->channelInfo.size(), 16);
+    ASSERT_EQ (splitter->displayBuffer->channelMetadata.size(), 16);
+
+    const auto getPhysicalOrder =
+        [&]
+    {
+        std::vector<int> order;
+        for (const auto& track : display->drawableChannels)
+        {
+            int physicalChannel = -1;
+            for (int channel = 0;
+                 channel < display->channelInfo.size();
+                 ++channel)
+            {
+                if (display->channelInfo[channel] == track.channelInfo)
+                {
+                    physicalChannel = channel;
+                    break;
+                }
+            }
+            EXPECT_NE (physicalChannel, -1);
+            order.push_back (physicalChannel);
+        }
+        return order;
+    };
+
+    Array<int> eligibleChannels;
+    for (const auto physicalChannel : { 1, 3, 5, 7, 9 })
+        eligibleChannels.add (physicalChannel);
+    for (int channel = 0;
+         channel < splitter->displayBuffer->channelMetadata.size();
+         ++channel)
+    {
+        auto& metadata =
+            splitter->displayBuffer->channelMetadata.getReference (channel);
+        metadata.description = String (channel);
+        metadata.group = 2;
+        metadata.ypos = float (channel);
+        metadata.xpos = 0.0f;
+        metadata.hasGroupMetadata = false;
+        metadata.hasYposMetadata = false;
+        metadata.hasXposMetadata = false;
+    }
+    splitter->setFilteredChannels (eligibleChannels);
+    display->options->setChannelsReversed (false);
+    display->options->setSortByDepth (false);
+    display->options->setChannelDisplaySkipSelection (1);
+    EXPECT_EQ (
+        getPhysicalOrder(),
+        (std::vector<int> { 1, 3, 5, 7, 9 }));
+
+    display->options->setChannelDisplaySkipSelection (2);
+    EXPECT_EQ (
+        getPhysicalOrder(),
+        (std::vector<int> { 1, 5, 9 }));
+
+    auto& channelOne =
+        splitter->displayBuffer->channelMetadata.getReference (1);
+    channelOne.group = 2;
+    channelOne.ypos = 100.0f;
+    channelOne.hasGroupMetadata = true;
+    channelOne.hasYposMetadata = true;
+    channelOne.hasXposMetadata = true;
+    auto& channelFive =
+        splitter->displayBuffer->channelMetadata.getReference (5);
+    channelFive.group = 1;
+    channelFive.ypos = 100.0f;
+    channelFive.hasGroupMetadata = true;
+    channelFive.hasYposMetadata = true;
+    channelFive.hasXposMetadata = true;
+    auto& channelNine =
+        splitter->displayBuffer->channelMetadata.getReference (9);
+    channelNine.group = 0;
+    channelNine.ypos = 100.0f;
+    channelNine.hasGroupMetadata = true;
+    channelNine.hasYposMetadata = true;
+    channelNine.hasXposMetadata = true;
+
+    canvas->updateSettings();
+    display->options->setSortByDepth (true);
+    EXPECT_EQ (
+        getPhysicalOrder(),
+        (std::vector<int> { 9, 5, 1 }));
+    display->options->setChannelsReversed (true);
+    EXPECT_EQ (
+        getPhysicalOrder(),
+        (std::vector<int> { 1, 5, 9 }));
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ChannelSkipRemainsConsistentWithoutChannelsOrDisplayBuffer)
+{
+    auto zeroChannelTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (zeroChannelProcessor->getNodeId())
+        + ".lfp.display_1.channel_skip";
+    auto* channelSkip =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::LfpDisplay> (*canvas);
+    auto* splitter =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (*canvas);
+    ASSERT_NE (channelSkip, nullptr);
+    ASSERT_NE (display, nullptr);
+    ASSERT_NE (splitter, nullptr);
+    ASSERT_EQ (zeroChannelProcessor->getNumInputs(), 0);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *channelSkip);
+    ASSERT_NE (options, nullptr);
+    auto* value =
+        channelSkip
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    value->setValueAsString ("32");
+    EXPECT_EQ (channelSkip->getSelectedId(), 6);
+    EXPECT_EQ (value->getCurrentValueAsString(), "32");
+    EXPECT_EQ (display->getChannelDisplaySkipAmount(), 32);
+
+    auto* displayBuffer = splitter->displayBuffer;
+    splitter->displayBuffer = nullptr;
+    options->setChannelDisplaySkipSelection (1);
+    EXPECT_EQ (channelSkip->getSelectedId(), 1);
+    EXPECT_EQ (value->getCurrentValueAsString(), "None");
+    EXPECT_EQ (display->getChannelDisplaySkipAmount(), 1);
+    splitter->displayBuffer = displayBuffer;
+}
+
+TEST (LfpChannelSkipTests,
+      NormalisesMalformedPersistedIds)
+{
+    constexpr int numberOfChoices = 7;
+    for (int validId = 1;
+         validId <= numberOfChoices;
+         ++validId)
+    {
+        EXPECT_EQ (
+            LfpViewer::normaliseLfpChannelSkipId (
+                validId,
+                numberOfChoices),
+            validId);
+    }
+
+    for (const auto invalidId : { -1, 0, 8, 999 })
+    {
+        EXPECT_EQ (
+            LfpViewer::normaliseLfpChannelSkipId (
+                invalidId,
+                numberOfChoices),
+            1);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ChannelSkipXmlRoundTripsEveryPaneAndNormalisesMalformedIds)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    std::array<MessageThreadComboBox*, 3> channelSkips {};
+    std::array<LfpViewer::LfpDisplayOptions*, 3> options {};
+    std::array<LfpViewer::LfpDisplay*, 3> displays {};
+    std::array<AccessibilityValueInterface*, 3> values {};
+    std::array<LfpThreadTrackingComboBoxListener, 3> listeners;
+    const std::array<int, 3> selectedIds { 1, 4, 7 };
+    const std::array<int, 3> skipAmounts { 1, 8, 64 };
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        channelSkips[displayIndex] =
+            dynamic_cast<MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + String (displayIndex + 1)
+                        + ".channel_skip"));
+        ASSERT_NE (channelSkips[displayIndex], nullptr);
+        options[displayIndex] =
+            findLfpAncestor<LfpViewer::LfpDisplayOptions> (
+                *channelSkips[displayIndex]);
+        ASSERT_NE (options[displayIndex], nullptr);
+        values[displayIndex] =
+            channelSkips[displayIndex]
+                ->getAccessibilityHandler()
+                ->getValueInterface();
+        ASSERT_NE (values[displayIndex], nullptr);
+        channelSkips[displayIndex]
+            ->addListener (&listeners[displayIndex]);
+        options[displayIndex]
+            ->setChannelDisplaySkipSelection (selectedIds[displayIndex]);
+    }
+    std::vector<LfpViewer::LfpDisplay*> allDisplays;
+    collectLfpDescendants (*canvas, allDisplays);
+    ASSERT_EQ (allDisplays.size(), 3);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        for (auto* candidate : allDisplays)
+        {
+            if (candidate->options == options[displayIndex])
+            {
+                displays[displayIndex] = candidate;
+                break;
+            }
+        }
+        ASSERT_NE (displays[displayIndex], nullptr);
+    }
+
+    XmlElement savedRoot ("ROOT");
+    for (auto* paneOptions : options)
+        paneOptions->saveParameters (&savedRoot);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        auto* savedPane =
+            savedRoot.getChildByName (
+                "LFPDISPLAY" + String (displayIndex));
+        ASSERT_NE (savedPane, nullptr);
+        EXPECT_EQ (
+            savedPane->getIntAttribute ("channelSkip"),
+            selectedIds[displayIndex]);
+        options[displayIndex]
+            ->setChannelDisplaySkipSelection (2);
+    }
+
+    for (auto* paneOptions : options)
+        paneOptions->loadParameters (&savedRoot);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_EQ (
+            channelSkips[displayIndex]->getSelectedId(),
+            selectedIds[displayIndex]);
+        EXPECT_EQ (
+            displays[displayIndex]->getChannelDisplaySkipAmount(),
+            skipAmounts[displayIndex]);
+        EXPECT_EQ (
+            listeners[displayIndex].callbackCount.load(),
+            0);
+    }
+
+    for (auto* savedPane : savedRoot.getChildIterator())
+        savedPane->setAttribute ("channelSkip", 999);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        options[displayIndex]
+            ->loadParameters (&savedRoot);
+        EXPECT_EQ (channelSkips[displayIndex]->getSelectedId(), 1);
+        EXPECT_EQ (
+            values[displayIndex]->getCurrentValueAsString(),
+            "None");
+        EXPECT_EQ (
+            displays[displayIndex]->getChannelDisplaySkipAmount(),
+            1);
+        EXPECT_EQ (listeners[displayIndex].callbackCount.load(), 0);
+    }
+
+    for (auto* savedPane : savedRoot.getChildIterator())
+        savedPane->removeAttribute ("channelSkip");
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        options[displayIndex]
+            ->setChannelDisplaySkipSelection (7);
+        options[displayIndex]
+            ->loadParameters (&savedRoot);
+        EXPECT_EQ (channelSkips[displayIndex]->getSelectedId(), 1);
+        EXPECT_EQ (
+            displays[displayIndex]->getChannelDisplaySkipAmount(),
+            1);
+        EXPECT_EQ (listeners[displayIndex].callbackCount.load(), 0);
+        channelSkips[displayIndex]
+            ->removeListener (&listeners[displayIndex]);
+    }
 }
 
 TEST_F (LfpDisplayNodeTests,
@@ -6896,6 +7595,136 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (
         hiddenResult.invokeResult,
         E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerSelectsChannelSkip)
+{
+    auto canvas =
+        std::make_unique<LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    const auto id = prefix + "1.channel_skip";
+    auto* channelSkip =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (channelSkip, nullptr);
+    ASSERT_NE (display, nullptr);
+    const auto window =
+        static_cast<HWND> (canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto runAction =
+        [&] (StringRef targetId,
+             LfpWindowsUiaAction action,
+             StringRef value = {})
+    {
+        LfpWindowsUiaInvokeResult actionResult;
+        std::atomic<bool> workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (targetId)
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (value)
+                                .toWideCharPointer()));
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (worker, workerReturned);
+        return actionResult;
+    };
+
+    const auto description =
+        L"Choose the visible-channel stride for LFP display 1: None shows every eligible channel; 2, 4, 8, 16, 32, or 64 shows every Nth eligible channel. This changes display density only; acquisition and recording are unaffected.";
+    const auto setValueResult =
+        runAction (id, LfpWindowsUiaAction::setValue, "32");
+    EXPECT_EQ (setValueResult.invokeResult, S_OK);
+    EXPECT_EQ (setValueResult.controlType, UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (setValueResult.enabled, TRUE);
+    EXPECT_EQ (setValueResult.name, L"LFP display 1 channel skip");
+    EXPECT_EQ (setValueResult.help, description);
+    EXPECT_TRUE (setValueResult.valuePatternAvailable);
+    EXPECT_EQ (setValueResult.valueReadOnly, FALSE);
+    EXPECT_TRUE (setValueResult.expandCollapsePatternAvailable);
+    EXPECT_TRUE (setValueResult.invokePatternAvailable);
+    EXPECT_FALSE (setValueResult.selectionItemPatternAvailable);
+    EXPECT_EQ (setValueResult.value, L"32");
+    EXPECT_EQ (channelSkip->getSelectedId(), 6);
+    EXPECT_EQ (display->getChannelDisplaySkipAmount(), 32);
+
+    const auto expandResult =
+        runAction (id, LfpWindowsUiaAction::expand);
+    EXPECT_EQ (expandResult.invokeResult, S_OK);
+    EXPECT_EQ (
+        expandResult.expansionState,
+        ExpandCollapseState_Expanded);
+    EXPECT_TRUE (channelSkip->isPopupActive());
+
+    const auto choiceResult =
+        runAction (
+            id + ".choice.64",
+            LfpWindowsUiaAction::select);
+    EXPECT_EQ (choiceResult.invokeResult, S_OK);
+    EXPECT_EQ (choiceResult.controlType, UIA_MenuItemControlTypeId);
+    EXPECT_TRUE (choiceResult.selectionItemPatternAvailable);
+    MessageManager::getInstance()->runDispatchLoopUntil (30);
+    const auto reexpandedResult =
+        runAction (id, LfpWindowsUiaAction::expand);
+    EXPECT_EQ (reexpandedResult.invokeResult, S_OK);
+    const auto selectedChoiceResult =
+        runAction (
+            id + ".choice.64",
+            LfpWindowsUiaAction::querySelection);
+    EXPECT_EQ (selectedChoiceResult.invokeResult, S_OK);
+    EXPECT_TRUE (selectedChoiceResult.selected);
+    EXPECT_EQ (channelSkip->getSelectedId(), 7);
+    EXPECT_EQ (display->getChannelDisplaySkipAmount(), 64);
+
+    channelSkip->setEnabled (false);
+    const auto disabledResult =
+        runAction (id, LfpWindowsUiaAction::setValue, "8");
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (UIA_E_ELEMENTNOTENABLED));
+    EXPECT_EQ (channelSkip->getSelectedId(), 7);
+    channelSkip->setEnabled (true);
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix + "2.channel_skip",
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (hiddenPaneResult.invokeResult, E_FAIL);
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult =
+        runAction (id, LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (closedDrawerResult.invokeResult, E_FAIL);
 }
 
 TEST_F (LfpDisplayNodeTests,

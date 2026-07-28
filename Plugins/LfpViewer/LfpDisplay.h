@@ -135,7 +135,7 @@ public:
     TESTABLE bool shouldOrderChannelsByDepth();
 
     /** Returns a factor of 2 by which the displayed channels should skip */
-    int getChannelDisplaySkipAmount();
+    TESTABLE int getChannelDisplaySkipAmount();
 
     /** Set the amount of channels to skip (hide) between each that is displayed */
     void setChannelDisplaySkipAmount (int skipAmt);

@@ -57,6 +57,18 @@ int LfpViewer::
                : 1;
 }
 
+int LfpViewer::
+    normaliseLfpChannelSkipId (
+        int requestedId,
+        int numberOfChoices)
+{
+    return requestedId > 0
+               && requestedId
+                      <= numberOfChoices
+               ? requestedId
+               : 1;
+}
+
 struct LfpViewer::
     LfpOptionButtonAccessibilityState
 {
@@ -1662,16 +1674,74 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     selectedChannelDisplaySkip = 1;
     selectedChannelDisplaySkipValue = channelDisplaySkipOptions[selectedChannelDisplaySkip - 1];
 
-    channelDisplaySkipSelection = std::make_unique<ComboBox> ("Channel Skip");
+    channelDisplaySkipSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    channelDisplaySkipSelection->setName (
+        "Channel skip");
+    const auto channelSkipDescription =
+        "Choose the visible-channel stride for LFP display "
+        + String (displayNumber)
+        + ": None shows every eligible channel; 2, 4, 8, 16, 32, or 64 shows every Nth eligible channel. This changes display density only; acquisition and recording are unaffected.";
+    applyLfpDisplayParameterMetadata (
+        *channelDisplaySkipSelection,
+        *processor,
+        displayNumber,
+        "channel_skip",
+        "LFP display "
+            + String (displayNumber)
+            + " channel skip",
+        channelSkipDescription);
     for (int i = 0; i < channelDisplaySkipOptions.size(); i++)
         channelDisplaySkipSelection->addItem (channelDisplaySkipOptions[i], i + 1);
-    channelDisplaySkipSelection->setSelectedId (selectedChannelDisplaySkip, sendNotification);
+    const std::array<String, 7>
+        channelSkipChoiceIds {
+            "none",
+            "2",
+            "4",
+            "8",
+            "16",
+            "32",
+            "64"
+        };
+    int channelSkipChoiceIndex = 0;
+    for (PopupMenu::MenuItemIterator
+             iterator (
+                 *channelDisplaySkipSelection
+                      ->getRootMenu(),
+                 false);
+         iterator.next();)
+    {
+        if (channelSkipChoiceIndex
+            >= static_cast<int> (
+                   channelSkipChoiceIds.size()))
+        {
+            jassertfalse;
+            break;
+        }
+        iterator
+            .getItem()
+            .accessibilityId =
+            channelDisplaySkipSelection
+                ->getComponentID()
+            + ".choice."
+            + channelSkipChoiceIds[
+                  channelSkipChoiceIndex++];
+    }
+    channelDisplaySkipSelection->setSelectedId (selectedChannelDisplaySkip, dontSendNotification);
     channelDisplaySkipSelection->setEditableText (false);
+    channelDisplaySkipSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
     channelDisplaySkipSelection->addListener (this);
     extendedOptions->addAndMakeVisible (channelDisplaySkipSelection.get());
+    setChannelDisplaySkipSelection (
+        selectedChannelDisplaySkip);
 
     channelDisplaySkipLabel = std::make_unique<Label> ("ChannelDisplaySkipLabel", "Skip:");
     channelDisplaySkipLabel->setFont (labelFont);
+    channelDisplaySkipLabel->setAccessible (
+        false);
     extendedOptions->addAndMakeVisible (channelDisplaySkipLabel.get());
 
     // Show channel number button
@@ -2454,15 +2524,17 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         return;
     }
 
+    if (cb == channelDisplaySkipSelection.get())
+    {
+        setChannelDisplaySkipSelection (
+            cb->getSelectedId());
+        return;
+    }
+
     if (canvasSplit->getNumChannels() == 0)
         return;
 
-    if (cb == channelDisplaySkipSelection.get())
-    {
-        const int skipAmt = pow (2, cb->getSelectedId() - 1);
-        lfpDisplay->setChannelDisplaySkipAmount (skipAmt);
-    }
-    else if (cb == spikeRasterSelection.get())
+    if (cb == spikeRasterSelection.get())
     {
         // if custom value
         if (cb->getSelectedId() == 0)
@@ -2811,6 +2883,29 @@ void LfpDisplayOptions::
         ->synchroniseAccessibilityState();
 }
 
+void LfpDisplayOptions::
+    setChannelDisplaySkipSelection (
+        int itemId)
+{
+    const auto validId =
+        normaliseLfpChannelSkipId (
+            itemId,
+            channelDisplaySkipOptions.size());
+    selectedChannelDisplaySkip = validId;
+    selectedChannelDisplaySkipValue =
+        channelDisplaySkipOptions[
+            validId - 1];
+    channelDisplaySkipSelection
+        ->setSelectedId (
+            validId,
+            dontSendNotification);
+    lfpDisplay
+        ->setChannelDisplaySkipAmount (
+            1 << (validId - 1));
+    channelDisplaySkipSelection
+        ->synchroniseAccessibilityState();
+}
+
 void LfpDisplayOptions::setSelectedType (ContinuousChannel::Type type, bool toggleButton)
 {
     if (selectedChannelType == type)
@@ -3120,9 +3215,10 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             start = Time::getHighResolutionTicks();
 
             // CHANNEL SKIP
-            channelDisplaySkipSelection->setSelectedId (xmlNode->getIntAttribute ("channelSkip"), dontSendNotification);
-            const int skipAmt = pow (2, channelDisplaySkipSelection->getSelectedId() - 1);
-            lfpDisplay->setChannelDisplaySkipAmount (skipAmt);
+            setChannelDisplaySkipSelection (
+                xmlNode->getIntAttribute (
+                    "channelSkip",
+                    1));
 
             // TRIGGER SOURCE
             triggerSourceSelection->setSelectedId (xmlNode->getIntAttribute ("triggerSource"), dontSendNotification);
@@ -3176,6 +3272,8 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             spreadSelection
                 ->synchroniseAccessibilityState();
             rangeSelection
+                ->synchroniseAccessibilityState();
+            channelDisplaySkipSelection
                 ->synchroniseAccessibilityState();
 
             //LOGD("    Restored view in ", MS_FROM_START, " milliseconds");
