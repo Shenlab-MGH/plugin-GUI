@@ -4203,6 +4203,63 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesSubtractOffsetToggleForEveryPane)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix = "oe.processor." + String (processor->getNodeId())
+                        + ".lfp.display_";
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        const auto displayNumber = displayIndex + 1;
+        const auto id = prefix + String (displayNumber) + ".subtract_offset";
+        auto* button = dynamic_cast<Button*> (
+            findLfpDescendantById (*canvas, id));
+        ASSERT_NE (button, nullptr) << id;
+        EXPECT_NE (dynamic_cast<LfpViewer::LfpOptionToggleButton*> (button),
+                   nullptr);
+        auto* handler = button->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        const auto description =
+            "Subtract each channel's display offset, computed from its current screen-buffer mean, in LFP display "
+            + String (displayNumber)
+            + ". Spike raster plotting requires this option and keeps it on. This affects display rendering only; acquisition and recording are unaffected.";
+        EXPECT_EQ (handler->getRole(), AccessibilityRole::toggleButton);
+        EXPECT_EQ (handler->getTitle(),
+                   "LFP display " + String (displayNumber)
+                       + " subtract offset");
+        EXPECT_EQ (handler->getDescription(), description);
+        EXPECT_EQ (handler->getHelp(), description);
+        EXPECT_TRUE (handler->getCurrentState().isCheckable());
+        EXPECT_FALSE (handler->getCurrentState().isChecked());
+        EXPECT_TRUE (handler->getActions().contains (
+            AccessibilityActionType::toggle));
+        EXPECT_FALSE (handler->getActions().contains (
+            AccessibilityActionType::press));
+        auto* value = handler->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_TRUE (value->isReadOnly());
+        EXPECT_EQ (value->getCurrentValueAsString(), "Off");
+        auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+        ASSERT_NE (options, nullptr);
+        std::vector<Label*> labels;
+        collectLfpDescendants (*options, labels);
+        const auto label = std::find_if (
+            labels.begin(), labels.end(), [] (const Label* candidate)
+            { return candidate->getName() == "MedianOffsetPlottingLabel"; });
+        ASSERT_NE (label, labels.end());
+        EXPECT_FALSE ((*label)->isAccessible());
+        EXPECT_EQ (options->isVisible(), displayIndex == 0);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
         ShowChannelNumbersToggleRunsOnMessageThreadAndSurvivesEdgeCases)
 {
     auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
@@ -4302,6 +4359,110 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        SubtractOffsetToggleRunsOnMessageThreadAndSurvivesEdgeCases)
+{
+    auto input = createBuffer (0.0f, 1.0f, numChannels, 128);
+    writeBlock (input);
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->updateSettings();
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id = "oe.processor." + String (processor->getNodeId())
+                    + ".lfp.display_1.subtract_offset";
+    auto* button = dynamic_cast<Button*> (findLfpDescendantById (*canvas, id));
+    auto* display = findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (button, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+    ASSERT_NE (options, nullptr);
+    auto* handler = button->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    auto* value = handler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+    const auto actions = handler->getActions();
+
+    LfpThreadTrackingButtonListener listener;
+    button->addListener (&listener);
+    std::atomic<bool> workerReturned { false };
+    bool toggled = false;
+    std::thread worker ([&]
+    {
+        toggled = actions.invoke (AccessibilityActionType::toggle);
+        workerReturned.store (true);
+    });
+    for (int attempt = 0; attempt < 100
+                        && (! workerReturned.load()
+                            || ! display->getMedianOffsetPlotting());
+         ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    joinLfpWorkerOrAbort (worker, workerReturned);
+    button->removeListener (&listener);
+    EXPECT_TRUE (toggled);
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (listener.callbackUsedMessageThread.load());
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_TRUE (handler->getCurrentState().isChecked());
+    EXPECT_EQ (value->getCurrentValueAsString(), "On");
+
+    options->setMedianOffset (false);
+    button->setEnabled (false);
+    workerReturned.store (false);
+    std::thread disabledWorker ([&]
+    {
+        toggled = actions.invoke (AccessibilityActionType::toggle);
+        workerReturned.store (true);
+    });
+    for (int attempt = 0; attempt < 100 && ! workerReturned.load(); ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    joinLfpWorkerOrAbort (disabledWorker, workerReturned);
+    EXPECT_TRUE (toggled);
+    EXPECT_FALSE (display->getMedianOffsetPlotting());
+    EXPECT_FALSE (button->getToggleState());
+    EXPECT_FALSE (handler->isEnabled());
+    button->setEnabled (true);
+
+    auto zeroChannelTester = std::make_unique<ProcessorTester> (
+        TestSourceNodeBuilder (FakeSourceNodeParams { 0, sampleRate, bitVolts }));
+    auto* zeroChannelProcessor = zeroChannelTester->createProcessor<LfpViewer::LfpDisplayNode> (
+        Plugin::Processor::SINK);
+    auto zeroCanvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        zeroChannelProcessor, LfpViewer::SplitLayouts::SINGLE, false);
+    zeroCanvas->updateSettings();
+    zeroCanvas->setSize (900, 800);
+    zeroCanvas->addToDesktop (0);
+    zeroCanvas->setVisible (true);
+    zeroCanvas->toggleOptionsDrawer (true);
+    zeroCanvas->removeBufferForDisplay (0);
+    const auto zeroId = "oe.processor." + String (zeroChannelProcessor->getNodeId())
+                        + ".lfp.display_1.subtract_offset";
+    auto* zeroButton = dynamic_cast<Button*> (
+        findLfpDescendantById (*zeroCanvas, zeroId));
+    auto* zeroDisplay = findLfpDescendant<LfpViewer::LfpDisplay> (*zeroCanvas);
+    ASSERT_NE (zeroButton, nullptr);
+    ASSERT_NE (zeroDisplay, nullptr);
+    EXPECT_TRUE (zeroButton->getAccessibilityHandler()->getActions().invoke (
+        AccessibilityActionType::toggle));
+    EXPECT_TRUE (zeroDisplay->getMedianOffsetPlotting());
+
+    canvas.reset();
+    workerReturned.store (false);
+    std::thread destroyedWorker ([&]
+    {
+        actions.invoke (AccessibilityActionType::toggle);
+        workerReturned.store (true);
+    });
+    for (int attempt = 0; attempt < 100 && ! workerReturned.load(); ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    joinLfpWorkerOrAbort (destroyedWorker, workerReturned);
+}
+
+TEST_F (LfpDisplayNodeTests,
         ShowChannelNumbersXmlRoundTripsPerPaneWithoutNotifications)
 {
     auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
@@ -4366,6 +4527,77 @@ TEST_F (LfpDisplayNodeTests,
         options[displayIndex]->setShowChannelNumbers (true);
         options[displayIndex]->loadParameters (&savedRoot);
         EXPECT_FALSE (options[displayIndex]->getChannelNameState());
+        EXPECT_FALSE (buttons[displayIndex]->getToggleState());
+        EXPECT_FALSE (buttons[displayIndex]->getAccessibilityHandler()
+                          ->getCurrentState().isChecked());
+        EXPECT_EQ (values[displayIndex]->getCurrentValueAsString(), "Off");
+        EXPECT_EQ (listeners[displayIndex].callbackCount.load(), 0);
+        buttons[displayIndex]->removeListener (&listeners[displayIndex]);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SubtractOffsetXmlRoundTripsPerPaneWithoutNotifications)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix = "oe.processor." + String (processor->getNodeId())
+                        + ".lfp.display_";
+    std::array<Button*, 3> buttons {};
+    std::array<LfpViewer::LfpDisplayOptions*, 3> options {};
+    std::array<AccessibilityValueInterface*, 3> values {};
+    std::array<LfpThreadTrackingButtonListener, 3> listeners;
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        buttons[displayIndex] = dynamic_cast<Button*> (findLfpDescendantById (
+            *canvas, prefix + String (displayIndex + 1) + ".subtract_offset"));
+        ASSERT_NE (buttons[displayIndex], nullptr);
+        options[displayIndex] = findLfpAncestor<LfpViewer::LfpDisplayOptions> (
+            *buttons[displayIndex]);
+        ASSERT_NE (options[displayIndex], nullptr);
+        values[displayIndex] = buttons[displayIndex]->getAccessibilityHandler()
+                                   ->getValueInterface();
+        ASSERT_NE (values[displayIndex], nullptr);
+        buttons[displayIndex]->addListener (&listeners[displayIndex]);
+        options[displayIndex]->setMedianOffset (displayIndex != 1);
+    }
+
+    XmlElement savedRoot ("ROOT");
+    for (auto* paneOptions : options)
+        paneOptions->saveParameters (&savedRoot);
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        auto* savedPane = savedRoot.getChildByName (
+            "LFPDISPLAY" + String (displayIndex));
+        ASSERT_NE (savedPane, nullptr);
+        EXPECT_EQ (savedPane->getBoolAttribute ("subtractOffset"),
+                   displayIndex != 1);
+        options[displayIndex]->setMedianOffset (false);
+    }
+    for (auto* paneOptions : options)
+        paneOptions->loadParameters (&savedRoot);
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        const auto expected = displayIndex != 1;
+        EXPECT_EQ (buttons[displayIndex]->getToggleState(), expected);
+        EXPECT_EQ (buttons[displayIndex]->getAccessibilityHandler()
+                       ->getCurrentState().isChecked(), expected);
+        EXPECT_EQ (values[displayIndex]->getCurrentValueAsString(),
+                   expected ? String ("On") : String ("Off"));
+        EXPECT_EQ (listeners[displayIndex].callbackCount.load(), 0);
+    }
+    for (auto* savedPane : savedRoot.getChildIterator())
+        savedPane->removeAttribute ("subtractOffset");
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        options[displayIndex]->setMedianOffset (true);
+        options[displayIndex]->loadParameters (&savedRoot);
         EXPECT_FALSE (buttons[displayIndex]->getToggleState());
         EXPECT_FALSE (buttons[displayIndex]->getAccessibilityHandler()
                           ->getCurrentState().isChecked());
@@ -4568,6 +4800,100 @@ TEST_F (LfpDisplayNodeTests,
     for (int attempt = 0; attempt < 100 && ! workerReturned.load(); ++attempt)
         MessageManager::getInstance()->runDispatchLoopUntil (10);
     joinLfpWorkerOrAbort (destroyedWorker, workerReturned);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerTogglesSubtractOffsetAndKeepsSpikeRasterOn)
+{
+    auto input = createBuffer (0.0f, 1.0f, numChannels, 128);
+    writeBlock (input);
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->updateSettings();
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix = "oe.processor." + String (processor->getNodeId())
+                        + ".lfp.display_";
+    const auto id = prefix + "1.subtract_offset";
+    auto* button = dynamic_cast<Button*> (findLfpDescendantById (*canvas, id));
+    auto* display = findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (button, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+    ASSERT_NE (options, nullptr);
+    const auto window = static_cast<HWND> (canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+    const auto runAction = [&] (StringRef targetId, LfpWindowsUiaAction action)
+    {
+        LfpWindowsUiaInvokeResult actionResult;
+        std::atomic<bool> workerReturned { false };
+        std::thread worker ([&]
+        {
+            actionResult = invokeLfpWindowsUiaControl (
+                window, std::wstring (String (targetId).toWideCharPointer()), action);
+            workerReturned.store (true);
+        });
+        for (int attempt = 0; attempt < 100 && ! workerReturned.load(); ++attempt)
+            MessageManager::getInstance()->runDispatchLoopUntil (10);
+        joinLfpWorkerOrAbort (worker, workerReturned);
+        return actionResult;
+    };
+
+    const auto description =
+        L"Subtract each channel's display offset, computed from its current screen-buffer mean, in LFP display 1. Spike raster plotting requires this option and keeps it on. This affects display rendering only; acquisition and recording are unaffected.";
+    const auto initialResult = runAction (id, LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (initialResult.invokeResult, S_OK);
+    EXPECT_EQ (initialResult.controlType, UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (initialResult.enabled, TRUE);
+    EXPECT_EQ (initialResult.name, L"LFP display 1 subtract offset");
+    EXPECT_EQ (initialResult.help, description);
+    EXPECT_TRUE (initialResult.togglePatternAvailable);
+    EXPECT_EQ (initialResult.toggleState, ToggleState_Off);
+    EXPECT_TRUE (initialResult.valuePatternAvailable);
+    EXPECT_EQ (initialResult.valueReadOnly, TRUE);
+    EXPECT_EQ (initialResult.value, L"Off");
+    EXPECT_FALSE (initialResult.invokePatternAvailable);
+
+    const auto enabledResult = runAction (id, LfpWindowsUiaAction::toggle);
+    EXPECT_EQ (enabledResult.invokeResult, S_OK);
+    EXPECT_EQ (enabledResult.toggleState, ToggleState_On);
+    EXPECT_EQ (enabledResult.value, L"On");
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+
+    button->setEnabled (false);
+    const auto disabledResult = runAction (id, LfpWindowsUiaAction::toggle);
+    EXPECT_EQ (disabledResult.invokeResult,
+               static_cast<HRESULT> (UIA_E_ELEMENTNOTENABLED));
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+    const auto hiddenPaneResult = runAction (
+        prefix + "2.subtract_offset", LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (hiddenPaneResult.invokeResult, E_FAIL);
+
+    button->setEnabled (true);
+    std::vector<ComboBox*> comboBoxes;
+    collectLfpDescendants (*options, comboBoxes);
+    const auto spikeRaster = std::find_if (
+        comboBoxes.begin(), comboBoxes.end(), [] (const ComboBox* candidate)
+        { return candidate->getName() == "spikeRasterSelection"; });
+    ASSERT_NE (spikeRaster, comboBoxes.end());
+    (*spikeRaster)->setSelectedId (2, sendNotification);
+    const auto forcedOnResult = runAction (id, LfpWindowsUiaAction::toggle);
+    EXPECT_EQ (forcedOnResult.invokeResult, S_OK);
+    EXPECT_EQ (forcedOnResult.toggleState, ToggleState_On);
+    EXPECT_EQ (forcedOnResult.value, L"On");
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_TRUE (display->getMedianOffsetPlotting());
+
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult = runAction (id, LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (closedDrawerResult.invokeResult, E_FAIL);
 }
 
 TEST_F (LfpDisplayNodeTests,

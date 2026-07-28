@@ -402,7 +402,7 @@ private:
     // SIGNAL PROCESSING SECTION
     std::unique_ptr<GroupComponent> signalProcessingGroup;
 
-    std::unique_ptr<UtilityButton> medianOffsetPlottingButton;
+    std::unique_ptr<LfpOptionToggleButton> medianOffsetPlottingButton;
     std::unique_ptr<Label> medianOffsetPlottingLabel;
 
     std::unique_ptr<LfpOptionToggleButton> invertInputButton;

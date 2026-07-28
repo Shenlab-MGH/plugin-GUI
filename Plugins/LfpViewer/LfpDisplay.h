@@ -178,7 +178,7 @@ public:
     void setScrollPosition (int x, int y);
 
     /** Returns true if the median offset is enabled for plotting, else false */
-    bool getMedianOffsetPlotting();
+    TESTABLE bool getMedianOffsetPlotting();
 
     /** Sets the state for the median offset plotting function */
     void setMedianOffsetPlotting (bool isEnabled);

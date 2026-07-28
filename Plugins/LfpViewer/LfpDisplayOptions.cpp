@@ -1826,17 +1826,32 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     extendedOptions->addAndMakeVisible (invertInputLabel.get());
 
     // subtract offset
-    medianOffsetPlottingButton = std::make_unique<UtilityButton> ("OFF");
+    medianOffsetPlottingButton = std::make_unique<LfpOptionToggleButton> ("OFF");
     medianOffsetPlottingButton->setRadius (5.0f);
     medianOffsetPlottingButton->setEnabledState (true);
     medianOffsetPlottingButton->setCorners (true, true, true, true);
     medianOffsetPlottingButton->addListener (this);
     medianOffsetPlottingButton->setClickingTogglesState (true);
     medianOffsetPlottingButton->setToggleState (false, sendNotification);
+    const auto subtractOffsetDescription =
+        "Subtract each channel's display offset, computed from its current screen-buffer mean, in LFP display "
+        + String (displayNumber)
+        + ". Spike raster plotting requires this option and keeps it on. This affects display rendering only; acquisition and recording are unaffected.";
+    applyLfpDisplayControlMetadata (
+        *medianOffsetPlottingButton,
+        *processor,
+        displayNumber,
+        "subtract_offset",
+        "LFP display "
+            + String (displayNumber)
+            + " subtract offset",
+        subtractOffsetDescription);
+    medianOffsetPlottingButton->refreshAccessibilityState();
     extendedOptions->addAndMakeVisible (medianOffsetPlottingButton.get());
 
     medianOffsetPlottingLabel = std::make_unique<Label> ("MedianOffsetPlottingLabel", "Subtract offset:");
     medianOffsetPlottingLabel->setFont (labelFont);
+    medianOffsetPlottingLabel->setAccessible (false);
     extendedOptions->addAndMakeVisible (medianOffsetPlottingLabel.get());
 
     // TRIGGERED DISPLAY
