@@ -90,7 +90,10 @@ enum class LfpWindowsUiaAction
 {
     invoke,
     select,
-    querySelection
+    querySelection,
+    expand,
+    collapse,
+    queryExpansion
 };
 
 struct LfpWindowsUiaInvokeResult
@@ -100,14 +103,24 @@ struct LfpWindowsUiaInvokeResult
         E_PENDING;
     HRESULT selectionItemPatternResult =
         E_PENDING;
+    HRESULT expandCollapsePatternResult =
+        E_PENDING;
+    HRESULT valuePatternResult =
+        E_PENDING;
     bool togglePatternAvailable = false;
     bool selectionItemPatternAvailable =
         false;
+    bool expandCollapsePatternAvailable =
+        false;
+    bool valuePatternAvailable = false;
     CONTROLTYPEID controlType = 0;
     BOOL enabled = FALSE;
     BOOL selected = FALSE;
+    ExpandCollapseState expansionState =
+        ExpandCollapseState_LeafNode;
     std::wstring name;
     std::wstring help;
+    std::wstring value;
 };
 
 LfpWindowsUiaInvokeResult
@@ -256,6 +269,88 @@ invokeLfpWindowsUiaControl (
                     &selectionItemPattern));
     output.selectionItemPatternAvailable =
         selectionItemPattern != nullptr;
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationExpandCollapsePattern>
+        expandCollapsePattern;
+    output.expandCollapsePatternResult =
+        element
+            ->GetCurrentPatternAs (
+                UIA_ExpandCollapsePatternId,
+                IID_PPV_ARGS (
+                    &expandCollapsePattern));
+    output.expandCollapsePatternAvailable =
+        expandCollapsePattern != nullptr;
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationValuePattern>
+        valuePattern;
+    output.valuePatternResult =
+        element
+            ->GetCurrentPatternAs (
+                UIA_ValuePatternId,
+                IID_PPV_ARGS (
+                    &valuePattern));
+    output.valuePatternAvailable =
+        valuePattern != nullptr;
+    if (valuePattern != nullptr)
+    {
+        BSTR value = nullptr;
+        if (SUCCEEDED (
+                valuePattern
+                    ->get_CurrentValue (
+                        &value))
+            && value != nullptr)
+        {
+            output.value = value;
+        }
+        SysFreeString (value);
+    }
+
+    if (action
+        == LfpWindowsUiaAction::
+               queryExpansion
+        || action
+               == LfpWindowsUiaAction::
+                      expand
+        || action
+               == LfpWindowsUiaAction::
+                      collapse)
+    {
+        if (expandCollapsePattern
+            == nullptr)
+        {
+            return finish (
+                E_NOINTERFACE);
+        }
+
+        if (action
+            == LfpWindowsUiaAction::
+                   expand)
+        {
+            result =
+                expandCollapsePattern
+                    ->Expand();
+        }
+        else if (action
+                 == LfpWindowsUiaAction::
+                        collapse)
+        {
+            result =
+                expandCollapsePattern
+                    ->Collapse();
+        }
+
+        if (SUCCEEDED (result))
+        {
+            result =
+                expandCollapsePattern
+                    ->get_CurrentExpandCollapseState (
+                        &output
+                             .expansionState);
+        }
+        return finish (result);
+    }
 
     if (action
         == LfpWindowsUiaAction::
@@ -1378,6 +1473,320 @@ TEST_F (LfpDisplayNodeTests,
     processor->setHeadlessMode (
         false);
 }
+
+TEST_F (LfpDisplayNodeTests,
+        ExposesStableStreamSelectorForEveryDisplay)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto expectedValue =
+        processor
+            ->getDisplayBuffers()[0]
+            ->name;
+    std::array<Component*, 3>
+        selectors {};
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".stream";
+        selectors[displayIndex] =
+            findLfpDescendantById (
+                *canvas,
+                id);
+        ASSERT_NE (
+            selectors[displayIndex],
+            nullptr)
+            << id;
+        auto* handler =
+            selectors[displayIndex]
+                ->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (
+                    displayNumber)
+                + " stream");
+        const auto description =
+            "Choose the data stream shown in LFP display "
+            + String (
+                displayNumber)
+            + ".";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        ASSERT_NE (
+            handler
+                ->getValueInterface(),
+            nullptr);
+        EXPECT_EQ (
+            handler
+                ->getValueInterface()
+                ->getCurrentValueAsString(),
+            expectedValue);
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        showMenu));
+        EXPECT_EQ (
+            selectors[displayIndex]
+                ->getParentComponent()
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::
+                THREE_HORZ);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_TRUE (
+            selectors[displayIndex]
+                ->getParentComponent()
+                ->isVisible());
+        EXPECT_EQ (
+            selectors[displayIndex]
+                ->getComponentID(),
+            prefix
+                + String (
+                    displayIndex + 1)
+                + ".stream");
+    }
+}
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerExpandsAndCollapsesStreamSelector)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto id =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.stream";
+    auto* selector =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (selector, nullptr);
+    const auto expectedValue =
+        processor
+            ->getDisplayBuffers()[0]
+            ->name;
+    const std::wstring wideId (
+        id.toWideCharPointer());
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto invokeUiaAction =
+        [&] (
+            LfpWindowsUiaAction action,
+            bool expectedPopupActive)
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        wideId,
+                        action);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && (! workerReturned.load()
+                     || selector
+                                ->isPopupActive()
+                            != expectedPopupActive);
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+        return actionResult;
+    };
+
+    const auto expandResult =
+        invokeUiaAction (
+            LfpWindowsUiaAction::
+                expand,
+            true);
+
+    EXPECT_EQ (
+        expandResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.controlType,
+        UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (
+        expandResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        expandResult.name,
+        L"LFP display 1 stream");
+    EXPECT_EQ (
+        expandResult.help,
+        L"Choose the data stream shown in LFP display 1.");
+    EXPECT_EQ (
+        expandResult
+            .expandCollapsePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        expandResult
+            .expandCollapsePatternAvailable);
+    EXPECT_EQ (
+        expandResult.valuePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        expandResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        expandResult.value,
+        std::wstring (
+            expectedValue
+                .toWideCharPointer()));
+    EXPECT_EQ (
+        expandResult.expansionState,
+        ExpandCollapseState_Expanded);
+    EXPECT_TRUE (
+        selector->isPopupActive());
+
+    const auto repeatedExpandResult =
+        invokeUiaAction (
+            LfpWindowsUiaAction::
+                expand,
+            true);
+    EXPECT_EQ (
+        repeatedExpandResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        repeatedExpandResult
+            .expansionState,
+        ExpandCollapseState_Expanded);
+    EXPECT_TRUE (
+        selector->isPopupActive());
+
+    const auto collapseResult =
+        invokeUiaAction (
+            LfpWindowsUiaAction::
+                collapse,
+            false);
+    EXPECT_EQ (
+        collapseResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        collapseResult.expansionState,
+        ExpandCollapseState_Collapsed);
+    EXPECT_FALSE (
+        selector->isPopupActive());
+
+    const auto repeatedCollapseResult =
+        invokeUiaAction (
+            LfpWindowsUiaAction::
+                collapse,
+            false);
+    EXPECT_EQ (
+        repeatedCollapseResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        repeatedCollapseResult
+            .expansionState,
+        ExpandCollapseState_Collapsed);
+    EXPECT_FALSE (
+        selector->isPopupActive());
+
+    selector->setEnabled (false);
+    const auto disabledExpandResult =
+        invokeUiaAction (
+            LfpWindowsUiaAction::
+                expand,
+            false);
+    EXPECT_EQ (
+        disabledExpandResult
+            .invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_FALSE (
+        selector->isPopupActive());
+    selector->setEnabled (true);
+
+    auto* handler =
+        selector
+            ->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isCollapsed());
+}
+#endif
 
 TEST_F (LfpDisplayNodeTests, VisualIntegrityTest)
 {

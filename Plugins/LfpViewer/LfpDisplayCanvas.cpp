@@ -719,7 +719,38 @@ LfpDisplaySplitter::LfpDisplaySplitter (LfpDisplayNode* node,
     timescale = std::make_unique<LfpTimescale> (this, lfpDisplay.get());
     options = std::make_unique<LfpDisplayOptions> (canvas, this, timescale.get(), lfpDisplay.get(), node);
 
-    streamSelection = std::make_unique<ComboBox> ("Stream selection");
+    streamSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    streamSelection->setName (
+        "Stream selection");
+    const auto displayNumber =
+        splitID + 1;
+    const auto description =
+        "Choose the data stream shown in LFP display "
+        + String (displayNumber)
+        + ".";
+    streamSelection->setComponentID (
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_"
+        + String (displayNumber)
+        + ".stream");
+    streamSelection->setTitle (
+        "LFP display "
+        + String (displayNumber)
+        + " stream");
+    streamSelection->setDescription (
+        description);
+    streamSelection->setHelpText (
+        description);
+    streamSelection->setAccessible (
+        true);
+    streamSelection
+        ->invalidateAccessibilityHandler();
+    streamSelection
+        ->synchroniseAccessibilityState();
     streamSelection->addListener (this);
 
     lfpDisplay->options = options.get();
@@ -1032,6 +1063,9 @@ void LfpDisplaySplitter::updateSettings()
     resized();
 
     lfpDisplay->restoreViewPosition();
+
+    streamSelection
+        ->synchroniseAccessibilityState();
 
     //lfpDisplay->refresh(); // calls refresh
 }

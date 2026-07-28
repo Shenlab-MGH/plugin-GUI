@@ -25,6 +25,7 @@
 #define __LFPDISPLAYCANVAS_H__
 
 #include <VisualizerWindowHeaders.h>
+#include <EditorHeaders.h>
 
 #include <array>
 #include <vector>
@@ -334,7 +335,9 @@ public:
 
     ContinuousChannel::Type selectedChannelType;
 
-    std::unique_ptr<ComboBox> streamSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        streamSelection;
 
     std::unique_ptr<LfpViewport> viewport;
     std::unique_ptr<LfpTimescale> timescale;
