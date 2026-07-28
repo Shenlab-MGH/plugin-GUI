@@ -31,6 +31,8 @@
 class StreamSelectorButton;
 class StreamButtonHolder;
 class DataStream;
+class MergerEditorAccessibilityHandler;
+struct MergerInputMenuState;
 
 /**
 
@@ -82,11 +84,26 @@ public:
     void updateSettings() override;
 
 private:
-    String getNameString (GenericProcessor*);
+    friend class MergerEditorAccessibilityHandler;
+
+    std::unique_ptr<AccessibilityHandler>
+        createAccessibilityHandler() override;
+    void toggleInputSelectionMenu (
+        bool asynchronously);
+    void applyInputSelectionMenuRequest (
+        bool shouldBeOpen,
+        bool asynchronously,
+        uint64 generation);
+    void openInputSelectionMenu (
+        bool asynchronously,
+        uint64 generation);
+
     Array<GenericProcessor*> getSelectableProcessors();
 
     std::unique_ptr<ImageButton> pipelineSelectorA;
     std::unique_ptr<ImageButton> pipelineSelectorB;
+    std::shared_ptr<MergerInputMenuState>
+        inputSelectionMenuState;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MergerEditor);
 };

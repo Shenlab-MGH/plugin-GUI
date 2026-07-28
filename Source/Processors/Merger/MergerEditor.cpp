@@ -33,8 +33,344 @@
 #include "../Editors/StreamSelector.h"
 #include "../Settings/DataStream.h"
 
+#include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <vector>
+
+struct MergerInputMenuState
+{
+    struct Request
+    {
+        bool shouldBeOpen;
+        uint64 generation;
+    };
+
+    Request toggle()
+    {
+        const std::lock_guard<std::mutex>
+            lock (requestMutex);
+        const bool nextState =
+            ! shouldBeOpen.load();
+        const auto nextGeneration =
+            generation.load() + 1;
+        shouldBeOpen.store (nextState);
+        generation.store (nextGeneration);
+        return {
+            nextState,
+            nextGeneration
+        };
+    }
+
+    bool finish (
+        uint64 expectedGeneration)
+    {
+        const std::lock_guard<std::mutex>
+            lock (requestMutex);
+        if (generation.load()
+            != expectedGeneration)
+        {
+            return false;
+        }
+
+        generation.store (
+            expectedGeneration + 1);
+        shouldBeOpen.store (false);
+        return true;
+    }
+
+    std::atomic<bool> shouldBeOpen { false };
+    std::atomic<uint64> generation { 0 };
+    std::atomic<uint64> activeMenuGeneration { 0 };
+
+private:
+    std::mutex requestMutex;
+};
+
+namespace
+{
+struct MergerInputMenuChoice
+{
+    int resultId;
+    int inputIndex;
+    int sourceNodeId;
+    GenericProcessor* expectedInputSource;
+};
+
+struct MergerInputMenuModel
+{
+    PopupMenu menu;
+    std::vector<
+        MergerInputMenuChoice>
+        choices;
+};
+
+void addSemanticMergerMenuItem (
+    PopupMenu& menu,
+    int resultId,
+    StringRef text,
+    bool isEnabled,
+    StringRef semanticId,
+    StringRef description)
+{
+    PopupMenu::Item item {
+        String (text)
+    };
+    item.itemID =
+        resultId;
+    item.isEnabled =
+        isEnabled;
+    item.accessibilityId =
+        String (semanticId);
+    item.accessibilityDescription =
+        String (description);
+    item.accessibilityHelp =
+        String (description);
+    menu.addItem (
+        std::move (item));
+}
+
+MergerInputMenuModel
+    createMergerInputMenuModel (
+        Merger& merger,
+        const Array<
+            GenericProcessor*>&
+            selectableProcessors)
+{
+    MergerInputMenuModel model;
+    int nextResultId =
+        0;
+    const auto editorId =
+        "oe.processor."
+        + String (
+            merger.getNodeId())
+        + ".route.input.";
+
+    const auto addInput =
+        [&] (
+            int inputIndex,
+            GenericProcessor* currentSource)
+    {
+        const auto inputName =
+            inputIndex == 0
+                ? String ("A")
+                : String ("B");
+        const auto inputId =
+            editorId
+            + inputName
+                  .toLowerCase();
+
+        if (currentSource
+                != nullptr
+            && ! currentSource
+                     ->isEmpty())
+        {
+            addSemanticMergerMenuItem (
+                model.menu,
+                ++nextResultId,
+                "Input "
+                    + inputName
+                    + ":",
+                false,
+                inputId
+                    + ".heading",
+                "Current source for merger input "
+                    + inputName
+                    + ".");
+            addSemanticMergerMenuItem (
+                model.menu,
+                ++nextResultId,
+                currentSource
+                        ->getName()
+                    + " ("
+                    + String (
+                        currentSource
+                            ->getNodeId())
+                    + ")",
+                false,
+                inputId
+                    + ".current."
+                    + String (
+                        currentSource
+                            ->getNodeId()),
+                currentSource
+                        ->getName()
+                    + " node "
+                    + String (
+                        currentSource
+                            ->getNodeId())
+                    + " is connected to merger input "
+                    + inputName
+                    + ".");
+            return;
+        }
+
+        addSemanticMergerMenuItem (
+            model.menu,
+            ++nextResultId,
+            "Choose input "
+                + inputName
+                + ":",
+            false,
+            inputId
+                + ".heading",
+            "Choose a processor for merger input "
+                + inputName
+                + ".");
+
+        if (selectableProcessors
+                .isEmpty())
+        {
+            addSemanticMergerMenuItem (
+                model.menu,
+                ++nextResultId,
+                "No input sources available",
+                false,
+                inputId
+                    + ".none",
+                "No processor is available to connect to merger input "
+                    + inputName
+                    + ".");
+            return;
+        }
+
+        for (auto* source :
+             selectableProcessors)
+        {
+            const auto resultId =
+                ++nextResultId;
+            addSemanticMergerMenuItem (
+                model.menu,
+                resultId,
+                source->getName()
+                    + " ("
+                    + String (
+                        source
+                            ->getNodeId())
+                    + ")",
+                true,
+                inputId
+                    + ".source."
+                    + String (
+                        source
+                            ->getNodeId()),
+                "Connect "
+                    + source
+                          ->getName()
+                    + " node "
+                    + String (
+                        source
+                            ->getNodeId())
+                    + " to merger input "
+                    + inputName
+                    + ".");
+            model.choices
+                .push_back ({ resultId,
+                              inputIndex,
+                              source
+                                  ->getNodeId(),
+                              currentSource });
+        }
+    };
+
+    addInput (
+        0,
+        merger.sourceNodeA);
+    model.menu.addItem (
+        ++nextResultId,
+        " ",
+        false);
+    addInput (
+        1,
+        merger.sourceNodeB);
+
+    return model;
+}
+
+} // namespace
+
+class MergerEditorAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    explicit MergerEditorAccessibilityHandler (
+        MergerEditor& editorToWrap)
+        : AccessibilityHandler (
+              editorToWrap,
+              AccessibilityRole::group,
+              createActions (editorToWrap)),
+          state (editorToWrap.inputSelectionMenuState)
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto currentState =
+            AccessibilityHandler::getCurrentState()
+                .withExpandable();
+        return state->shouldBeOpen.load()
+                   ? currentState.withExpanded()
+                   : currentState.withCollapsed();
+    }
+
+private:
+    static AccessibilityActions createActions (
+        MergerEditor& editor)
+    {
+        const auto state =
+            editor.inputSelectionMenuState;
+        const auto safeEditor =
+            std::make_shared<
+                Component::SafePointer<
+                    MergerEditor>> (
+                &editor);
+
+        return AccessibilityActions().addAction (
+            AccessibilityActionType::showMenu,
+            [state, safeEditor]
+            {
+                const auto request =
+                    state->toggle();
+                const auto applyRequest =
+                    [state,
+                     safeEditor,
+                     request]
+                {
+                    if (state->generation.load()
+                            != request.generation
+                        || *safeEditor == nullptr)
+                    {
+                        return;
+                    }
+
+                    (*safeEditor)
+                        ->applyInputSelectionMenuRequest (
+                            request.shouldBeOpen,
+                            true,
+                            request.generation);
+                };
+
+                if (MessageManager::getInstance()
+                        ->isThisTheMessageThread())
+                {
+                    applyRequest();
+                }
+                else
+                {
+                    MessageManager::callAsync (
+                        applyRequest);
+                }
+            });
+    }
+
+    std::shared_ptr<MergerInputMenuState> state;
+};
+
 MergerEditor::MergerEditor (GenericProcessor* parentNode)
-    : GenericEditor (parentNode)
+    : GenericEditor (parentNode),
+      inputSelectionMenuState (
+          std::make_shared<
+              MergerInputMenuState>())
 
 {
     desiredWidth = 90;
@@ -111,8 +447,14 @@ Array<GenericProcessor*> MergerEditor::getSelectableProcessors()
 {
     Array<GenericProcessor*> selectableProcessors;
 
+    auto* graph =
+        AccessClass::
+            getProcessorGraph();
+    if (graph == nullptr)
+        return selectableProcessors;
+
     Array<GenericProcessor*> availableProcessors =
-        AccessClass::getProcessorGraph()->getListOfProcessors();
+        graph->getListOfProcessors();
 
     if (availableProcessors.size() > 0)
     {
@@ -145,154 +487,297 @@ Array<GenericProcessor*> MergerEditor::getSelectableProcessors()
     return selectableProcessors;
 }
 
-String MergerEditor::getNameString (GenericProcessor* p)
+std::unique_ptr<
+    AccessibilityHandler>
+    MergerEditor::
+        createAccessibilityHandler()
 {
-    return p->getName() + " (" + String (p->getNodeId()) + ")";
+    return std::make_unique<
+        MergerEditorAccessibilityHandler> (
+        *this);
+}
+
+void MergerEditor::
+    toggleInputSelectionMenu (
+        bool asynchronously)
+{
+    const auto request =
+        inputSelectionMenuState
+            ->toggle();
+    applyInputSelectionMenuRequest (
+        request.shouldBeOpen,
+        asynchronously,
+        request.generation);
+}
+
+void MergerEditor::
+    applyInputSelectionMenuRequest (
+        bool shouldBeOpen,
+        bool asynchronously,
+        uint64 generation)
+{
+    if (inputSelectionMenuState
+            ->generation
+            .load()
+        != generation)
+    {
+        return;
+    }
+
+    if (! shouldBeOpen)
+    {
+        PopupMenu::dismissAllActiveMenus();
+        if (auto* handler =
+                getAccessibilityHandler())
+        {
+            handler->notifyAccessibilityEvent (
+                AccessibilityEvent::structureChanged);
+        }
+        return;
+    }
+
+    if (auto* handler =
+            getAccessibilityHandler())
+    {
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::structureChanged);
+    }
+
+    if (inputSelectionMenuState
+            ->activeMenuGeneration
+            .load()
+        != 0)
+    {
+        return;
+    }
+
+    if (! asynchronously)
+    {
+        openInputSelectionMenu (
+            false,
+            generation);
+        return;
+    }
+
+    const auto state =
+        inputSelectionMenuState;
+    const auto safeEditor =
+        std::make_shared<
+            Component::SafePointer<
+                MergerEditor>> (
+            this);
+    MessageManager::callAsync (
+        [state,
+         safeEditor,
+         generation]
+        {
+            if (state->generation.load()
+                    != generation
+                || ! state->shouldBeOpen.load()
+                || *safeEditor == nullptr)
+            {
+                return;
+            }
+
+            (*safeEditor)
+                ->openInputSelectionMenu (
+                    true,
+                    generation);
+        });
+}
+
+void MergerEditor::
+    openInputSelectionMenu (
+        bool asynchronously,
+        uint64 generation)
+{
+    if (inputSelectionMenuState
+                ->generation
+                .load()
+            != generation
+        || ! inputSelectionMenuState
+                  ->shouldBeOpen
+                  .load())
+    {
+        return;
+    }
+
+    uint64 noActiveMenu = 0;
+    if (! inputSelectionMenuState
+              ->activeMenuGeneration
+              .compare_exchange_strong (
+                  noActiveMenu,
+                  generation))
+    {
+        return;
+    }
+
+    auto model =
+        createMergerInputMenuModel (
+            *static_cast<
+                Merger*> (
+                getProcessor()),
+            getSelectableProcessors());
+    const auto safeEditor =
+        Component::SafePointer<
+            MergerEditor> (
+            this);
+    const auto state =
+        inputSelectionMenuState;
+    auto performSelection =
+        [safeEditor,
+         state,
+         generation,
+         choices = std::move (
+             model.choices)] (
+            int result)
+    {
+        uint64 activeGeneration =
+            generation;
+        if (! state
+                  ->activeMenuGeneration
+                  .compare_exchange_strong (
+                      activeGeneration,
+                      0))
+        {
+            return;
+        }
+
+        if (state->generation.load()
+            != generation)
+        {
+            if (state->shouldBeOpen.load()
+                && safeEditor != nullptr)
+            {
+                const auto currentGeneration =
+                    state->generation.load();
+                Timer::callAfterDelay (
+                    20,
+                    [safeEditor,
+                     state,
+                     currentGeneration]
+                    {
+                        if (safeEditor != nullptr
+                            && state->generation.load()
+                                   == currentGeneration
+                            && state->shouldBeOpen.load())
+                        {
+                            safeEditor
+                                ->applyInputSelectionMenuRequest (
+                                    true,
+                                    true,
+                                    currentGeneration);
+                        }
+                    });
+            }
+            return;
+        }
+
+        if (safeEditor == nullptr
+            || ! state->finish (
+                generation))
+        {
+            return;
+        }
+
+        if (auto* handler =
+                safeEditor
+                    ->getAccessibilityHandler())
+        {
+            handler
+                ->notifyAccessibilityEvent (
+                    AccessibilityEvent::
+                        structureChanged);
+        }
+
+        const auto choice =
+            std::find_if (
+                choices.begin(),
+                choices.end(),
+                [result] (
+                    const auto& candidate)
+                {
+                    return candidate
+                               .resultId
+                           == result;
+                });
+        if (choice
+            == choices.end())
+            return;
+
+        auto* graph =
+            AccessClass::
+                getProcessorGraph();
+        if (graph == nullptr)
+            return;
+
+        auto* merger =
+            dynamic_cast<
+                Merger*> (
+                safeEditor
+                    ->getProcessor());
+        if (merger == nullptr
+            || graph
+                       ->getProcessorWithNodeId (
+                           merger
+                               ->getNodeId())
+                   != merger
+            || merger
+                       ->getSourceNode (
+                           choice
+                               ->inputIndex)
+                   != choice
+                          ->expectedInputSource)
+        {
+            return;
+        }
+
+        auto* source =
+            graph
+                ->getProcessorWithNodeId (
+                    choice
+                        ->sourceNodeId);
+        if (source == nullptr
+            || ! safeEditor
+                     ->getSelectableProcessors()
+                     .contains (
+                         source))
+            return;
+
+        graph->connectMergerSource (
+            safeEditor
+                ->getProcessor(),
+            source,
+            choice
+                ->inputIndex);
+        graph->updateSettings (
+            safeEditor
+                ->getProcessor());
+    };
+
+    if (! asynchronously)
+    {
+        const auto result =
+            model.menu.show();
+        performSelection (
+            result);
+        return;
+    }
+
+    model.menu.showMenuAsync (
+        PopupMenu::Options()
+            .withTargetComponent (
+                this),
+        ModalCallbackFunction::create (
+            std::move (
+                performSelection)));
 }
 
 void MergerEditor::mouseDown (const MouseEvent& e)
 {
-    Merger* merger = (Merger*) getProcessor();
-
     if (e.mods.isRightButtonDown())
-    {
-        PopupMenu menu;
-        int menuItemIndex = 0;
-        int sourceNodeAIndex = -1;
-        int sourceNodeBIndex = -1;
-        int inputSelectionIndexA = -1;
-        int inputSelectionIndexB = -1;
-
-        Array<GenericProcessor*> selectableProcessors = getSelectableProcessors();
-
-        if (merger->sourceNodeA != 0 && ! merger->sourceNodeA->isEmpty())
-        {
-            menu.addItem (++menuItemIndex, // index
-                          "Input A: ", // message
-                          false); // isSelectable
-
-            menu.addItem (++menuItemIndex, // index
-                          getNameString (merger->sourceNodeA), // message
-                          false); // isSelectable, isTicked
-
-            sourceNodeAIndex = menuItemIndex;
-        }
-        else
-        {
-            menu.addItem (++menuItemIndex, // index
-                          "Choose input A:", // message
-                          false); // isSelectable
-
-            if (selectableProcessors.size() > 0)
-            {
-                inputSelectionIndexA = menuItemIndex + 1;
-
-                for (auto& selectableProcessor : selectableProcessors)
-                {
-                    menu.addItem (++menuItemIndex, // index
-                                  getNameString (selectableProcessor), // message
-                                  true); // isSelectable
-                }
-            }
-            else
-            {
-                menu.addItem (++menuItemIndex, // index
-                              " NONE AVAILABLE", // message
-                              false); // isSelectable
-            }
-        }
-
-        menu.addItem (++menuItemIndex,
-                      " ",
-                      false);
-
-        if (merger->sourceNodeB != 0 && ! merger->sourceNodeB->isEmpty())
-        {
-            menu.addItem (++menuItemIndex, // index
-                          "Input B: ", // message
-                          false); // isSelectable
-
-            menu.addItem (++menuItemIndex, // index
-                          getNameString (merger->sourceNodeB), // message
-                          false); // isSelectable, isTicked
-
-            sourceNodeBIndex = menuItemIndex;
-        }
-        else
-        {
-            menu.addItem (++menuItemIndex, // index
-                          "Choose input B:", // message
-                          false); // isSelectable
-
-            if (selectableProcessors.size() > 0)
-            {
-                inputSelectionIndexB = menuItemIndex + 1;
-
-                for (auto& selectableProcessor : selectableProcessors)
-                {
-                    menu.addItem (++menuItemIndex, // index
-                                  getNameString (selectableProcessor), // message
-                                  true); // isSelectable
-                }
-            }
-            else
-            {
-                menu.addItem (++menuItemIndex, // index
-                              " NONE AVAILABLE", // message
-                              false); // isSelectable
-            }
-        }
-
-        const int result = menu.show(); // returns 0 if nothing is selected
-
-        LOGD ("Selection: ", result);
-
-        /*if (result == sourceNodeAIndex)
-        {
-           
-            switchSource(0);
-            merger->getSourceNode(0)->setDestNode(nullptr);
-            merger->setMergerSourceNode(nullptr);
-            
-            AccessClass::getProcessorGraph()->updateSettings(getProcessor());
-            return;
-        } else if (result == sourceNodeBIndex)
-        {
-            
-            switchSource(1);
-            merger->getSourceNode(1)->setDestNode(nullptr);
-            merger->setMergerSourceNode(nullptr);
-
-            AccessClass::getProcessorGraph()->updateSettings(getProcessor());
-            return;
-        }*/
-
-        if (inputSelectionIndexA > 0)
-        {
-            if (result >= inputSelectionIndexA
-                && result < inputSelectionIndexA + selectableProcessors.size())
-            {
-                auto graph = AccessClass::getProcessorGraph();
-                graph->connectMergerSource (getProcessor(), selectableProcessors[result - inputSelectionIndexA], 0);
-                graph->updateSettings (getProcessor());
-
-                return;
-            }
-        }
-
-        if (inputSelectionIndexB > 0)
-        {
-            if (result >= inputSelectionIndexB
-                && result < inputSelectionIndexB + selectableProcessors.size())
-            {
-                auto graph = AccessClass::getProcessorGraph();
-                graph->connectMergerSource (getProcessor(), selectableProcessors[result - inputSelectionIndexB], 1);
-                graph->updateSettings (getProcessor());
-
-                return;
-            }
-        }
-    }
+        toggleInputSelectionMenu (
+            false);
 }
 
 Array<GenericEditor*> MergerEditor::getConnectedEditors()
