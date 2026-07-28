@@ -28,6 +28,7 @@
 #include "../RecordNode/RecordNode.h"
 #include "../../UI/SemanticComponent.h"
 #include <mutex>
+#include <unordered_map>
 
 struct MessageThreadComboBoxAccessibilityState
 {
@@ -265,6 +266,299 @@ private:
 
     std::shared_ptr<
         MessageThreadComboBoxAccessibilityState>
+        state;
+};
+
+struct SyncControlButtonAccessibilityState
+{
+    void attach (SyncControlButton* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+    }
+
+    SyncControlButton*
+    getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+    void synchronise (
+        String valueToUse,
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isEnabled,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            value = std::move (valueToUse);
+            title = std::move (titleToUse);
+            description =
+                std::move (descriptionToUse);
+            help = std::move (helpToUse);
+        }
+
+        enabled.store (isEnabled);
+        focused.store (isFocused);
+    }
+
+    String getValue() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return value;
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String value;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> enabled { true };
+    std::atomic<bool> focused { false };
+    SyncControlButton* button = nullptr;
+};
+
+struct SyncControlButtonAccessibilityRegistry
+{
+    std::mutex mutex;
+    std::unordered_map<
+        SyncControlButton*,
+        std::shared_ptr<
+            SyncControlButtonAccessibilityState>>
+        states;
+};
+
+SyncControlButtonAccessibilityRegistry&
+getSyncControlButtonAccessibilityRegistry()
+{
+    static auto* registry =
+        new SyncControlButtonAccessibilityRegistry();
+    return *registry;
+}
+
+std::shared_ptr<
+    SyncControlButtonAccessibilityState>
+registerSyncControlButton (
+    SyncControlButton* button)
+{
+    auto state =
+        std::make_shared<
+            SyncControlButtonAccessibilityState>();
+    state->attach (button);
+
+    auto& registry =
+        getSyncControlButtonAccessibilityRegistry();
+    const std::lock_guard<std::mutex>
+        lock (registry.mutex);
+    registry.states[button] = state;
+    return state;
+}
+
+std::shared_ptr<
+    SyncControlButtonAccessibilityState>
+getSyncControlButtonState (
+    SyncControlButton* button)
+{
+    auto& registry =
+        getSyncControlButtonAccessibilityRegistry();
+    const std::lock_guard<std::mutex>
+        lock (registry.mutex);
+    const auto found =
+        registry.states.find (button);
+    return found != registry.states.end()
+               ? found->second
+               : nullptr;
+}
+
+void unregisterSyncControlButton (
+    SyncControlButton* button)
+{
+    std::shared_ptr<
+        SyncControlButtonAccessibilityState>
+        state;
+    {
+        auto& registry =
+            getSyncControlButtonAccessibilityRegistry();
+        const std::lock_guard<std::mutex>
+            lock (registry.mutex);
+        const auto found =
+            registry.states.find (button);
+        if (found == registry.states.end())
+            return;
+
+        state = found->second;
+        registry.states.erase (found);
+    }
+
+    state->detach();
+}
+
+class SyncControlButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit SyncControlButtonAccessibilityValue (
+        std::shared_ptr<
+            SyncControlButtonAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getValue();
+    }
+
+private:
+    std::shared_ptr<
+        SyncControlButtonAccessibilityState>
+        state;
+};
+
+class SyncControlButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    SyncControlButtonAccessibilityHandler (
+        SyncControlButton& button,
+        std::shared_ptr<
+            SyncControlButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::button,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      SyncControlButtonAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto current =
+            AccessibleState().withFocusable();
+        return state->isFocused()
+                   ? current.withFocused()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            SyncControlButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::press,
+                [state]
+                {
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager == nullptr)
+                        return;
+
+                    messageManager->callSync (
+                        [state]
+                        {
+                            auto* button =
+                                state
+                                    ->getButtonOnMessageThread();
+                            if (button == nullptr
+                                || ! button->isEnabled())
+                            {
+                                return;
+                            }
+
+                            button->triggerClick();
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        SyncControlButtonAccessibilityState>
         state;
 };
 
@@ -1226,29 +1520,34 @@ SyncControlButton::SyncControlButton (SynchronizingProcessor* node_,
       node (node_),
       ttlLineCount (ttlLineCount_)
 {
-    isPrimary = node->isMainDataStream (streamKey);
+    registerSyncControlButton (this);
+    synchroniseAccessibilityState();
     LOGD ("SyncControlButton::Constructor; Stream: ", streamKey, " is main stream: ", isPrimary);
-    lastAccessibleValue = getAccessibleValue();
     startTimer (250);
 
     setTooltip ("Configure synchronization settings for " + streamKey);
 }
 
-SyncControlButton::~SyncControlButton() {}
+SyncControlButton::~SyncControlButton()
+{
+    stopTimer();
+    unregisterSyncControlButton (this);
+}
 
 std::unique_ptr<AccessibilityHandler>
 SyncControlButton::createAccessibilityHandler()
 {
-    return createReadOnlyButtonTextAccessibilityHandler (
+    synchroniseAccessibilityState();
+    auto state =
+        getSyncControlButtonState (this);
+    if (state == nullptr)
+        return Button::
+            createAccessibilityHandler();
+
+    return std::make_unique<
+        SyncControlButtonAccessibilityHandler> (
         *this,
-        [safeButton =
-             Component::SafePointer<SyncControlButton> (
-                 this)]
-        {
-            return safeButton != nullptr
-                       ? safeButton->getAccessibleValue()
-                       : String();
-        });
+        std::move (state));
 }
 
 String SyncControlButton::getAccessibleValue() const
@@ -1280,22 +1579,73 @@ String SyncControlButton::getAccessibleValue() const
 
 void SyncControlButton::timerCallback()
 {
+    synchroniseAccessibilityState();
+    repaint();
+}
+
+void SyncControlButton::
+    synchroniseAccessibilityState()
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
     isPrimary =
         node->isMainDataStream (streamKey);
     const auto accessibleValue =
         getAccessibleValue();
+    const auto previousValue =
+        lastAccessibleValue;
+    lastAccessibleValue =
+        accessibleValue;
 
-    if (accessibleValue != lastAccessibleValue)
+    if (auto state =
+            getSyncControlButtonState (
+                this))
     {
-        lastAccessibleValue = accessibleValue;
-
-        if (auto* handler =
-                getAccessibilityHandler())
-            handler->notifyAccessibilityEvent (
-                AccessibilityEvent::valueChanged);
+        const auto help =
+            getHelpText().isNotEmpty()
+                ? getHelpText()
+                : getTooltip();
+        state->synchronise (
+            accessibleValue,
+            getTitle().isNotEmpty()
+                ? getTitle()
+                : getButtonText(),
+            getDescription(),
+            help,
+            Button::isEnabled(),
+            hasKeyboardFocus (false));
     }
 
-    repaint();
+    if (accessibleValue != previousValue)
+    {
+        if (auto* handler =
+                getAccessibilityHandler())
+        {
+            handler->notifyAccessibilityEvent (
+                AccessibilityEvent::valueChanged);
+        }
+    }
+}
+
+void SyncControlButton::enablementChanged()
+{
+    Button::enablementChanged();
+    synchroniseAccessibilityState();
+}
+
+void SyncControlButton::focusGained (
+    Component::FocusChangeType cause)
+{
+    Button::focusGained (cause);
+    synchroniseAccessibilityState();
+}
+
+void SyncControlButton::focusLost (
+    Component::FocusChangeType cause)
+{
+    Button::focusLost (cause);
+    synchroniseAccessibilityState();
 }
 
 void SyncControlButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)

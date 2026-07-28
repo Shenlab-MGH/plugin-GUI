@@ -515,7 +515,7 @@ public:
                        int ttlLineCount = 8);
 
     /** Destructor */
-    ~SyncControlButton();
+    ~SyncControlButton() override;
 
     /** Exposes synchronization status and clock role. */
     std::unique_ptr<AccessibilityHandler>
@@ -530,9 +530,13 @@ public:
 
 private:
     String getAccessibleValue() const;
+    void synchroniseAccessibilityState();
 
     /** Checks whether the underlying stream is synchronized */
     void timerCallback() override;
+    void enablementChanged() override;
+    void focusGained (Component::FocusChangeType cause) override;
+    void focusLost (Component::FocusChangeType cause) override;
 
     /** Renders the button */
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;

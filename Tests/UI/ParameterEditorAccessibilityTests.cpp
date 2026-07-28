@@ -1,5 +1,6 @@
 #include "../../Source/Processors/Parameter/ParameterEditor.h"
 #include "../../Source/Processors/Parameter/ParameterOwner.h"
+#include "../../Source/UI/SemanticComponent.h"
 #include "gtest/gtest.h"
 #include <atomic>
 #include <thread>
@@ -648,6 +649,8 @@ TEST_F (ParameterEditorAccessibilityTests,
         "off; secondary clock");
 
     processor.synchronizer.startAcquisition();
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (300);
     EXPECT_EQ (
         mainHandler->getValueInterface()
             ->getCurrentValueAsString(),
@@ -679,4 +682,199 @@ TEST_F (ParameterEditorAccessibilityTests,
         hardwareHandler->getValueInterface()
             ->getCurrentValueAsString(),
         "hardware synchronized; secondary clock");
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        SynchronizationStatusUsesAMessageThreadSnapshot)
+{
+    SynchronizingProcessor processor;
+    processor.synchronizer.addDataStream (
+        "main",
+        30000.0f);
+    processor.setMainDataStream ("main");
+    SyncControlButton button (
+        &processor,
+        "Main synchronization",
+        "main");
+    auto handler =
+        static_cast<Component&> (button)
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+
+    String workerValue;
+    std::thread initialReader (
+        [&]
+        {
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+        });
+    initialReader.join();
+    EXPECT_EQ (
+        workerValue,
+        "off; main clock");
+
+    processor.synchronizer.startAcquisition();
+    std::thread prePublishReader (
+        [&]
+        {
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+        });
+    prePublishReader.join();
+    EXPECT_EQ (
+        workerValue,
+        "off; main clock");
+
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (300);
+    std::thread publishedReader (
+        [&]
+        {
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+        });
+    publishedReader.join();
+    EXPECT_EQ (
+        workerValue,
+        "synchronized; main clock");
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        SynchronizationControlActionAndProvidersAreWorkerSafe)
+{
+    SynchronizingProcessor processor;
+    processor.synchronizer.addDataStream (
+        "main",
+        30000.0f);
+    processor.setMainDataStream ("main");
+    auto button =
+        std::make_unique<SyncControlButton> (
+            &processor,
+            "Main synchronization",
+            "main");
+    applySemanticMetadata (
+        *button,
+        "oe.processor.100.parameter.synchronization",
+        "Main synchronization",
+        "Configure synchronization for the main stream.",
+        "Configure synchronization for the main stream.");
+    auto handler =
+        static_cast<Component&> (*button)
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+
+    String workerTitle;
+    String workerDescription;
+    String workerHelp;
+    String workerValue;
+    AccessibleState workerState;
+    bool workerEnabled = false;
+    std::thread reader (
+        [&]
+        {
+            workerTitle =
+                handler->getTitle();
+            workerDescription =
+                handler->getDescription();
+            workerHelp =
+                handler->getHelp();
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+            workerState =
+                handler->getCurrentState();
+            workerEnabled =
+                handler->isEnabled();
+        });
+    reader.join();
+
+    EXPECT_EQ (
+        workerTitle,
+        "Main synchronization");
+    EXPECT_EQ (
+        workerDescription,
+        "Configure synchronization for the main stream.");
+    EXPECT_EQ (
+        workerHelp,
+        workerDescription);
+    EXPECT_EQ (
+        workerValue,
+        "off; main clock");
+    EXPECT_TRUE (
+        workerState.isFocusable());
+    EXPECT_TRUE (workerEnabled);
+
+    auto clickCount =
+        std::make_shared<
+            std::atomic<int>> (0);
+    std::atomic<bool>
+        clickUsedMessageThread { false };
+    button->onClick =
+        [clickCount,
+         &clickUsedMessageThread]
+        {
+            clickCount->fetch_add (1);
+            clickUsedMessageThread.store (
+                MessageManager::getInstance()
+                    ->isThisTheMessageThread());
+        };
+    const auto actions =
+        handler->getActions();
+    const auto invokePress =
+        [&actions]
+        {
+            std::atomic<bool>
+                invoked { false };
+            std::thread worker (
+                [&]
+                {
+                    invoked.store (
+                        actions.invoke (
+                            AccessibilityActionType::
+                                press));
+                });
+            while (! invoked.load())
+            {
+                MessageManager::getInstance()
+                    ->runDispatchLoopUntil (10);
+            }
+            worker.join();
+            return invoked.load();
+        };
+
+    ASSERT_TRUE (invokePress());
+    for (int attempt = 0;
+         attempt < 20
+             && clickCount->load() == 0;
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    EXPECT_EQ (clickCount->load(), 1);
+    EXPECT_TRUE (
+        clickUsedMessageThread.load());
+
+    button->setEnabled (false);
+    EXPECT_FALSE (handler->isEnabled());
+    EXPECT_TRUE (invokePress());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (clickCount->load(), 1);
+
+    handler.reset();
+    button.reset();
+    EXPECT_TRUE (invokePress());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (clickCount->load(), 1);
 }
