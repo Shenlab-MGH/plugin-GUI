@@ -4190,7 +4190,27 @@ TEST_F (LfpDisplayNodeTests,
     ASSERT_NE (splitter, nullptr);
     auto* displayBuffer = splitter->displayBuffer;
     splitter->displayBuffer = nullptr;
-    options->setChannelsReversed (true);
+    LfpThreadTrackingButtonListener nullBufferListener;
+    button->addListener (&nullBufferListener);
+    workerReturned.store (false);
+    toggled = false;
+    std::thread nullBufferWorker (
+        [&]
+        {
+            toggled = actions.invoke (
+                AccessibilityActionType::toggle);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100 && (! workerReturned.load()
+                           || ! display->getChannelsReversed());
+         ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    joinLfpWorkerOrAbort (nullBufferWorker, workerReturned);
+    button->removeListener (&nullBufferListener);
+    EXPECT_TRUE (toggled);
+    EXPECT_EQ (nullBufferListener.callbackCount.load(), 1);
+    EXPECT_TRUE (nullBufferListener.callbackUsedMessageThread.load());
     EXPECT_TRUE (display->getChannelsReversed());
     EXPECT_TRUE (button->getToggleState());
     EXPECT_TRUE (handler->getCurrentState().isChecked());
