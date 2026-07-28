@@ -1764,17 +1764,31 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     extendedOptions->addAndMakeVisible (channelDisplaySkipLabel.get());
 
     // Show channel number button
-    showChannelNumberButton = std::make_unique<UtilityButton> ("OFF");
+    showChannelNumberButton = std::make_unique<LfpOptionToggleButton> ("OFF");
     showChannelNumberButton->setRadius (5.0f);
     showChannelNumberButton->setEnabledState (true);
     showChannelNumberButton->setCorners (true, true, true, true);
     showChannelNumberButton->addListener (this);
-    showChannelNumberButton->setClickingTogglesState (true);
     showChannelNumberButton->setToggleState (false, sendNotification);
+    const auto showChannelNumbersDescription =
+        "Show channel numbers instead of channel names in LFP display "
+        + String (displayNumber)
+        + ". This changes labels and tooltips only; acquisition and recording are unaffected.";
+    applyLfpDisplayControlMetadata (
+        *showChannelNumberButton,
+        *processor,
+        displayNumber,
+        "show_channel_numbers",
+        "LFP display "
+            + String (displayNumber)
+            + " show channel numbers",
+        showChannelNumbersDescription);
+    showChannelNumberButton->refreshAccessibilityState();
     extendedOptions->addAndMakeVisible (showChannelNumberButton.get());
 
     showChannelNumberLabel = std::make_unique<Label> ("ShowChannelNumberLabel", "Show number:");
     showChannelNumberLabel->setFont (labelFont);
+    showChannelNumberLabel->setAccessible (false);
     extendedOptions->addAndMakeVisible (showChannelNumberLabel.get());
 
     // SIGNAL PROCESSING SECTION

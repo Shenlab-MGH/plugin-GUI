@@ -396,7 +396,7 @@ private:
         channelDisplaySkipSelection;
     std::unique_ptr<Label> channelDisplaySkipLabel;
 
-    std::unique_ptr<UtilityButton> showChannelNumberButton;
+    std::unique_ptr<LfpOptionToggleButton> showChannelNumberButton;
     std::unique_ptr<Label> showChannelNumberLabel;
 
     // SIGNAL PROCESSING SECTION

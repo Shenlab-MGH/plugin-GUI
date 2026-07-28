@@ -28,6 +28,7 @@
 #include "../DisplayBuffer.h"
 #include "../LfpDisplayCanvas.h"
 #include "../LfpDisplay.h"
+#include "../LfpChannelDisplayInfo.h"
 #include "../LfpDisplayEditor.h"
 #include "../LfpDisplayNode.h"
 #include <ModelApplication.h>
@@ -4083,6 +4084,332 @@ TEST_F (LfpDisplayNodeTests,
                 ->isVisible(),
             displayIndex == 0);
     }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ExposesShowChannelNumbersToggleForEveryPane)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix = "oe.processor." + String (processor->getNodeId())
+                        + ".lfp.display_";
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        const auto displayNumber = displayIndex + 1;
+        const auto id = prefix + String (displayNumber)
+                        + ".show_channel_numbers";
+        auto* button = dynamic_cast<Button*> (
+            findLfpDescendantById (*canvas, id));
+        ASSERT_NE (button, nullptr) << id;
+        EXPECT_NE (dynamic_cast<LfpViewer::LfpOptionToggleButton*> (button),
+                   nullptr);
+        auto* handler = button->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        const auto description =
+            "Show channel numbers instead of channel names in LFP display "
+            + String (displayNumber)
+            + ". This changes labels and tooltips only; acquisition and recording are unaffected.";
+        EXPECT_EQ (handler->getRole(), AccessibilityRole::toggleButton);
+        EXPECT_EQ (handler->getTitle(),
+                   "LFP display " + String (displayNumber)
+                       + " show channel numbers");
+        EXPECT_EQ (handler->getDescription(), description);
+        EXPECT_EQ (handler->getHelp(), description);
+        EXPECT_TRUE (handler->getCurrentState().isCheckable());
+        EXPECT_FALSE (handler->getCurrentState().isChecked());
+        EXPECT_TRUE (handler->getActions().contains (
+            AccessibilityActionType::toggle));
+        EXPECT_FALSE (handler->getActions().contains (
+            AccessibilityActionType::press));
+        auto* value = handler->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_TRUE (value->isReadOnly());
+        EXPECT_EQ (value->getCurrentValueAsString(), "Off");
+        auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+        ASSERT_NE (options, nullptr);
+        std::vector<Label*> labels;
+        collectLfpDescendants (*options, labels);
+        const auto label = std::find_if (
+            labels.begin(), labels.end(), [] (const Label* candidate)
+            { return candidate->getName() == "ShowChannelNumberLabel"; });
+        ASSERT_NE (label, labels.end());
+        EXPECT_FALSE ((*label)->isAccessible());
+        EXPECT_EQ (options->isVisible(), displayIndex == 0);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ShowChannelNumbersToggleRunsOnMessageThreadAndSurvivesEdgeCases)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id = "oe.processor." + String (processor->getNodeId())
+                    + ".lfp.display_1.show_channel_numbers";
+    auto* button = dynamic_cast<Button*> (findLfpDescendantById (*canvas, id));
+    ASSERT_NE (button, nullptr);
+    auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+    ASSERT_NE (options, nullptr);
+    auto* handler = button->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    auto* value = handler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+    const auto actions = handler->getActions();
+
+    LfpThreadTrackingButtonListener listener;
+    button->addListener (&listener);
+    std::atomic<bool> workerReturned { false };
+    bool toggled = false;
+    std::thread worker ([&]
+    {
+        toggled = actions.invoke (AccessibilityActionType::toggle);
+        workerReturned.store (true);
+    });
+    for (int attempt = 0; attempt < 100
+                        && (! workerReturned.load()
+                            || ! options->getChannelNameState());
+         ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    joinLfpWorkerOrAbort (worker, workerReturned);
+    button->removeListener (&listener);
+    EXPECT_TRUE (toggled);
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (listener.callbackUsedMessageThread.load());
+    EXPECT_TRUE (options->getChannelNameState());
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_TRUE (handler->getCurrentState().isChecked());
+    EXPECT_EQ (value->getCurrentValueAsString(), "On");
+
+    options->setShowChannelNumbers (false);
+    button->setEnabled (false);
+    workerReturned.store (false);
+    std::thread disabledWorker ([&]
+    {
+        toggled = actions.invoke (AccessibilityActionType::toggle);
+        workerReturned.store (true);
+    });
+    for (int attempt = 0; attempt < 100 && ! workerReturned.load(); ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    joinLfpWorkerOrAbort (disabledWorker, workerReturned);
+    EXPECT_TRUE (toggled);
+    EXPECT_FALSE (options->getChannelNameState());
+    EXPECT_FALSE (button->getToggleState());
+    EXPECT_FALSE (handler->isEnabled());
+    button->setEnabled (true);
+
+    auto zeroChannelTester = std::make_unique<ProcessorTester> (
+        TestSourceNodeBuilder (FakeSourceNodeParams { 0, sampleRate, bitVolts }));
+    auto* zeroChannelProcessor = zeroChannelTester->createProcessor<LfpViewer::LfpDisplayNode> (
+        Plugin::Processor::SINK);
+    auto zeroCanvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        zeroChannelProcessor, LfpViewer::SplitLayouts::SINGLE, false);
+    zeroCanvas->updateSettings();
+    zeroCanvas->setSize (900, 800);
+    zeroCanvas->addToDesktop (0);
+    zeroCanvas->setVisible (true);
+    zeroCanvas->toggleOptionsDrawer (true);
+    const auto zeroId = "oe.processor." + String (zeroChannelProcessor->getNodeId())
+                        + ".lfp.display_1.show_channel_numbers";
+    auto* zeroButton = dynamic_cast<Button*> (
+        findLfpDescendantById (*zeroCanvas, zeroId));
+    ASSERT_NE (zeroButton, nullptr);
+    auto* zeroOptions = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*zeroButton);
+    ASSERT_NE (zeroOptions, nullptr);
+    EXPECT_TRUE (zeroButton->getAccessibilityHandler()->getActions().invoke (
+        AccessibilityActionType::toggle));
+    EXPECT_TRUE (zeroOptions->getChannelNameState());
+    EXPECT_TRUE (zeroButton->getToggleState());
+
+    canvas.reset();
+    workerReturned.store (false);
+    std::thread destroyedWorker ([&]
+    {
+        actions.invoke (AccessibilityActionType::toggle);
+        workerReturned.store (true);
+    });
+    for (int attempt = 0; attempt < 100 && ! workerReturned.load(); ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    joinLfpWorkerOrAbort (destroyedWorker, workerReturned);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ShowChannelNumbersXmlRoundTripsPerPaneWithoutNotifications)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix = "oe.processor." + String (processor->getNodeId())
+                        + ".lfp.display_";
+    std::array<Button*, 3> buttons {};
+    std::array<LfpViewer::LfpDisplayOptions*, 3> options {};
+    std::array<AccessibilityValueInterface*, 3> values {};
+    std::array<LfpThreadTrackingButtonListener, 3> listeners;
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        buttons[displayIndex] = dynamic_cast<Button*> (findLfpDescendantById (
+            *canvas, prefix + String (displayIndex + 1)
+                         + ".show_channel_numbers"));
+        ASSERT_NE (buttons[displayIndex], nullptr);
+        options[displayIndex] = findLfpAncestor<LfpViewer::LfpDisplayOptions> (
+            *buttons[displayIndex]);
+        ASSERT_NE (options[displayIndex], nullptr);
+        values[displayIndex] = buttons[displayIndex]->getAccessibilityHandler()
+                                   ->getValueInterface();
+        ASSERT_NE (values[displayIndex], nullptr);
+        buttons[displayIndex]->addListener (&listeners[displayIndex]);
+        options[displayIndex]->setShowChannelNumbers (displayIndex != 1);
+    }
+
+    XmlElement savedRoot ("ROOT");
+    for (auto* paneOptions : options)
+        paneOptions->saveParameters (&savedRoot);
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        auto* savedPane = savedRoot.getChildByName (
+            "LFPDISPLAY" + String (displayIndex));
+        ASSERT_NE (savedPane, nullptr);
+        EXPECT_EQ (savedPane->getBoolAttribute ("showChannelNum"),
+                   displayIndex != 1);
+        options[displayIndex]->setShowChannelNumbers (false);
+    }
+    for (auto* paneOptions : options)
+        paneOptions->loadParameters (&savedRoot);
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        const auto expected = displayIndex != 1;
+        EXPECT_EQ (options[displayIndex]->getChannelNameState(), expected);
+        EXPECT_EQ (buttons[displayIndex]->getToggleState(), expected);
+        EXPECT_EQ (buttons[displayIndex]->getAccessibilityHandler()
+                       ->getCurrentState().isChecked(), expected);
+        EXPECT_EQ (values[displayIndex]->getCurrentValueAsString(),
+                   expected ? String ("On") : String ("Off"));
+        EXPECT_EQ (listeners[displayIndex].callbackCount.load(), 0);
+    }
+    for (auto* savedPane : savedRoot.getChildIterator())
+        savedPane->removeAttribute ("showChannelNum");
+    for (int displayIndex = 0; displayIndex < 3; ++displayIndex)
+    {
+        options[displayIndex]->setShowChannelNumbers (true);
+        options[displayIndex]->loadParameters (&savedRoot);
+        EXPECT_FALSE (options[displayIndex]->getChannelNameState());
+        EXPECT_FALSE (buttons[displayIndex]->getToggleState());
+        EXPECT_FALSE (buttons[displayIndex]->getAccessibilityHandler()
+                          ->getCurrentState().isChecked());
+        EXPECT_EQ (values[displayIndex]->getCurrentValueAsString(), "Off");
+        EXPECT_EQ (listeners[displayIndex].callbackCount.load(), 0);
+        buttons[displayIndex]->removeListener (&listeners[displayIndex]);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ShowChannelNumbersChangesTheRealChannelInfoTooltipConsumer)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    auto* display = findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (display, nullptr);
+    ASSERT_GT (display->channelInfo.size(), 3);
+    auto* channelInfo = display->channelInfo[3];
+    ASSERT_NE (channelInfo, nullptr);
+    auto* tooltip = dynamic_cast<TooltipClient*> (channelInfo);
+    ASSERT_NE (tooltip, nullptr);
+
+    display->options->setShowChannelNumbers (false);
+    EXPECT_EQ (tooltip->getTooltip(), "CH3");
+    display->options->setShowChannelNumbers (true);
+    EXPECT_EQ (tooltip->getTooltip(), "4");
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerTogglesShowChannelNumbers)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix = "oe.processor." + String (processor->getNodeId())
+                        + ".lfp.display_";
+    const auto id = prefix + "1.show_channel_numbers";
+    auto* button = dynamic_cast<Button*> (findLfpDescendantById (*canvas, id));
+    ASSERT_NE (button, nullptr);
+    auto* options = findLfpAncestor<LfpViewer::LfpDisplayOptions> (*button);
+    ASSERT_NE (options, nullptr);
+    const auto window = static_cast<HWND> (canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+    const auto runAction = [&] (StringRef targetId, LfpWindowsUiaAction action)
+    {
+        LfpWindowsUiaInvokeResult actionResult;
+        std::atomic<bool> workerReturned { false };
+        std::thread worker ([&]
+        {
+            actionResult = invokeLfpWindowsUiaControl (
+                window, std::wstring (String (targetId).toWideCharPointer()), action);
+            workerReturned.store (true);
+        });
+        for (int attempt = 0; attempt < 100 && ! workerReturned.load(); ++attempt)
+            MessageManager::getInstance()->runDispatchLoopUntil (10);
+        joinLfpWorkerOrAbort (worker, workerReturned);
+        return actionResult;
+    };
+
+    const auto description =
+        L"Show channel numbers instead of channel names in LFP display 1. This changes labels and tooltips only; acquisition and recording are unaffected.";
+    const auto initialResult = runAction (id, LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (initialResult.invokeResult, S_OK);
+    EXPECT_EQ (initialResult.controlType, UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (initialResult.enabled, TRUE);
+    EXPECT_EQ (initialResult.name, L"LFP display 1 show channel numbers");
+    EXPECT_EQ (initialResult.help, description);
+    EXPECT_TRUE (initialResult.togglePatternAvailable);
+    EXPECT_EQ (initialResult.toggleState, ToggleState_Off);
+    EXPECT_TRUE (initialResult.valuePatternAvailable);
+    EXPECT_EQ (initialResult.valueReadOnly, TRUE);
+    EXPECT_EQ (initialResult.value, L"Off");
+    EXPECT_FALSE (initialResult.invokePatternAvailable);
+
+    const auto enabledResult = runAction (id, LfpWindowsUiaAction::toggle);
+    EXPECT_EQ (enabledResult.invokeResult, S_OK);
+    EXPECT_EQ (enabledResult.toggleState, ToggleState_On);
+    EXPECT_EQ (enabledResult.value, L"On");
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_TRUE (options->getChannelNameState());
+
+    button->setEnabled (false);
+    const auto disabledResult = runAction (id, LfpWindowsUiaAction::toggle);
+    EXPECT_EQ (disabledResult.invokeResult,
+               static_cast<HRESULT> (UIA_E_ELEMENTNOTENABLED));
+    EXPECT_TRUE (button->getToggleState());
+    EXPECT_TRUE (options->getChannelNameState());
+    const auto hiddenPaneResult = runAction (
+        prefix + "2.show_channel_numbers", LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (hiddenPaneResult.invokeResult, E_FAIL);
+
+    button->setEnabled (true);
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult = runAction (id, LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (closedDrawerResult.invokeResult, E_FAIL);
 }
 
 TEST_F (LfpDisplayNodeTests,
