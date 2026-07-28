@@ -42,12 +42,25 @@ public:
     SyncChannelButton (int id, SyncLineSelector* parent);
 
     /** Destructor */
-    ~SyncChannelButton();
+    ~SyncChannelButton() override;
 
     /** Returns the ID for this button's stream*/
     int getId() { return id; };
 
+    /** Creates the stable, message-thread-safe line selection handler. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
+protected:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (Component::FocusChangeType cause) override;
+    void focusLost (Component::FocusChangeType cause) override;
+
 private:
+    friend class SyncLineSelector;
+
+    void synchroniseAccessibilityState();
+
     int id;
     SyncLineSelector* parent;
     int width;
@@ -55,6 +68,7 @@ private:
     Colour btnColour;
 
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
+
 };
 
 class PLUGIN_API SetPrimaryButton : public Button
@@ -64,11 +78,24 @@ public:
     SetPrimaryButton (const String& name);
 
     /** Destructor */
-    ~SetPrimaryButton();
+    ~SetPrimaryButton() override;
+
+    /** Creates the message-thread-safe primary-clock action handler. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
+protected:
+    void enablementChanged() override;
+    void focusGained (Component::FocusChangeType cause) override;
+    void focusLost (Component::FocusChangeType cause) override;
 
 private:
+    friend class SyncLineSelector;
+
+    void synchroniseAccessibilityState();
+
     /** Renders the button*/
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
+
 };
 
 class PLUGIN_API SyncLineSelector : public PopupComponent,
@@ -101,6 +128,9 @@ public:
 
     int getSelectedChannel() { return selectedLine; }
 
+    /** True when activating the selected line again may clear the selection. */
+    bool allowsNoSelection() const { return canSelectNone; }
+
     /** Mouse listener methods*/
     void mouseDown (const MouseEvent& event) override;
     void mouseMove (const MouseEvent& event) override;
@@ -129,6 +159,8 @@ public:
 
 private:
     void updateAccessibilityMetadata();
+    void configurePrimaryButtonAccessibility();
+    String getAccessibilitySemanticId();
 
     Listener* listener;
 
