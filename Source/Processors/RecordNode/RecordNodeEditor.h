@@ -138,7 +138,7 @@ protected:
     String getAccessibleValue() const override;
 };
 
-class StreamMonitor : public LevelMonitor
+class TESTABLE StreamMonitor : public LevelMonitor
 {
 public:
     /** Constructor */
@@ -153,10 +153,16 @@ public:
     /** Draws the monitor with custom text */
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
 
+    /** Exposes selected channel count and FIFO usage. */
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
     /** Updates the number of channels to be recorded */
     void updateChannelCount (int selectedChans);
 
 private:
+    String getAccessibleValue() const;
+
     uint64 streamId;
     int selectedChannels;
     int totalChannels;

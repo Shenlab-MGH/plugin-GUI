@@ -1,6 +1,11 @@
 #include "../../Source/Processors/RecordNode/RecordNodeEditor.h"
+#include "../../Source/Processors/RecordNode/RecordNode.h"
 #include "../../Source/Processors/Parameter/ParameterOwner.h"
 #include "../../Source/Processors/ProcessorGraph/ProcessorGraph.h"
+#include "../../Source/Processors/Settings/ContinuousChannel.h"
+#include "../../Source/Processors/Settings/DataStream.h"
+#include "../../Source/Audio/AudioComponent.h"
+#include "../../Source/UI/ControlPanel.h"
 #include "../../Source/AccessClass.h"
 #include "gtest/gtest.h"
 
@@ -42,6 +47,38 @@ public:
     void parameterChangeRequest (Parameter* parameter) override
     {
         parameter->updateValue();
+    }
+};
+
+class TestRecordNode final : public RecordNode
+{
+public:
+    uint16 addTestStream (int channelCount)
+    {
+        auto* stream = dataStreams.add (
+            new DataStream (
+                { "Probe AP",
+                  "Neuropixels AP stream",
+                  "probe.ap",
+                  30000.0f,
+                  false }));
+
+        for (int channel = 0;
+             channel < channelCount;
+             ++channel)
+        {
+            continuousChannels.add (
+                new ContinuousChannel (
+                    { ContinuousChannel::ELECTRODE,
+                      "AP" + String (channel),
+                      "Probe AP channel",
+                      "probe.ap." + String (channel),
+                      0.195f,
+                      stream }));
+        }
+
+        updateChannelIndexMaps();
+        return stream->getStreamId();
     }
 };
 
@@ -217,4 +254,56 @@ TEST_F (RecordNodeEditorAccessibilityTests,
         browseHandler->getValueInterface()
             ->getCurrentValueAsString(),
         "default");
+}
+
+TEST_F (RecordNodeEditorAccessibilityTests,
+        ExposesRecordingChannelAndFifoState)
+{
+    auto audioComponent =
+        std::make_unique<AudioComponent>();
+    auto controlPanel =
+        std::make_unique<ControlPanel> (
+            processorGraph.get(),
+            audioComponent.get(),
+            true);
+    controlPanel->updateRecordEngineList();
+
+    TestRecordNode recordNode;
+    const auto streamId =
+        recordNode.addTestStream (8);
+    StreamMonitor monitor (
+        &recordNode,
+        streamId);
+
+    monitor.updateChannelCount (3);
+    monitor.setFillPercentage (0.25f);
+
+    auto handler =
+        static_cast<Component&> (monitor)
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        handler->getValueInterface()
+            ->isReadOnly());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "3 of 8 channels selected; FIFO 25%");
+
+    monitor.updateChannelCount (8);
+    monitor.setFillPercentage (0.875f);
+
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "8 of 8 channels selected; FIFO 88%");
 }

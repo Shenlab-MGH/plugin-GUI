@@ -215,6 +215,36 @@ StreamMonitor::StreamMonitor (RecordNode* rn, uint64 id)
 
 StreamMonitor::~StreamMonitor() {}
 
+std::unique_ptr<AccessibilityHandler>
+StreamMonitor::createAccessibilityHandler()
+{
+    return createReadOnlyButtonTextAccessibilityHandler (
+        *this,
+        [safeMonitor =
+             Component::SafePointer<StreamMonitor> (
+                 this)]
+        {
+            return safeMonitor != nullptr
+                       ? safeMonitor->getAccessibleValue()
+                       : String();
+        });
+}
+
+String StreamMonitor::getAccessibleValue() const
+{
+    const auto fifoPercent =
+        roundToInt (
+            jlimit (0.0f,
+                    1.0f,
+                    fillPercentage)
+            * 100.0f);
+
+    return String (selectedChannels)
+           + " of " + String (totalChannels)
+           + " channels selected; FIFO "
+           + String (fifoPercent) + "%";
+}
+
 void StreamMonitor::timerCallback()
 {
     if (((RecordNode*) processor)->recordThread->isThreadRunning())
@@ -250,8 +280,16 @@ void StreamMonitor::paintButton (Graphics& g, bool isMouseOver, bool isButtonDow
 
 void StreamMonitor::updateChannelCount (int selected)
 {
+    if (selectedChannels == selected)
+        return;
+
     selectedChannels = selected;
     repaint();
+
+    if (auto* handler =
+            getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::valueChanged);
 }
 
 DiskMonitor::DiskMonitor (RecordNode* rn)
