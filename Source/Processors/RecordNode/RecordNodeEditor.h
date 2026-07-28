@@ -32,6 +32,7 @@
 
 class RecordThread;
 class RecordNode;
+struct RecordToggleButtonAccessibilityState;
 
 /** 
 * 
@@ -246,10 +247,20 @@ public:
     RecordToggleButton (const String& name);
 
     /** Destructor */
-    ~RecordToggleButton();
+    ~RecordToggleButton() override;
+
+    /** Keeps UI Automation toggle actions on the JUCE message thread. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
+protected:
+    void buttonStateChanged() override;
 
 private:
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
+
+    std::shared_ptr<
+        RecordToggleButtonAccessibilityState>
+        accessibilityState;
 };
 
 class PLUGIN_API RecordToggleParameterEditor : public ParameterEditor,

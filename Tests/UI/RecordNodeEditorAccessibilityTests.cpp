@@ -8,6 +8,8 @@
 #include "../../Source/UI/ControlPanel.h"
 #include "../../Source/AccessClass.h"
 #include "gtest/gtest.h"
+#include <atomic>
+#include <thread>
 
 namespace
 {
@@ -46,8 +48,19 @@ public:
 
     void parameterChangeRequest (Parameter* parameter) override
     {
+        parameterChangeUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        parameterChangeCount.fetch_add (1);
         parameter->updateValue();
     }
+
+    std::atomic<bool>
+        parameterChangeUsedMessageThread {
+            false
+        };
+    std::atomic<int>
+        parameterChangeCount { 0 };
 };
 
 class TestRecordNode final : public RecordNode
@@ -163,14 +176,117 @@ TEST_F (RecordNodeEditorAccessibilityTests,
         EXPECT_TRUE (
             handler->getActions().contains (
                 AccessibilityActionType::toggle));
+        EXPECT_FALSE (
+            handler->getActions().contains (
+                AccessibilityActionType::press));
+        ASSERT_NE (
+            handler->getValueInterface(),
+            nullptr);
         EXPECT_TRUE (
             handler->getCurrentState().isChecked());
+        EXPECT_EQ (
+            handler->getValueInterface()
+                ->getCurrentValueAsString(),
+            "On");
 
+        auto* messageManager =
+            MessageManager::getInstance();
+        std::atomic<bool> workerEntered {
+            false
+        };
+        std::atomic<bool> invoked {
+            false
+        };
+        std::thread worker (
+            [&]
+            {
+                workerEntered.store (true);
+                invoked.store (
+                    handler->getActions().invoke (
+                        AccessibilityActionType::
+                            toggle));
+            });
+
+        while (! workerEntered.load())
+            std::this_thread::yield();
+
+        EXPECT_EQ (
+            owner.parameterChangeCount.load(),
+            0);
+        for (int attempt = 0;
+             attempt < 20
+                 && ! invoked.load();
+             ++attempt)
+        {
+            messageManager
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+
+        EXPECT_TRUE (invoked.load());
+        EXPECT_EQ (
+            owner.parameterChangeCount.load(),
+            1);
         EXPECT_TRUE (
-            handler->getActions().invoke (
-                AccessibilityActionType::toggle));
+            owner
+                .parameterChangeUsedMessageThread
+                .load());
         EXPECT_FALSE (parameter.getBoolValue());
         EXPECT_FALSE (
+            handler->getCurrentState().isChecked());
+        EXPECT_EQ (
+            handler->getValueInterface()
+                ->getCurrentValueAsString(),
+            "Off");
+
+        parameter.setNextValue (
+            true,
+            false);
+        editor.updateView();
+        EXPECT_TRUE (
+            handler->getCurrentState().isChecked());
+        EXPECT_EQ (
+            handler->getValueInterface()
+                ->getCurrentValueAsString(),
+            "On");
+
+        owner.parameterChangeCount.store (
+            0);
+        owner
+            .parameterChangeUsedMessageThread
+            .store (false);
+        editor.setEnabled (false);
+        workerEntered.store (false);
+        invoked.store (false);
+        std::thread disabledWorker (
+            [&]
+            {
+                workerEntered.store (true);
+                invoked.store (
+                    handler->getActions().invoke (
+                        AccessibilityActionType::
+                            toggle));
+            });
+        while (! workerEntered.load())
+            std::this_thread::yield();
+        for (int attempt = 0;
+             attempt < 20
+                 && ! invoked.load();
+             ++attempt)
+        {
+            messageManager
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        disabledWorker.join();
+
+        EXPECT_TRUE (invoked.load());
+        EXPECT_EQ (
+            owner.parameterChangeCount.load(),
+            0);
+        EXPECT_TRUE (parameter.getBoolValue());
+        EXPECT_TRUE (
             handler->getCurrentState().isChecked());
     }
 }

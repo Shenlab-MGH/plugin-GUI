@@ -25,10 +25,172 @@
 #include "../../UI/SemanticComponent.h"
 #include "../../CoreServices.h"
 #include "RecordNode.h"
+#include <atomic>
 #include <stdio.h>
+
+struct RecordToggleButtonAccessibilityState
+{
+    explicit RecordToggleButtonAccessibilityState (
+        bool initialState)
+        : publishedState (initialState)
+    {
+    }
+
+    void synchronise (bool actualState)
+    {
+        publishedState.store (
+            actualState);
+    }
+
+    bool getPublishedState() const
+    {
+        return publishedState.load();
+    }
+
+    void attach (Button* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+    }
+
+    Button* getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button;
+    }
+
+private:
+    std::atomic<bool> publishedState;
+    Button* button = nullptr;
+};
 
 namespace
 {
+class RecordToggleButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit RecordToggleButtonAccessibilityValue (
+        std::shared_ptr<
+            RecordToggleButtonAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getPublishedState()
+                   ? String ("On")
+                   : String ("Off");
+    }
+
+private:
+    std::shared_ptr<
+        RecordToggleButtonAccessibilityState>
+        state;
+};
+
+class RecordToggleButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    RecordToggleButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            RecordToggleButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::toggleButton,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      RecordToggleButtonAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto accessibleState =
+            AccessibilityHandler::getCurrentState()
+                .withCheckable();
+        return state->getPublishedState()
+                   ? accessibleState.withChecked()
+                   : accessibleState;
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            RecordToggleButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::toggle,
+                [state]
+                {
+                    MessageManager::callSync (
+                        [state]
+                        {
+                            auto* button =
+                                state
+                                    ->getButtonOnMessageThread();
+                            if (button == nullptr
+                                || ! button->isEnabled())
+                            {
+                                return;
+                            }
+
+                            button->setToggleState (
+                                ! button->getToggleState(),
+                                sendNotification);
+
+                            if (auto* survivingButton =
+                                    state
+                                        ->getButtonOnMessageThread())
+                            {
+                                state->synchronise (
+                                    survivingButton
+                                        ->getToggleState());
+                            }
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        RecordToggleButtonAccessibilityState>
+        state;
+};
+
 String getParameterSemanticId (Parameter& parameter)
 {
     return "oe.parameter."
@@ -465,9 +627,41 @@ void RecordChannelsParameterEditor::resized()
     updateBounds();
 }
 
-RecordToggleButton::RecordToggleButton (const String& name) : CustomToggleButton() {}
+RecordToggleButton::RecordToggleButton (
+    const String& name)
+    : CustomToggleButton(),
+      accessibilityState (
+          std::make_shared<
+              RecordToggleButtonAccessibilityState> (
+              false))
+{
+    accessibilityState->attach (
+        this);
+}
 
-RecordToggleButton::~RecordToggleButton() {}
+RecordToggleButton::~RecordToggleButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+RecordToggleButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        RecordToggleButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void RecordToggleButton::
+    buttonStateChanged()
+{
+    CustomToggleButton::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
+}
 
 void RecordToggleButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
 {
