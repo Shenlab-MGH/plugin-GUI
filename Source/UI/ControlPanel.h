@@ -39,6 +39,8 @@
 #include "LookAndFeel/CustomLookAndFeel.h"
 #include <queue>
 
+struct MessageThreadToggleButtonAccessibilityState;
+
 /**
 
     Triggers a new directory to be created at the start of each recording
@@ -71,12 +73,21 @@ public:
     ForceNewDirectoryButton();
 
     /** Destructor */
-    ~ForceNewDirectoryButton() {}
+    ~ForceNewDirectoryButton() override;
+
+    /** Keeps UI Automation toggle actions on the JUCE message thread. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
 
+protected:
+    void buttonStateChanged() override;
+
 private:
     std::unique_ptr<Drawable> forceNewDirectoryIcon;
+    std::shared_ptr<
+        MessageThreadToggleButtonAccessibilityState>
+        accessibilityState;
 };
 
 /** Shows or hides the recording options row. */
@@ -101,8 +112,6 @@ public:
     /** Destructor */
     ~FilenameEditorButton() {}
 };
-
-struct MessageThreadToggleButtonAccessibilityState;
 
 /**
 

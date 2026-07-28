@@ -303,8 +303,15 @@ void NewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool isButt
     g.drawRect (8, 11, 6, 2);
 }
 
-ForceNewDirectoryButton::ForceNewDirectoryButton() : Button ("ForceNewDirectory")
+ForceNewDirectoryButton::ForceNewDirectoryButton()
+    : Button ("ForceNewDirectory"),
+      accessibilityState (
+          std::make_shared<
+              MessageThreadToggleButtonAccessibilityState> (
+              false))
 {
+    accessibilityState->attach (
+        this);
     XmlDocument xmlDoc (R"(
        <svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-lock"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 2a5 5 0 0 1 5 5v3a3 3 0 0 1 3 3v6a3 3 0 0 1 -3 3h-10a3 3 0 0 1 -3 -3v-6a3 3 0 0 1 3 -3v-3a5 5 0 0 1 5 -5m0 12a2 2 0 0 0 -1.995 1.85l-.005 .15a2 2 0 1 0 2 -2m0 -10a3 3 0 0 0 -3 3v3h6v-3a3 3 0 0 0 -3 -3" /></svg>)");
 
@@ -315,6 +322,31 @@ ForceNewDirectoryButton::ForceNewDirectoryButton() : Button ("ForceNewDirectory"
                            "oe.control.recording.force_new_directory",
                            "Force new recording directories",
                            "Force a new data directory for each recording.");
+}
+
+ForceNewDirectoryButton::
+    ~ForceNewDirectoryButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+ForceNewDirectoryButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        MessageThreadToggleButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void ForceNewDirectoryButton::
+    buttonStateChanged()
+{
+    Button::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
 }
 
 void ForceNewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)

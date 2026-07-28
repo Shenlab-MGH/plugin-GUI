@@ -17,6 +17,14 @@ public:
     using RecordButton::createAccessibilityHandler;
 };
 
+class InspectableForceNewDirectoryButton final
+    : public ForceNewDirectoryButton
+{
+public:
+    using ForceNewDirectoryButton::
+        createAccessibilityHandler;
+};
+
 class ThreadRecordingButtonListener final : public Button::Listener
 {
 public:
@@ -600,6 +608,93 @@ TEST (ControlPanelAccessibilityTests, SharesForceNewDirectoryStateWithTheButton)
 
     panel.setRecordingOptionsExpanded (true);
     EXPECT_TRUE (panel.getRecordingOptionsStatus().expanded);
+}
+
+TEST (ControlPanelAccessibilityTests,
+      ForceNewDirectoryToggleFromWorkerRunsOnMessageThread)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    InspectableForceNewDirectoryButton
+        forceNewDirectory;
+    ThreadRecordingButtonListener listener;
+    forceNewDirectory.addListener (
+        &listener);
+
+    auto handler =
+        forceNewDirectory
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    EXPECT_EQ (
+        listener.callCount.load(),
+        0);
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        listener.callCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener.usedMessageThread.load());
+    EXPECT_TRUE (
+        forceNewDirectory
+            .getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+
+    forceNewDirectory.setToggleState (
+        false,
+        dontSendNotification);
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
 }
 
 TEST (ControlPanelAccessibilityTests, ExposesRecordingDirectoryEditorAndBrowser)
