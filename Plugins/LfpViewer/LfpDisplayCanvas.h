@@ -107,6 +107,14 @@ public:
     /** Loads parameters */
     void loadCustomParametersFromXml (XmlElement* xml) override;
 
+    /** Saves the official global options-drawer XML attribute. */
+    void saveOptionsDrawerState (
+        XmlElement& canvasNode) const;
+
+    /** Restores the official global options-drawer XML attribute. */
+    void restoreOptionsDrawerState (
+        const XmlElement& canvasNode);
+
     /** Responds to space bar presses */
     bool keyPressed (const KeyPress& key) override;
 

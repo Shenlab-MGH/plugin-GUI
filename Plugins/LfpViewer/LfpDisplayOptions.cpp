@@ -1347,6 +1347,17 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
 
     // init show/hide options button
     showHideOptionsButton = std::make_unique<ShowHideOptionsButton> (this);
+    applyLfpDisplayControlMetadata (
+        *showHideOptionsButton,
+        *processor,
+        displayNumber,
+        "options_drawer",
+        "LFP display "
+            + String (displayNumber)
+            + " options drawer",
+        "Show or hide advanced options for all LFP displays. Opening the drawer reveals threshold, channel, signal-processing, and triggered-display controls.");
+    showHideOptionsButton
+        ->refreshAccessibilityState();
     showHideOptionsButton->addListener (this);
     addAndMakeVisible (showHideOptionsButton.get());
 
@@ -2382,6 +2393,15 @@ int LfpDisplayOptions::getRangeStep (ContinuousChannel::Type type)
 void LfpDisplayOptions::setShowHideOptionsButtonState (bool state)
 {
     showHideOptionsButton->setToggleState (state, dontSendNotification);
+    showHideOptionsButton
+        ->refreshAccessibilityState();
+}
+
+int LfpDisplayOptions::
+    getExtendedOptionsHeight() const
+{
+    return extendedOptionsHolder
+        ->getHeight();
 }
 
 void LfpDisplayOptions::saveParameters (XmlElement* xml)

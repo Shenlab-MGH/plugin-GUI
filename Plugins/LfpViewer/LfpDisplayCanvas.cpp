@@ -542,12 +542,17 @@ void LfpDisplayCanvas::toggleOptionsDrawer (bool isOpen)
 
     for (int i = 0; i < 3; i++)
     {
+        displaySplits[i]->options
+            ->setShowHideOptionsButtonState (
+                optionsDrawerIsOpen);
+    }
+
+    for (int i = 0; i < 3; i++)
+    {
         if (optionsDrawerIsOpen)
             displaySplits[i]->options->setBounds (0, getHeight() - 210, getWidth(), 210);
         else
             displaySplits[i]->options->setBounds (0, getHeight() - 60, getWidth(), 60);
-
-        displaySplits[i]->options->setShowHideOptionsButtonState (optionsDrawerIsOpen);
     }
 }
 
@@ -647,7 +652,27 @@ void LfpDisplayCanvas::saveCustomParametersToXml (XmlElement* xml)
     xmlNode->setAttribute ("tripleHorizontalSplitRatio", String (tripleHorizontalSplitRatio[0]) + "," + String (tripleHorizontalSplitRatio[1]));
     xmlNode->setAttribute ("tripleVerticalSplitRatio", String (tripleVerticalSplitRatio[0]) + "," + String (tripleVerticalSplitRatio[1]));
 
-    xmlNode->setAttribute ("showAllOptions", optionsDrawerIsOpen);
+    saveOptionsDrawerState (
+        *xmlNode);
+}
+
+void LfpDisplayCanvas::
+    saveOptionsDrawerState (
+        XmlElement& canvasNode) const
+{
+    canvasNode.setAttribute (
+        "showAllOptions",
+        optionsDrawerIsOpen);
+}
+
+void LfpDisplayCanvas::
+    restoreOptionsDrawerState (
+        const XmlElement& canvasNode)
+{
+    toggleOptionsDrawer (
+        canvasNode.getBoolAttribute (
+            "showAllOptions",
+            false));
 }
 
 void LfpDisplayCanvas::loadCustomParametersFromXml (XmlElement* xml)
@@ -673,7 +698,8 @@ void LfpDisplayCanvas::loadCustomParametersFromXml (XmlElement* xml)
             tripleVerticalSplitRatio.set (0, splitString.substring (0, splitPoint).getFloatValue());
             tripleVerticalSplitRatio.set (1, splitString.substring (splitPoint + 1).getFloatValue());
 
-            toggleOptionsDrawer (xmlNode->getBoolAttribute ("showAllOptions", false));
+            restoreOptionsDrawerState (
+                *xmlNode);
 
             //LOGD("    Loaded canvas split settings in ", MS_FROM_START, " milliseconds");
         }

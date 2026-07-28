@@ -216,6 +216,10 @@ public:
 
     void setShowHideOptionsButtonState (bool showOptions);
 
+    /** Returns the laid-out advanced-options viewport height. */
+    int getExtendedOptionsHeight()
+        const;
+
     int selectedSpread;
     String selectedSpreadValue;
 

@@ -33,6 +33,7 @@ namespace LfpViewer
 {
 
 class LfpDisplayOptions;
+struct ShowHideOptionsButtonAccessibilityState;
 
 /**
  
@@ -51,7 +52,24 @@ public:
     /** Renders the button */
     void paintButton (Graphics& g, bool, bool);
 
-    LfpDisplayOptions* options;
+    /** Publishes current drawer state for worker-safe accessibility providers. */
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+private:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (
+        FocusChangeType cause) override;
+    void focusLost (
+        FocusChangeType cause) override;
+
+    std::shared_ptr<
+        ShowHideOptionsButtonAccessibilityState>
+        accessibilityState;
 };
 
 }; // namespace LfpViewer

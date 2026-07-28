@@ -2166,6 +2166,634 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesOptionsDrawerForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".options_drawer";
+        auto* button =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (
+            button,
+            nullptr)
+            << id;
+        auto* handler =
+            button
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                button);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (
+                    displayNumber)
+                + " options drawer");
+        const auto description =
+            "Show or hide advanced options for all LFP displays. Opening the drawer reveals threshold, channel, signal-processing, and triggered-display controls.";
+        EXPECT_EQ (
+            handler
+                ->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        EXPECT_FALSE (
+            button->getToggleState());
+        EXPECT_FALSE (
+            handler
+                ->getCurrentState()
+                .isCheckable());
+        EXPECT_TRUE (
+            handler
+                ->getCurrentState()
+                .isExpandable());
+        EXPECT_TRUE (
+            handler
+                ->getCurrentState()
+                .isCollapsed());
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_TRUE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "Closed");
+        for (const auto action :
+             { AccessibilityActionType::
+                   press,
+               AccessibilityActionType::
+                   expand,
+               AccessibilityActionType::
+                   collapse })
+        {
+            EXPECT_TRUE (
+                handler->getActions()
+                    .contains (
+                        action));
+        }
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        toggle));
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *button)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::
+                THREE_HORZ);
+    int visibleOptionsCount = 0;
+    for (int displayNumber = 1;
+         displayNumber <= 3;
+         ++displayNumber)
+    {
+        auto* button =
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + String (
+                        displayNumber)
+                    + ".options_drawer");
+        ASSERT_NE (
+            button,
+            nullptr);
+        if (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *button)
+                ->isVisible())
+        {
+            ++visibleOptionsCount;
+        }
+    }
+    EXPECT_EQ (
+        visibleOptionsCount,
+        1);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        OptionsDrawerWorkerActionsSynchroniseEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    std::array<Button*, 3>
+        buttons {};
+    std::array<
+        AccessibilityHandler*,
+        3>
+        handlers {};
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        buttons[displayIndex] =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + String (
+                            displayIndex
+                            + 1)
+                        + ".options_drawer"));
+        ASSERT_NE (
+            buttons[displayIndex],
+            nullptr);
+        handlers[displayIndex] =
+            buttons[displayIndex]
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handlers[displayIndex],
+            nullptr);
+    }
+
+    LfpThreadTrackingButtonListener
+        listener;
+    buttons[0]->addListener (
+        &listener);
+    const auto invokeFromWorker =
+        [&] (
+            AccessibilityActionType
+                action)
+    {
+        bool invoked = false;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                invoked =
+                    handlers[0]
+                        ->getActions()
+                        .invoke (
+                            action);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        EXPECT_TRUE (
+            invoked);
+    };
+
+    invokeFromWorker (
+        AccessibilityActionType::
+            expand);
+    EXPECT_TRUE (
+        canvas
+            ->optionsDrawerIsOpen);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_TRUE (
+            buttons[displayIndex]
+                ->getToggleState());
+        EXPECT_TRUE (
+            handlers[displayIndex]
+                ->getCurrentState()
+                .isExpanded());
+        EXPECT_EQ (
+            handlers[displayIndex]
+                ->getValueInterface()
+                ->getCurrentValueAsString(),
+            "Open");
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[
+                    displayIndex])
+                ->getHeight(),
+            210);
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[
+                    displayIndex])
+                ->getExtendedOptionsHeight(),
+            150);
+    }
+
+    invokeFromWorker (
+        AccessibilityActionType::
+            expand);
+    EXPECT_TRUE (
+        canvas
+            ->optionsDrawerIsOpen);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+
+    invokeFromWorker (
+        AccessibilityActionType::
+            collapse);
+    EXPECT_FALSE (
+        canvas
+            ->optionsDrawerIsOpen);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        2);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_FALSE (
+            buttons[displayIndex]
+                ->getToggleState());
+        EXPECT_TRUE (
+            handlers[displayIndex]
+                ->getCurrentState()
+                .isCollapsed());
+        EXPECT_EQ (
+            handlers[displayIndex]
+                ->getValueInterface()
+                ->getCurrentValueAsString(),
+            "Closed");
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[
+                    displayIndex])
+                ->getHeight(),
+            60);
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[
+                    displayIndex])
+                ->getExtendedOptionsHeight(),
+            0);
+    }
+
+    invokeFromWorker (
+        AccessibilityActionType::
+            collapse);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        2);
+
+    canvas
+        ->toggleOptionsDrawer (
+            true);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        2);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_TRUE (
+            handlers[displayIndex]
+                ->getCurrentState()
+                .isExpanded());
+    }
+
+    buttons[0]->removeListener (
+        &listener);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        OptionsDrawerActionsIgnoreDisabledAndDestroyedControls)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.options_drawer";
+    auto* button =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        button,
+        nullptr);
+    auto* handler =
+        button
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+    const auto actions =
+        handler->getActions();
+
+    button->setEnabled (
+        false);
+    EXPECT_FALSE (
+        handler->isEnabled());
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                expand));
+    EXPECT_FALSE (
+        canvas
+            ->optionsDrawerIsOpen);
+    EXPECT_FALSE (
+        button->getToggleState());
+
+    button->setEnabled (
+        true);
+    canvas.reset();
+
+    std::atomic<bool>
+        workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            actions.invoke (
+                AccessibilityActionType::
+                    expand);
+            actions.invoke (
+                AccessibilityActionType::
+                    press);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        OptionsDrawerXmlStateRoundTripsWithoutNotifications)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    std::array<Button*, 3>
+        buttons {};
+    std::array<
+        AccessibilityHandler*,
+        3>
+        handlers {};
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        buttons[displayIndex] =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + String (
+                            displayIndex
+                            + 1)
+                        + ".options_drawer"));
+        ASSERT_NE (
+            buttons[displayIndex],
+            nullptr);
+        handlers[displayIndex] =
+            buttons[displayIndex]
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handlers[displayIndex],
+            nullptr);
+    }
+
+    LfpThreadTrackingButtonListener
+        listener;
+    buttons[0]->addListener (
+        &listener);
+    canvas
+        ->toggleOptionsDrawer (
+            true);
+    XmlElement savedNode (
+        "CANVAS");
+    canvas
+        ->saveOptionsDrawerState (
+            savedNode);
+    EXPECT_TRUE (
+        savedNode.hasAttribute (
+            "showAllOptions"));
+    EXPECT_TRUE (
+        savedNode.getBoolAttribute (
+            "showAllOptions"));
+
+    canvas
+        ->toggleOptionsDrawer (
+            false);
+    canvas
+        ->restoreOptionsDrawerState (
+            savedNode);
+    EXPECT_TRUE (
+        canvas
+            ->optionsDrawerIsOpen);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        0);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_TRUE (
+            buttons[displayIndex]
+                ->getToggleState());
+        EXPECT_TRUE (
+            handlers[displayIndex]
+                ->getCurrentState()
+                .isExpanded());
+        auto* options =
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[
+                    displayIndex]);
+        ASSERT_NE (
+            options,
+            nullptr);
+        EXPECT_EQ (
+            options->getHeight(),
+            210);
+        EXPECT_EQ (
+            options
+                ->getExtendedOptionsHeight(),
+            150);
+    }
+
+    XmlElement explicitClosedNode (
+        "CANVAS");
+    explicitClosedNode.setAttribute (
+        "showAllOptions",
+        false);
+    canvas
+        ->restoreOptionsDrawerState (
+            explicitClosedNode);
+    EXPECT_FALSE (
+        canvas
+            ->optionsDrawerIsOpen);
+
+    canvas
+        ->toggleOptionsDrawer (
+            true);
+    XmlElement missingAttributeNode (
+        "CANVAS");
+    canvas
+        ->restoreOptionsDrawerState (
+            missingAttributeNode);
+    EXPECT_FALSE (
+        canvas
+            ->optionsDrawerIsOpen);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        0);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_FALSE (
+            buttons[displayIndex]
+                ->getToggleState());
+        EXPECT_TRUE (
+            handlers[displayIndex]
+                ->getCurrentState()
+                .isCollapsed());
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[
+                    displayIndex])
+                ->getExtendedOptionsHeight(),
+            0);
+    }
+    buttons[0]->removeListener (
+        &listener);
+}
+
+TEST_F (LfpDisplayNodeTests,
         ExposesRangeTypeSelectorsForEveryPane)
 {
     auto canvas =
@@ -4363,6 +4991,317 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (
         hiddenResult.invokeResult,
         E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerControlsOptionsDrawer)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.options_drawer";
+    auto* button =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        button,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto runAction =
+        [&] (
+            StringRef targetId,
+            LfpWindowsUiaAction action,
+            bool expectedOpen)
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (
+                                targetId)
+                                .toWideCharPointer()),
+                        action);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && (! workerReturned.load()
+                     || canvas
+                                ->optionsDrawerIsOpen
+                            != expectedOpen);
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return actionResult;
+    };
+
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryExpansion,
+            false);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_ButtonControlTypeId);
+    EXPECT_EQ (
+        initialResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 options drawer");
+    EXPECT_EQ (
+        initialResult.help,
+        L"Show or hide advanced options for all LFP displays. Opening the drawer reveals threshold, channel, signal-processing, and triggered-display controls.");
+    EXPECT_TRUE (
+        initialResult
+            .expandCollapsePatternAvailable);
+    EXPECT_FALSE (
+        initialResult
+            .togglePatternAvailable);
+    EXPECT_TRUE (
+        initialResult
+            .invokePatternAvailable);
+    EXPECT_EQ (
+        initialResult
+            .expansionState,
+        ExpandCollapseState_Collapsed);
+
+    LfpThreadTrackingButtonListener
+        listener;
+    button->addListener (
+        &listener);
+    const auto expandedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand,
+            true);
+    EXPECT_EQ (
+        expandedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        expandedResult
+            .expansionState,
+        ExpandCollapseState_Expanded);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+
+    const auto repeatedExpandResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand,
+            true);
+    EXPECT_EQ (
+        repeatedExpandResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+
+    const auto collapsedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                collapse,
+            false);
+    EXPECT_EQ (
+        collapsedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        collapsedResult
+            .expansionState,
+        ExpandCollapseState_Collapsed);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        2);
+
+    const auto toggledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                toggle,
+            false);
+    EXPECT_EQ (
+        toggledResult.invokeResult,
+        E_NOINTERFACE);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        2);
+
+    const auto invokedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                invoke,
+            true);
+    EXPECT_EQ (
+        invokedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        3);
+    const auto repeatedInvokeResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                invoke,
+            false);
+    EXPECT_EQ (
+        repeatedInvokeResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        4);
+    button->removeListener (
+        &listener);
+
+    button->setEnabled (
+        false);
+    for (const auto action :
+         { LfpWindowsUiaAction::
+               expand,
+           LfpWindowsUiaAction::
+               invoke })
+    {
+        const auto disabledResult =
+            runAction (
+                id,
+                action,
+                false);
+        EXPECT_EQ (
+            disabledResult
+                .invokeResult,
+            static_cast<HRESULT> (
+                UIA_E_ELEMENTNOTENABLED));
+        EXPECT_FALSE (
+            canvas
+                ->optionsDrawerIsOpen);
+    }
+
+    const auto hiddenResult =
+        runAction (
+            prefix
+                + "2.options_drawer",
+            LfpWindowsUiaAction::
+                queryExpansion,
+            false);
+    EXPECT_EQ (
+        hiddenResult.invokeResult,
+        E_FAIL);
+
+    button->setEnabled (
+        true);
+    LfpDestroyCanvasButtonListener
+        destroyListener (
+            canvas);
+    button->addListener (
+        &destroyListener);
+    LfpWindowsUiaInvokeResult
+        destroyedResult;
+    std::atomic<bool>
+        destroyWorkerReturned {
+            false
+        };
+    std::thread destroyWorker (
+        [&]
+        {
+            destroyedResult =
+                invokeLfpWindowsUiaControl (
+                    window,
+                    std::wstring (
+                        id
+                            .toWideCharPointer()),
+                    LfpWindowsUiaAction::
+                        invoke);
+            destroyWorkerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && (! destroyWorkerReturned
+                       .load()
+                 || canvas != nullptr);
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        destroyWorker,
+        destroyWorkerReturned);
+    EXPECT_EQ (
+        canvas,
+        nullptr);
+    EXPECT_EQ (
+        destroyedResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTAVAILABLE));
 }
 
 TEST_F (LfpDisplayNodeTests,
