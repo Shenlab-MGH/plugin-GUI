@@ -52,6 +52,125 @@ public:
             AccessibilityRole::group);
     }
 };
+
+class GraphNodeAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    explicit GraphNodeAccessibilityHandler (
+        GraphNode& nodeToWrap)
+        : AccessibilityHandler (
+              nodeToWrap,
+              AccessibilityRole::button,
+              createActions (
+                  nodeToWrap),
+              AccessibilityHandler::
+                  Interfaces {
+                      std::make_unique<
+                          SelectionValue> (
+                          nodeToWrap) }),
+          node (nodeToWrap)
+    {
+    }
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto state =
+            AccessibilityHandler::
+                getCurrentState();
+
+        if (node
+                .hasExpandableProcessorDetails())
+        {
+            state = state.withExpandable();
+            state =
+                node.processorInfoVisible
+                    ? state.withExpanded()
+                    : state.withCollapsed();
+        }
+
+        return state;
+    }
+
+private:
+    class SelectionValue final
+        : public
+          AccessibilityTextValueInterface
+    {
+    public:
+        explicit SelectionValue (
+            GraphNode& nodeToWrap)
+            : node (nodeToWrap)
+        {
+        }
+
+        bool isReadOnly()
+            const override
+        {
+            return true;
+        }
+
+        void setValueAsString (
+            const String&) override
+        {
+            jassertfalse;
+        }
+
+        String getCurrentValueAsString()
+            const override
+        {
+            return node
+                           .isSelectedForAccessibility()
+                       ? "selected"
+                       : "not selected";
+        }
+
+    private:
+        GraphNode& node;
+    };
+
+    static AccessibilityActions
+    createActions (GraphNode& node)
+    {
+        const auto safeNode =
+            Component::SafePointer<
+                GraphNode> (&node);
+
+        auto actions =
+            AccessibilityActions()
+                .addAction (
+                    AccessibilityActionType::
+                        press,
+                    [safeNode]
+                    {
+                        if (safeNode != nullptr)
+                            safeNode
+                                ->performAccessibilityPress();
+                    });
+
+        if (node
+                .hasExpandableProcessorDetails())
+        {
+            const auto toggle =
+                [safeNode]
+                {
+                    if (safeNode != nullptr)
+                        safeNode
+                            ->performAccessibilityToggle();
+                };
+
+            actions.addAction (
+                AccessibilityActionType::
+                    showMenu,
+                toggle);
+        }
+
+        return actions;
+    }
+
+    GraphNode& node;
+};
 } // namespace
 
 GraphViewport::GraphViewport (GraphViewer* gv)
@@ -839,6 +958,8 @@ void DataStreamButton::paintButton (Graphics& g, bool isHighlighted, bool isDown
 GraphNode::GraphNode (GenericEditor* ed, GraphViewer* g)
     : editor (ed), processor (ed->getProcessor()), gv (g), isMouseOver (false), stillNeeded (true), nodeWidth (NODE_WIDTH)
 {
+    setFocusContainerType (
+        FocusContainerType::focusContainer);
     nodeId = processor->getNodeId();
     horzShift = 0;
     vertShift = 0;
@@ -896,6 +1017,14 @@ GraphNode::GraphNode (GenericEditor* ed, GraphViewer* g)
 
     if (! processor->isEmpty())
         nodeDropShadower.setOwner (this);
+
+    updateSemanticMetadata();
+    applySemanticMetadata (
+        *this,
+        "oe.graph.node."
+            + String (nodeId),
+        getTitle(),
+        getDescription());
 }
 
 GraphNode::~GraphNode()
@@ -936,6 +1065,42 @@ void GraphNode::updateWidth()
 
     if (newWidth > nodeWidth)
         nodeWidth = newWidth;
+
+    updateSemanticMetadata();
+}
+
+void GraphNode::updateSemanticMetadata()
+{
+    const auto nodeTitle =
+        getName()
+        + " node "
+        + String (nodeId);
+
+    const auto description =
+        "Select "
+        + nodeTitle
+        + (hasExpandableProcessorDetails()
+               ? " and show or hide its details."
+               : ".");
+    const bool changed =
+        getTitle() != nodeTitle
+        || getDescription()
+               != description;
+
+    if (! changed)
+        return;
+
+    setTitle (nodeTitle);
+    setDescription (description);
+
+    if (auto* handler =
+            getAccessibilityHandler())
+    {
+        handler
+            ->notifyAccessibilityEvent (
+                AccessibilityEvent::
+                    titleChanged);
+    }
 }
 
 void GraphNode::mouseEnter (const MouseEvent& m)
@@ -954,31 +1119,149 @@ void GraphNode::mouseExit (const MouseEvent& m)
 
 void GraphNode::mouseDown (const MouseEvent& m)
 {
-    AccessClass::getEditorViewport()->highlightEditor (editor);
+    selectProcessor();
 
-    if (processor->isMerger()
-        || processor->isSplitter()
-        || processor->isEmpty()
-        || processorParamComponent->heightInPixels == 0)
+    if (! hasExpandableProcessorDetails())
         return;
 
     if (m.getEventRelativeTo (this).y < 20 && m.getEventRelativeTo (this).x > 24)
-    {
-        if (processorInfoVisible)
-        {
-            processorInfoVisible = false;
-            updateBoundaries();
-            infoPanel->setPanelSize (processorParamComponent.get(), 0, false);
-        }
-        else
-        {
-            processorInfoVisible = true;
-            updateBoundaries();
-            infoPanel->expandPanelFully (processorParamComponent.get(), false);
-        }
+        toggleProcessorDetails();
+}
 
-        updateGraphView();
+std::unique_ptr<AccessibilityHandler>
+GraphNode::createAccessibilityHandler()
+{
+    return std::make_unique<
+        GraphNodeAccessibilityHandler> (
+        *this);
+}
+
+void GraphNode::selectProcessor()
+{
+    if (auto* editorViewport =
+            AccessClass::
+                getEditorViewport())
+    {
+        editorViewport
+            ->highlightEditor (editor);
     }
+    else
+    {
+        editor->highlight();
+    }
+
+    if (auto* handler =
+            getAccessibilityHandler())
+    {
+        handler
+            ->notifyAccessibilityEvent (
+                AccessibilityEvent::
+                    valueChanged);
+    }
+
+    if (auto* graphHandler =
+            gv->getAccessibilityHandler())
+    {
+        graphHandler
+            ->notifyAccessibilityEvent (
+                AccessibilityEvent::
+                    structureChanged);
+    }
+}
+
+void GraphNode::toggleProcessorDetails()
+{
+    if (! hasExpandableProcessorDetails())
+        return;
+
+    processorInfoVisible =
+        ! processorInfoVisible;
+    updateBoundaries();
+
+    if (processorInfoVisible)
+    {
+        infoPanel->expandPanelFully (
+            processorParamComponent.get(),
+            false);
+    }
+    else
+    {
+        infoPanel->setPanelSize (
+            processorParamComponent.get(),
+            0,
+            false);
+    }
+
+    updateGraphView();
+
+    if (auto* handler =
+            getAccessibilityHandler())
+    {
+        handler
+            ->notifyAccessibilityEvent (
+                AccessibilityEvent::
+                    structureChanged);
+    }
+}
+
+void GraphNode::performAccessibilityPress()
+{
+    const auto perform =
+        [safeNode =
+             Component::SafePointer<
+                 GraphNode> (this)]
+        {
+            if (safeNode != nullptr)
+                safeNode->selectProcessor();
+        };
+
+    if (MessageManager::getInstance()
+            ->isThisTheMessageThread())
+        perform();
+    else
+        MessageManager::callAsync (
+            perform);
+}
+
+void GraphNode::performAccessibilityToggle()
+{
+    const auto perform =
+        [safeNode =
+             Component::SafePointer<
+                 GraphNode> (this)]
+        {
+            if (safeNode != nullptr)
+                safeNode
+                    ->toggleProcessorDetails();
+        };
+
+    if (MessageManager::getInstance()
+            ->isThisTheMessageThread())
+        perform();
+    else
+        MessageManager::callAsync (
+            perform);
+}
+
+bool GraphNode::
+    hasExpandableProcessorDetails()
+    const
+{
+    return ! processor->isMerger()
+           && ! processor->isSplitter()
+           && ! processor->isEmpty()
+           && processorParamComponent
+                  != nullptr
+           && processorParamComponent
+                      ->heightInPixels
+                  > 0;
+}
+
+bool GraphNode::
+    isSelectedForAccessibility()
+    const
+{
+    return editor->getSelectionState();
 }
 
 void GraphNode::mouseDoubleClick (const MouseEvent& m)

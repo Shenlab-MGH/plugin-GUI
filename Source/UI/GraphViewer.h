@@ -150,8 +150,8 @@ private:
  @see GraphViewer
 */
 
-class GraphNode : public Component,
-                  public Button::Listener
+class TESTABLE GraphNode : public Component,
+                           public Button::Listener
 {
 public:
     /** Constructor */
@@ -183,6 +183,14 @@ public:
 
     /** To respond to DataStreamButton clicks */
     void buttonClicked (Button* button);
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+    void performAccessibilityPress();
+    void performAccessibilityToggle();
+    bool hasExpandableProcessorDetails() const;
+    bool isSelectedForAccessibility() const;
 
     /** Returns location of component center point */
     juce::Point<float> getCenterPoint() const;
@@ -263,6 +271,10 @@ public:
     std::map<String, bool> streamParamsVisible;
 
 private:
+    void selectProcessor();
+    void toggleProcessorDetails();
+    void updateSemanticMetadata();
+
     GenericEditor* editor;
     GenericProcessor* processor;
     GraphViewer* gv;

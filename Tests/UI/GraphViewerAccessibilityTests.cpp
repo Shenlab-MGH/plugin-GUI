@@ -21,6 +21,46 @@ public:
     void shutdown() override {}
 };
 
+class GraphNodeTestProcessor final
+    : public GenericProcessor
+{
+public:
+    GraphNodeTestProcessor (
+        int nodeId = 42,
+        bool withDetails = true)
+        : GenericProcessor (
+              "Graph Test Processor")
+    {
+        setNodeId (nodeId);
+
+        if (withDetails)
+        {
+            addBooleanParameter (
+                Parameter::PROCESSOR_SCOPE,
+                "enabled",
+                "Enabled",
+                "Enable graph test processing.",
+                true);
+        }
+    }
+
+    void process (
+        AudioBuffer<float>&) override
+    {
+    }
+};
+
+class GraphNodeTestEditor final
+    : public GenericEditor
+{
+public:
+    explicit GraphNodeTestEditor (
+        GenericProcessor* processor)
+        : GenericEditor (processor)
+    {
+    }
+};
+
 JUCEApplicationBase*
 createGraphViewerTestApplication()
 {
@@ -33,6 +73,8 @@ class GraphViewerAccessibilityTests
 protected:
     void SetUp() override
     {
+        AccessClass::
+            clearAccessClassStateForTesting();
         JUCEApplicationBase::createInstance =
             createGraphViewerTestApplication;
         application =
@@ -47,6 +89,8 @@ protected:
     void TearDown() override
     {
         messageManagerLock.reset();
+        AccessClass::
+            clearAccessClassStateForTesting();
         application.reset();
         JUCEApplicationBase::createInstance =
             nullptr;
@@ -253,4 +297,269 @@ TEST_F (GraphViewerAccessibilityTests,
                 expected.id),
             expected.scrollBar);
     }
+}
+
+TEST_F (GraphViewerAccessibilityTests,
+        ExposesGraphNodeSelectionAndDetails)
+{
+    GraphNodeTestProcessor processor;
+    GraphNodeTestEditor editor (
+        &processor);
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+    graph.addAndMakeVisible (&node);
+    graph.setBounds (
+        0,
+        0,
+        1600,
+        1200);
+    auto* navigation =
+        graph.getGraphViewport();
+    ASSERT_NE (navigation, nullptr);
+    navigation->setBounds (
+        0,
+        0,
+        800,
+        400);
+    navigation->addToDesktop (0);
+
+    EXPECT_EQ (
+        node.getComponentID(),
+        "oe.graph.node.42");
+    EXPECT_EQ (
+        node.getTitle(),
+        "Graph Test Processor node 42");
+    EXPECT_EQ (
+        node.getDescription(),
+        "Select Graph Test Processor node 42 and show or hide its details.");
+    EXPECT_TRUE (
+        node.isFocusContainer());
+
+    auto* handler =
+        node.getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::showMenu));
+
+    auto state =
+        handler->getCurrentState();
+    EXPECT_FALSE (state.isSelectable());
+    EXPECT_FALSE (state.isSelected());
+    EXPECT_TRUE (state.isExpandable());
+    EXPECT_TRUE (state.isCollapsed());
+    ASSERT_NE (
+        handler->getParent(),
+        nullptr);
+    EXPECT_EQ (
+        &handler
+             ->getParent()
+             ->getComponent(),
+        &graph);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        handler
+            ->getValueInterface()
+            ->isReadOnly());
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "not selected");
+
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        editor.getSelectionState());
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "selected");
+
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::showMenu));
+    EXPECT_TRUE (
+        node.processorInfoVisible);
+
+    state = handler->getCurrentState();
+    EXPECT_TRUE (state.isExpanded());
+    EXPECT_FALSE (
+        handler->getChildren().empty());
+
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::showMenu));
+    EXPECT_FALSE (
+        node.processorInfoVisible);
+
+    state = handler->getCurrentState();
+    EXPECT_TRUE (state.isCollapsed());
+}
+
+TEST_F (GraphViewerAccessibilityTests,
+        DoesNotAdvertiseUnavailableGraphNodeDetails)
+{
+    GraphNodeTestProcessor processor (
+        43,
+        false);
+    GraphNodeTestEditor editor (
+        &processor);
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+
+    EXPECT_EQ (
+        node.getComponentID(),
+        "oe.graph.node.43");
+    EXPECT_EQ (
+        node.getDescription(),
+        "Select Graph Test Processor node 43.");
+
+    auto handler =
+        node.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::showMenu));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "not selected");
+
+    const auto state =
+        handler->getCurrentState();
+    EXPECT_FALSE (state.isSelectable());
+    EXPECT_FALSE (state.isExpandable());
+    EXPECT_FALSE (state.isExpanded());
+    EXPECT_FALSE (state.isCollapsed());
+}
+
+TEST_F (GraphViewerAccessibilityTests,
+        GraphNodeSelectionRunsOnMessageThread)
+{
+    GraphNodeTestProcessor processor (
+        44,
+        false);
+    GraphNodeTestEditor editor (
+        &processor);
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+    auto handler =
+        node.createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    std::thread worker (
+        [&handler]
+        {
+            handler
+                ->getActions()
+                .invoke (
+                    AccessibilityActionType::
+                        press);
+        });
+    worker.join();
+
+    EXPECT_FALSE (
+        editor.getSelectionState());
+
+    auto* messageManager =
+        MessageManager::getInstance();
+    for (int attempt = 0;
+         attempt < 20
+             && ! editor
+                       .getSelectionState();
+         ++attempt)
+    {
+        messageManager
+            ->runDispatchLoopUntil (10);
+    }
+
+    EXPECT_TRUE (
+        editor.getSelectionState());
+}
+
+TEST_F (GraphViewerAccessibilityTests,
+        GraphNodeRefreshKeepsItsHandlerAlive)
+{
+    GraphNodeTestProcessor processor (
+        45,
+        false);
+    GraphNodeTestEditor editor (
+        &processor);
+    GraphViewer graph;
+    GraphNode node (
+        &editor,
+        &graph);
+    graph.addAndMakeVisible (&node);
+    graph.setBounds (
+        0,
+        0,
+        800,
+        400);
+    auto* navigation =
+        graph.getGraphViewport();
+    ASSERT_NE (navigation, nullptr);
+    navigation->setBounds (
+        0,
+        0,
+        800,
+        400);
+    navigation->addToDesktop (0);
+
+    auto* cachedHandler =
+        node.getAccessibilityHandler();
+    ASSERT_NE (cachedHandler, nullptr);
+
+    node.setTitle ("Stale graph node title");
+    node.updateWidth();
+
+    auto allocationProbe =
+        node.createAccessibilityHandler();
+    ASSERT_NE (allocationProbe, nullptr);
+    EXPECT_EQ (
+        node.getAccessibilityHandler(),
+        cachedHandler);
+    EXPECT_EQ (
+        node.getTitle(),
+        "Graph Test Processor node 45");
+    EXPECT_TRUE (
+        cachedHandler
+            ->getActions()
+            .invoke (
+                AccessibilityActionType::
+                    press));
+    EXPECT_EQ (
+        cachedHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "selected");
 }
