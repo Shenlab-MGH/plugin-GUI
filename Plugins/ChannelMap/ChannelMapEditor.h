@@ -25,6 +25,59 @@
 #define __CHANNELMAPEDITOR_H_73D0AB34__
 
 #include <EditorHeaders.h>
+#include "../../Source/TestableExport.h"
+
+struct ChannelMapFileButtonAccessibilityState;
+
+/** Channel Map load button with worker-safe accessibility providers/actions. */
+class TESTABLE ChannelMapLoadButton final
+    : public LoadButton
+{
+public:
+    explicit ChannelMapLoadButton (
+        const String& name);
+    ~ChannelMapLoadButton() override;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+    void refreshAccessibilityState();
+    void enablementChanged() override;
+    void focusGained (
+        FocusChangeType cause) override;
+    void focusLost (
+        FocusChangeType cause) override;
+
+private:
+    std::shared_ptr<
+        ChannelMapFileButtonAccessibilityState>
+        accessibilityState;
+};
+
+/** Channel Map save button with worker-safe accessibility providers/actions. */
+class TESTABLE ChannelMapSaveButton final
+    : public SaveButton
+{
+public:
+    explicit ChannelMapSaveButton (
+        const String& name);
+    ~ChannelMapSaveButton() override;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+    void refreshAccessibilityState();
+    void enablementChanged() override;
+    void focusGained (
+        FocusChangeType cause) override;
+    void focusLost (
+        FocusChangeType cause) override;
+
+private:
+    std::shared_ptr<
+        ChannelMapFileButtonAccessibilityState>
+        accessibilityState;
+};
 
 /**
 
@@ -81,8 +134,12 @@ private:
 
     OwnedArray<ElectrodeButton> electrodeButtons;
 
-    std::unique_ptr<LoadButton> loadButton;
-    std::unique_ptr<SaveButton> saveButton;
+    std::unique_ptr<
+        ChannelMapLoadButton>
+        loadButton;
+    std::unique_ptr<
+        ChannelMapSaveButton>
+        saveButton;
     std::unique_ptr<Viewport> electrodeButtonViewport;
     std::unique_ptr<Component> electrodeButtonHolder;
 

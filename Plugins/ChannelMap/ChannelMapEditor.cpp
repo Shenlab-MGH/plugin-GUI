@@ -27,6 +27,362 @@
 #include "ChannelMapEditor.h"
 
 #include "ChannelMapActions.h"
+#include <atomic>
+#include <mutex>
+
+struct ChannelMapFileButtonAccessibilityState
+{
+    void attach (Button* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+        enabled.store (false);
+        focused.store (false);
+    }
+
+    Button*
+    getButtonOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return button.getComponent();
+    }
+
+    void synchronise (
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isEnabled,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            title = std::move (titleToUse);
+            description =
+                std::move (descriptionToUse);
+            help = std::move (helpToUse);
+        }
+
+        enabled.store (isEnabled);
+        focused.store (isFocused);
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> enabled { true };
+    std::atomic<bool> focused { false };
+    Component::SafePointer<Button> button;
+};
+
+namespace
+{
+void applyChannelMapMetadata (
+    Component& component,
+    StringRef id,
+    StringRef title,
+    StringRef description,
+    StringRef help)
+{
+    component.setComponentID (
+        String (id));
+    component.setTitle (
+        String (title));
+    component.setDescription (
+        String (description));
+    component.setHelpText (
+        String (help));
+    component.setAccessible (true);
+    component
+        .invalidateAccessibilityHandler();
+}
+
+class ChannelMapFileButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    ChannelMapFileButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            ChannelMapFileButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::button,
+              createActions (stateToUse)),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable();
+        return state->isFocused()
+                   ? current.withFocused()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            ChannelMapFileButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::press,
+                [state]
+                {
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager == nullptr)
+                        return;
+
+                    messageManager->callSync (
+                        [state]
+                        {
+                            auto* button =
+                                state
+                                    ->getButtonOnMessageThread();
+                            if (button == nullptr
+                                || ! button
+                                        ->isEnabled())
+                            {
+                                return;
+                            }
+
+                            // triggerClick only posts the click, so the
+                            // accessibility caller is not held in a
+                            // nested native file chooser loop.
+                            button->triggerClick();
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        ChannelMapFileButtonAccessibilityState>
+        state;
+};
+
+void refreshChannelMapFileButtonState (
+    Button& button,
+    const std::shared_ptr<
+        ChannelMapFileButtonAccessibilityState>&
+        state)
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+
+    auto title = button.getTitle();
+    if (title.isEmpty())
+        title = button.getName();
+    auto help = button.getTooltip();
+    if (help.isEmpty())
+        help = button.getHelpText();
+    if (help.isEmpty())
+        help = button.getDescription();
+
+    state->synchronise (
+        std::move (title),
+        button.getDescription(),
+        std::move (help),
+        button.isEnabled(),
+        button.hasKeyboardFocus (false));
+}
+
+std::unique_ptr<AccessibilityHandler>
+createChannelMapFileButtonHandler (
+    Button& button,
+    const std::shared_ptr<
+        ChannelMapFileButtonAccessibilityState>&
+        state)
+{
+    refreshChannelMapFileButtonState (
+        button,
+        state);
+    return std::make_unique<
+        ChannelMapFileButtonAccessibilityHandler> (
+        button,
+        state);
+}
+} // namespace
+
+ChannelMapLoadButton::ChannelMapLoadButton (
+    const String& name)
+    : LoadButton (name),
+      accessibilityState (
+          std::make_shared<
+              ChannelMapFileButtonAccessibilityState>())
+{
+    accessibilityState->attach (this);
+    refreshAccessibilityState();
+}
+
+ChannelMapLoadButton::~ChannelMapLoadButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+ChannelMapLoadButton::
+    createAccessibilityHandler()
+{
+    return createChannelMapFileButtonHandler (
+        *this,
+        accessibilityState);
+}
+
+void ChannelMapLoadButton::
+    refreshAccessibilityState()
+{
+    refreshChannelMapFileButtonState (
+        *this,
+        accessibilityState);
+}
+
+void ChannelMapLoadButton::enablementChanged()
+{
+    LoadButton::enablementChanged();
+    refreshAccessibilityState();
+}
+
+void ChannelMapLoadButton::focusGained (
+    FocusChangeType cause)
+{
+    LoadButton::focusGained (cause);
+    refreshAccessibilityState();
+}
+
+void ChannelMapLoadButton::focusLost (
+    FocusChangeType cause)
+{
+    LoadButton::focusLost (cause);
+    refreshAccessibilityState();
+}
+
+ChannelMapSaveButton::ChannelMapSaveButton (
+    const String& name)
+    : SaveButton (name),
+      accessibilityState (
+          std::make_shared<
+              ChannelMapFileButtonAccessibilityState>())
+{
+    accessibilityState->attach (this);
+    refreshAccessibilityState();
+}
+
+ChannelMapSaveButton::~ChannelMapSaveButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+ChannelMapSaveButton::
+    createAccessibilityHandler()
+{
+    return createChannelMapFileButtonHandler (
+        *this,
+        accessibilityState);
+}
+
+void ChannelMapSaveButton::
+    refreshAccessibilityState()
+{
+    refreshChannelMapFileButtonState (
+        *this,
+        accessibilityState);
+}
+
+void ChannelMapSaveButton::enablementChanged()
+{
+    SaveButton::enablementChanged();
+    refreshAccessibilityState();
+}
+
+void ChannelMapSaveButton::focusGained (
+    FocusChangeType cause)
+{
+    SaveButton::focusGained (cause);
+    refreshAccessibilityState();
+}
+
+void ChannelMapSaveButton::focusLost (
+    FocusChangeType cause)
+{
+    SaveButton::focusLost (cause);
+    refreshAccessibilityState();
+}
 
 ChannelMapEditor::ChannelMapEditor (GenericProcessor* parentNode)
     : GenericEditor (parentNode),
@@ -36,7 +392,14 @@ ChannelMapEditor::ChannelMapEditor (GenericProcessor* parentNode)
 {
     desiredWidth = 335;
 
-    electrodeButtonViewport = std::make_unique<Viewport>();
+    const auto semanticPrefix =
+        "oe.processor."
+        + String (
+            parentNode->getNodeId())
+        + ".channel_map";
+
+    electrodeButtonViewport =
+        std::make_unique<Viewport>();
 
     addAndMakeVisible (electrodeButtonViewport.get());
     electrodeButtonViewport->setBounds (10, 30, 325, 90);
@@ -44,12 +407,44 @@ ChannelMapEditor::ChannelMapEditor (GenericProcessor* parentNode)
     electrodeButtonHolder = std::make_unique<Component>();
     electrodeButtonViewport->setViewedComponent (electrodeButtonHolder.get(), false);
 
-    loadButton = std::make_unique<LoadButton> (getNameAndId() + " Load Prb File");
+    loadButton =
+        std::make_unique<
+            ChannelMapLoadButton> (
+            getNameAndId()
+            + " Load Prb File");
+    const auto loadDescription =
+        "Load channel map settings for the selected data stream from a .prb file.";
+    applyChannelMapMetadata (
+        *loadButton,
+        semanticPrefix + ".load_prb",
+        "Load channel map...",
+        loadDescription,
+        loadDescription);
+    loadButton->setTooltip (
+        loadDescription);
+    loadButton
+        ->refreshAccessibilityState();
     loadButton->addListener (this);
     loadButton->setBounds (325, 4, 15, 15);
     addAndMakeVisible (loadButton.get());
 
-    saveButton = std::make_unique<SaveButton> (getNameAndId() + " Save Prb File");
+    saveButton =
+        std::make_unique<
+            ChannelMapSaveButton> (
+            getNameAndId()
+            + " Save Prb File");
+    const auto saveDescription =
+        "Save channel map settings for the selected data stream to a .prb file.";
+    applyChannelMapMetadata (
+        *saveButton,
+        semanticPrefix + ".save_prb",
+        "Save channel map...",
+        saveDescription,
+        saveDescription);
+    saveButton->setTooltip (
+        saveDescription);
+    saveButton
+        ->refreshAccessibilityState();
     saveButton->addListener (this);
     saveButton->setBounds (305, 4, 15, 15);
     addAndMakeVisible (saveButton.get());

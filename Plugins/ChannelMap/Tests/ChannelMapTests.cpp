@@ -26,17 +26,63 @@
 #include "gtest/gtest.h"
 
 #include "../ChannelMap.h"
+#include "../ChannelMapEditor.h"
+#include "../../../Source/UI/SemanticComponent.h"
 #include <ModelApplication.h>
 #include <ModelProcessors.h>
 #include <ProcessorHeaders.h>
 #include <TestFixtures.h>
+#include <atomic>
 #include <filesystem>
+#include <thread>
+
+namespace
+{
+Component* findDescendantBySemanticId (
+    Component& parent,
+    StringRef id)
+{
+    if (parent.getComponentID()
+        == id)
+        return &parent;
+
+    for (auto* child :
+         parent.getChildren())
+    {
+        if (auto* result =
+                findDescendantBySemanticId (
+                    *child,
+                    id))
+            return result;
+    }
+
+    return nullptr;
+}
+
+class ThreadTrackingButtonListener final
+    : public Button::Listener
+{
+public:
+    void buttonClicked (Button*) override
+    {
+        callbackCount.fetch_add (1);
+        callbackUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+    }
+
+    std::atomic<int> callbackCount { 0 };
+    std::atomic<bool>
+        callbackUsedMessageThread { false };
+};
+} // namespace
 
 class ChannelMapTests : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
+        MessageManager::getInstance();
         numChannels = 8;
         tester = std::make_unique<ProcessorTester> (TestSourceNodeBuilder (FakeSourceNodeParams {
             numChannels,
@@ -65,6 +111,189 @@ protected:
     float sampleRate = 30000.0;
     std::filesystem::path prbFilePath;
 };
+
+TEST_F (ChannelMapTests,
+        ExposesChannelMapFileControls)
+{
+    processor->setHeadlessMode (false);
+    processor->setProcessorType (
+        Plugin::Processor::SPLITTER);
+    auto* editor =
+        static_cast<
+            GenericProcessor*> (
+                processor)
+            ->createEditor();
+    ASSERT_NE (editor, nullptr);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".channel_map";
+    auto* load =
+        findDescendantBySemanticId (
+            *editor,
+            prefix + ".load_prb");
+    auto* save =
+        findDescendantBySemanticId (
+            *editor,
+            prefix + ".save_prb");
+    ASSERT_NE (load, nullptr);
+    EXPECT_EQ (
+        load->getTitle(),
+        "Load channel map...");
+    EXPECT_EQ (
+        load->getDescription(),
+        "Load channel map settings for the selected data stream from a .prb file.");
+    ASSERT_NE (save, nullptr);
+    EXPECT_EQ (
+        save->getTitle(),
+        "Save channel map...");
+    EXPECT_EQ (
+        save->getDescription(),
+        "Save channel map settings for the selected data stream to a .prb file.");
+}
+
+TEST_F (ChannelMapTests,
+        ChannelMapFileButtonActionsAreWorkerSafe)
+{
+    auto verifyButton =
+        [] (auto button,
+            StringRef semanticId,
+            StringRef title)
+    {
+        applySemanticMetadata (
+            *button,
+            semanticId,
+            title,
+            "Choose a channel map file.",
+            "Opens the system file chooser.");
+        button
+            ->refreshAccessibilityState();
+        ThreadTrackingButtonListener
+            listener;
+        button->addListener (&listener);
+        auto handler =
+            button
+                ->createAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::button);
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::press));
+        EXPECT_FALSE (
+            handler->getActions().contains (
+                AccessibilityActionType::toggle));
+        EXPECT_EQ (
+            handler->getValueInterface(),
+            nullptr);
+
+        String workerTitle;
+        String workerDescription;
+        String workerHelp;
+        bool workerEnabled = false;
+        std::atomic<bool>
+            actionReturned { false };
+        std::thread worker (
+            [&]
+            {
+                workerTitle =
+                    handler->getTitle();
+                workerDescription =
+                    handler
+                        ->getDescription();
+                workerHelp =
+                    handler->getHelp();
+                workerEnabled =
+                    handler->isEnabled();
+                actionReturned.store (
+                    handler
+                        ->getActions()
+                        .invoke (
+                            AccessibilityActionType::
+                                press));
+            });
+
+        auto* messageManager =
+            MessageManager::getInstance();
+        for (int attempt = 0;
+             attempt < 20
+                 && (! actionReturned.load()
+                     || listener
+                                .callbackCount
+                                .load()
+                            == 0);
+             ++attempt)
+        {
+            messageManager
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+
+        EXPECT_EQ (
+            workerTitle,
+            title);
+        EXPECT_EQ (
+            workerDescription,
+            "Choose a channel map file.");
+        EXPECT_EQ (
+            workerHelp,
+            "Opens the system file chooser.");
+        EXPECT_TRUE (workerEnabled);
+        EXPECT_TRUE (
+            actionReturned.load());
+        EXPECT_EQ (
+            listener.callbackCount.load(),
+            1);
+        EXPECT_TRUE (
+            listener
+                .callbackUsedMessageThread
+                .load());
+
+        button->setEnabled (false);
+        const auto actions =
+            handler->getActions();
+        EXPECT_TRUE (
+            actions.invoke (
+                AccessibilityActionType::
+                    press));
+        messageManager
+            ->runDispatchLoopUntil (10);
+        EXPECT_EQ (
+            listener.callbackCount.load(),
+            1);
+        EXPECT_FALSE (
+            handler->isEnabled());
+
+        handler.reset();
+        button.reset();
+        EXPECT_TRUE (
+            actions.invoke (
+                AccessibilityActionType::
+                    press));
+        messageManager
+            ->runDispatchLoopUntil (10);
+        EXPECT_EQ (
+            listener.callbackCount.load(),
+            1);
+    };
+
+    verifyButton (
+        std::make_unique<
+            ChannelMapLoadButton> (
+            "Load channel map"),
+        "oe.test.channel_map.load_prb",
+        "Load channel map...");
+    verifyButton (
+        std::make_unique<
+            ChannelMapSaveButton> (
+            "Save channel map"),
+        "oe.test.channel_map.save_prb",
+        "Save channel map...");
+}
 
 TEST_F (ChannelMapTests, TestRemapsChannels)
 {
