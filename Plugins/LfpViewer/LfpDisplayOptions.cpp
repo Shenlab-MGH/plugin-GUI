@@ -2327,16 +2327,10 @@ void LfpDisplayOptions::setInputInverted (bool state)
 void LfpDisplayOptions::setMedianOffset (bool state)
 {
     if (lfpDisplay->getSpikeRasterPlotting())
-    {
-        medianOffsetPlottingButton->setToggleState (true, dontSendNotification);
-        medianOffsetPlottingButton->setLabel ("ON");
-        return;
-    }
-    else
-    {
-        lfpDisplay->setMedianOffsetPlotting (state);
-        medianOffsetPlottingButton->setToggleState (state, dontSendNotification);
-    }
+        state = true;
+
+    lfpDisplay->setMedianOffsetPlotting (state);
+    medianOffsetPlottingButton->setToggleState (state, dontSendNotification);
 
     if (state)
     {
@@ -2346,6 +2340,8 @@ void LfpDisplayOptions::setMedianOffset (bool state)
     {
         medianOffsetPlottingButton->setLabel ("OFF");
     }
+
+    medianOffsetPlottingButton->refreshAccessibilityState();
 }
 
 void LfpDisplayOptions::setAveraging (bool state)
@@ -3223,11 +3219,18 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
 
             // SPIKE RASTER
             String spikeRasterThresh = xmlNode->getStringAttribute ("spikeRaster", "OFF");
+            const bool savedMedianOffset = xmlNode->getBoolAttribute ("subtractOffset", false);
             spikeRasterSelection->setText (spikeRasterThresh, dontSendNotification);
             if (! spikeRasterThresh.equalsIgnoreCase ("OFF"))
             {
                 lfpDisplay->setSpikeRasterPlotting (true);
                 lfpDisplay->setSpikeRasterThreshold (spikeRasterThresh.getFloatValue());
+                medianOffsetOnForSpikeRaster = ! savedMedianOffset;
+            }
+            else
+            {
+                lfpDisplay->setSpikeRasterPlotting (false);
+                medianOffsetOnForSpikeRaster = false;
             }
 
             // CLIP WARNING
@@ -3277,7 +3280,7 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             //LOGD("    --> setAveraging: ", MS_FROM_START, " milliseconds");
             start = Time::getHighResolutionTicks();
 
-            setMedianOffset (xmlNode->getBoolAttribute ("subtractOffset", false));
+            setMedianOffset (savedMedianOffset);
 
             //LOGD("    --> setMedianOffset: ", MS_FROM_START, " milliseconds");
             start = Time::getHighResolutionTicks();

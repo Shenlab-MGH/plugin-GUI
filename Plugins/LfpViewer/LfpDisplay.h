@@ -184,13 +184,13 @@ public:
     void setMedianOffsetPlotting (bool isEnabled);
 
     /** Returns true if spike raster is enabled for plotting, else false */
-    bool getSpikeRasterPlotting();
+    TESTABLE bool getSpikeRasterPlotting();
 
     /** Sets the state for the spike raster plotting function */
     void setSpikeRasterPlotting (bool isEnabled);
 
     /** Returns the value at which the spike raster will detect and draw spikes */
-    float getSpikeRasterThreshold();
+    TESTABLE float getSpikeRasterThreshold();
 
     /** Set the threshold value for the spike raster plotting function */
     void setSpikeRasterThreshold (float thresh);
