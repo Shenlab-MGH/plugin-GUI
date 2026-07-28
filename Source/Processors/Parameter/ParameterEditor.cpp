@@ -889,6 +889,7 @@ SyncControlButton::SyncControlButton (SynchronizingProcessor* node_,
 {
     isPrimary = node->isMainDataStream (streamKey);
     LOGD ("SyncControlButton::Constructor; Stream: ", streamKey, " is main stream: ", isPrimary);
+    lastAccessibleValue = getAccessibleValue();
     startTimer (250);
 
     setTooltip ("Configure synchronization settings for " + streamKey);
@@ -896,8 +897,65 @@ SyncControlButton::SyncControlButton (SynchronizingProcessor* node_,
 
 SyncControlButton::~SyncControlButton() {}
 
+std::unique_ptr<AccessibilityHandler>
+SyncControlButton::createAccessibilityHandler()
+{
+    return createReadOnlyButtonTextAccessibilityHandler (
+        *this,
+        [safeButton =
+             Component::SafePointer<SyncControlButton> (
+                 this)]
+        {
+            return safeButton != nullptr
+                       ? safeButton->getAccessibleValue()
+                       : String();
+        });
+}
+
+String SyncControlButton::getAccessibleValue() const
+{
+    String status;
+
+    switch (node->synchronizer.getStatus (
+        streamKey))
+    {
+        case SyncStatus::OFF:
+            status = "off";
+            break;
+        case SyncStatus::SYNCING:
+            status = "synchronizing";
+            break;
+        case SyncStatus::SYNCED:
+            status = "synchronized";
+            break;
+        case SyncStatus::HARDWARE_SYNCED:
+            status = "hardware synchronized";
+            break;
+    }
+
+    return status
+           + (node->isMainDataStream (streamKey)
+                  ? "; main clock"
+                  : "; secondary clock");
+}
+
 void SyncControlButton::timerCallback()
 {
+    isPrimary =
+        node->isMainDataStream (streamKey);
+    const auto accessibleValue =
+        getAccessibleValue();
+
+    if (accessibleValue != lastAccessibleValue)
+    {
+        lastAccessibleValue = accessibleValue;
+
+        if (auto* handler =
+                getAccessibilityHandler())
+            handler->notifyAccessibilityEvent (
+                AccessibilityEvent::valueChanged);
+    }
+
     repaint();
 }
 

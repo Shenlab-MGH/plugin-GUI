@@ -268,3 +268,87 @@ TEST_F (ParameterEditorAccessibilityTests,
             "00:00:01.000");
     }
 }
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ExposesSynchronizationStatusAndClockRole)
+{
+    SynchronizingProcessor processor;
+    processor.synchronizer.addDataStream (
+        "main",
+        30000.0f);
+    processor.synchronizer.addDataStream (
+        "secondary",
+        30000.0f);
+    processor.setMainDataStream ("main");
+
+    SyncControlButton mainButton (
+        &processor,
+        "Main synchronization",
+        "main");
+    SyncControlButton secondaryButton (
+        &processor,
+        "Secondary synchronization",
+        "secondary");
+
+    auto mainHandler =
+        static_cast<Component&> (mainButton)
+            .createAccessibilityHandler();
+    auto secondaryHandler =
+        static_cast<Component&> (secondaryButton)
+            .createAccessibilityHandler();
+    ASSERT_NE (mainHandler, nullptr);
+    ASSERT_NE (secondaryHandler, nullptr);
+    EXPECT_EQ (
+        mainHandler->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        mainHandler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        mainHandler->getValueInterface(),
+        nullptr);
+    ASSERT_NE (
+        secondaryHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        mainHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "off; main clock");
+    EXPECT_EQ (
+        secondaryHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "off; secondary clock");
+
+    processor.synchronizer.startAcquisition();
+    EXPECT_EQ (
+        mainHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "synchronized; main clock");
+    EXPECT_EQ (
+        secondaryHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "synchronizing; secondary clock");
+    processor.synchronizer.stopAcquisition();
+
+    SynchronizingProcessor hardwareProcessor;
+    hardwareProcessor.synchronizer.addDataStream (
+        "hardware",
+        30000.0f,
+        -1,
+        true);
+    SyncControlButton hardwareButton (
+        &hardwareProcessor,
+        "Hardware synchronization",
+        "hardware");
+    auto hardwareHandler =
+        static_cast<Component&> (hardwareButton)
+            .createAccessibilityHandler();
+    ASSERT_NE (hardwareHandler, nullptr);
+    ASSERT_NE (
+        hardwareHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        hardwareHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "hardware synchronized; secondary clock");
+}

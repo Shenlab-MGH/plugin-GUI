@@ -476,6 +476,10 @@ public:
     /** Destructor */
     ~SyncControlButton();
 
+    /** Exposes synchronization status and clock role. */
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
     /** Creates the sync selection interface */
     //void mouseUp(const MouseEvent &event) override;
 
@@ -484,6 +488,8 @@ public:
     int ttlLineCount;
 
 private:
+    String getAccessibleValue() const;
+
     /** Checks whether the underlying stream is synchronized */
     void timerCallback() override;
 
@@ -494,6 +500,7 @@ private:
     //void componentBeingDeleted(Component &component);
 
     SynchronizingProcessor* node;
+    String lastAccessibleValue;
 };
 
 /**
