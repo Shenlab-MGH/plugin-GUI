@@ -25,6 +25,7 @@
 #define __LFPDISPLAYOPTIONS_H__
 
 #include <VisualizerWindowHeaders.h>
+#include <EditorHeaders.h>
 
 #include <array>
 #include <vector>
@@ -42,10 +43,10 @@ namespace LfpViewer
     Holds the LfpDisplay UI controls
  
  */
-class LfpDisplayOptions : public Component,
-                          public ComboBox::Listener,
-                          public Button::Listener,
-                          public Timer
+class TESTABLE LfpDisplayOptions : public Component,
+                                   public ComboBox::Listener,
+                                   public Button::Listener,
+                                   public Timer
 {
 public:
     /** Construtor */
@@ -173,6 +174,8 @@ public:
     void timerCallback();
 
 private:
+    void updateRangeAccessibilityMetadata();
+
     LfpDisplayCanvas* canvas;
     LfpDisplaySplitter* canvasSplit;
     LfpDisplay* lfpDisplay;
@@ -187,13 +190,19 @@ private:
     std::unique_ptr<Component> mainOptions;
     std::unique_ptr<Viewport> mainOptionsHolder;
 
-    std::unique_ptr<ComboBox> timebaseSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        timebaseSelection;
     std::unique_ptr<Label> timebaseSelectionLabel;
 
-    std::unique_ptr<ComboBox> spreadSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        spreadSelection;
     std::unique_ptr<Label> spreadSelectionLabel;
 
-    std::unique_ptr<ComboBox> rangeSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        rangeSelection;
     std::unique_ptr<Label> rangeSelectionLabel;
 
     OwnedArray<UtilityButton> typeButtons;

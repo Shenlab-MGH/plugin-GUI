@@ -68,6 +68,30 @@ Component* findLfpDescendantById (
     return nullptr;
 }
 
+template <typename ComponentType>
+ComponentType* findLfpAncestor (
+    Component& component)
+{
+    for (auto* parent =
+             component
+                 .getParentComponent();
+         parent != nullptr;
+         parent =
+             parent
+                 ->getParentComponent())
+    {
+        if (auto* result =
+                dynamic_cast<
+                    ComponentType*> (
+                    parent))
+        {
+            return result;
+        }
+    }
+
+    return nullptr;
+}
+
 class LfpThreadTrackingButtonListener final
     : public Button::Listener
 {
@@ -93,7 +117,8 @@ enum class LfpWindowsUiaAction
     querySelection,
     expand,
     collapse,
-    queryExpansion
+    queryExpansion,
+    setValue
 };
 
 struct LfpWindowsUiaInvokeResult
@@ -127,7 +152,8 @@ LfpWindowsUiaInvokeResult
 invokeLfpWindowsUiaControl (
     HWND window,
     const std::wstring& automationId,
-    LfpWindowsUiaAction action)
+    LfpWindowsUiaAction action,
+    const std::wstring& valueToSet = {})
 {
     LfpWindowsUiaInvokeResult output;
     const auto comResult =
@@ -305,6 +331,51 @@ invokeLfpWindowsUiaControl (
             output.value = value;
         }
         SysFreeString (value);
+    }
+
+    if (action
+        == LfpWindowsUiaAction::
+               setValue)
+    {
+        if (valuePattern == nullptr)
+        {
+            return finish (
+                E_NOINTERFACE);
+        }
+
+        auto input =
+            SysAllocString (
+                valueToSet.c_str());
+        if (input == nullptr)
+        {
+            return finish (
+                E_OUTOFMEMORY);
+        }
+        result =
+            valuePattern
+                ->SetValue (
+                    input);
+        SysFreeString (
+            input);
+        if (FAILED (result))
+            return finish (result);
+
+        BSTR currentValue =
+            nullptr;
+        result =
+            valuePattern
+                ->get_CurrentValue (
+                    &currentValue);
+        if (SUCCEEDED (result)
+            && currentValue
+                   != nullptr)
+        {
+            output.value =
+                currentValue;
+        }
+        SysFreeString (
+            currentValue);
+        return finish (result);
     }
 
     if (action
@@ -1593,6 +1664,353 @@ TEST_F (LfpDisplayNodeTests,
     }
 }
 
+TEST_F (LfpDisplayNodeTests,
+        ExposesEditableDisplayParametersForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    struct ParameterExpectation
+    {
+        String suffix;
+        String title;
+        String description;
+        String initialValue;
+    };
+    const std::array<
+        ParameterExpectation,
+        3>
+        parameters {
+            ParameterExpectation {
+                "timebase",
+                "timebase",
+                "Choose the time span shown in LFP display ",
+                "2.0" },
+            ParameterExpectation {
+                "channel_height",
+                "channel height",
+                "Choose the channel height used in LFP display ",
+                "40" },
+            ParameterExpectation {
+                "voltage_range",
+                "voltage range",
+                "Choose the voltage range shown in LFP display ",
+                "250" }
+        };
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    std::array<
+        std::array<Component*, 3>,
+        3>
+        controls {};
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        for (int parameterIndex = 0;
+             parameterIndex
+             < static_cast<int> (
+                 parameters.size());
+             ++parameterIndex)
+        {
+            const auto& expected =
+                parameters[parameterIndex];
+            const auto id =
+                prefix
+                + String (displayNumber)
+                + "."
+                + expected.suffix;
+            auto* component =
+                findLfpDescendantById (
+                    *canvas,
+                    id);
+            controls[displayIndex]
+                    [parameterIndex] =
+                component;
+            ASSERT_NE (
+                component,
+                nullptr)
+                << id;
+            auto* comboBox =
+                dynamic_cast<
+                    MessageThreadComboBox*> (
+                    component);
+            ASSERT_NE (
+                comboBox,
+                nullptr)
+                << id;
+            auto handler =
+                comboBox
+                    ->createAccessibilityHandler();
+            ASSERT_NE (
+                handler,
+                nullptr);
+            EXPECT_EQ (
+                handler->getRole(),
+                AccessibilityRole::
+                    comboBox);
+            EXPECT_EQ (
+                handler->getTitle(),
+                "LFP display "
+                    + String (
+                        displayNumber)
+                    + " "
+                    + expected.title);
+
+            auto description =
+                expected.description
+                + String (
+                    displayNumber);
+            if (expected.suffix
+                == "timebase")
+            {
+                description +=
+                    ", in seconds.";
+            }
+            else if (expected.suffix
+                     == "channel_height")
+            {
+                description +=
+                    ", in pixels.";
+            }
+            else
+            {
+                description =
+                    "Choose the DATA voltage range shown in LFP display "
+                    + String (
+                        displayNumber)
+                    + ", in "
+                    + String (
+                        CharPointer_UTF8 (
+                            "\xC2\xB5V"))
+                    + ".";
+            }
+            EXPECT_EQ (
+                handler
+                    ->getDescription(),
+                description);
+            EXPECT_EQ (
+                handler->getHelp(),
+                description);
+            auto* value =
+                handler
+                    ->getValueInterface();
+            ASSERT_NE (
+                value,
+                nullptr);
+            EXPECT_FALSE (
+                value->isReadOnly());
+            EXPECT_EQ (
+                value
+                    ->getCurrentValueAsString(),
+                expected.initialValue);
+            EXPECT_EQ (
+                findLfpAncestor<
+                    LfpViewer::
+                        LfpDisplayOptions> (
+                    *component)
+                    ->isVisible(),
+                displayIndex == 0);
+        }
+    }
+
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::
+                THREE_HORZ);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        for (int parameterIndex = 0;
+             parameterIndex
+             < static_cast<int> (
+                 parameters.size());
+             ++parameterIndex)
+        {
+            auto* control =
+                controls[displayIndex]
+                        [parameterIndex];
+            EXPECT_EQ (
+                findLfpAncestor<
+                    LfpViewer::
+                        LfpDisplayOptions> (
+                    *control)
+                    ->isVisible(),
+                displayIndex == 0);
+            EXPECT_EQ (
+                control
+                    ->getComponentID(),
+                prefix
+                    + String (
+                        displayIndex + 1)
+                    + "."
+                    + parameters
+                          [parameterIndex]
+                              .suffix);
+        }
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ProgrammaticDisplayParameterUpdatesRefreshAccessibleValues)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.";
+    auto* timebase =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "timebase"));
+    auto* channelHeight =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "channel_height"));
+    auto* voltageRange =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "voltage_range"));
+    ASSERT_NE (
+        timebase,
+        nullptr);
+    ASSERT_NE (
+        channelHeight,
+        nullptr);
+    ASSERT_NE (
+        voltageRange,
+        nullptr);
+    auto timebaseHandler =
+        timebase
+            ->createAccessibilityHandler();
+    auto channelHeightHandler =
+        channelHeight
+            ->createAccessibilityHandler();
+    auto voltageRangeHandler =
+        voltageRange
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        timebaseHandler,
+        nullptr);
+    ASSERT_NE (
+        channelHeightHandler,
+        nullptr);
+    ASSERT_NE (
+        voltageRangeHandler,
+        nullptr);
+
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *timebase);
+    ASSERT_NE (
+        options,
+        nullptr);
+
+    options
+        ->setTimebaseAndSelectionText (
+            0.75f);
+    options
+        ->setSpreadSelection (
+            55);
+    options
+        ->setRangeSelection (
+            333.0f);
+
+    EXPECT_EQ (
+        timebaseHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "0.8");
+    EXPECT_EQ (
+        channelHeightHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "55");
+    EXPECT_EQ (
+        voltageRangeHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "333");
+
+    const auto stableRangeId =
+        voltageRange
+            ->getComponentID();
+    options->setSelectedType (
+        ContinuousChannel::Type::
+            AUX);
+    EXPECT_EQ (
+        voltageRangeHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Auto");
+    EXPECT_EQ (
+        voltageRangeHandler
+            ->getDescription(),
+        "Choose the AUX voltage range shown in LFP display 1, in mV, or Auto.");
+    EXPECT_EQ (
+        voltageRangeHandler
+            ->getHelp(),
+        "Choose the AUX voltage range shown in LFP display 1, in mV, or Auto.");
+    options->setSelectedType (
+        ContinuousChannel::Type::
+            ADC);
+    EXPECT_EQ (
+        voltageRangeHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "10.0");
+    EXPECT_EQ (
+        voltageRangeHandler
+            ->getDescription(),
+        "Choose the ADC voltage range shown in LFP display 1, in V.");
+    EXPECT_EQ (
+        voltageRangeHandler
+            ->getHelp(),
+        "Choose the ADC voltage range shown in LFP display 1, in V.");
+    EXPECT_EQ (
+        voltageRange
+            ->getComponentID(),
+        stableRangeId);
+}
+
 #if JUCE_WINDOWS
 TEST_F (LfpDisplayNodeTests,
         WindowsUiaWorkerExpandsAndCollapsesStreamSelector)
@@ -1785,6 +2203,238 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_TRUE (
         handler->getCurrentState()
             .isCollapsed());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerWritesCoreDisplayParameters)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto id =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.timebase";
+    auto* timebase =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (
+        timebase,
+        nullptr);
+    const auto channelHeightId =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.channel_height";
+    const auto voltageRangeId =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.voltage_range";
+    auto* channelHeight =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                channelHeightId));
+    auto* voltageRange =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                voltageRangeId));
+    ASSERT_NE (
+        channelHeight,
+        nullptr);
+    ASSERT_NE (
+        voltageRange,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto writeValue =
+        [&] (
+            StringRef targetId,
+            const std::wstring& value)
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (
+                                targetId)
+                                .toWideCharPointer()),
+                        LfpWindowsUiaAction::
+                            setValue,
+                        value);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+        EXPECT_TRUE (
+            workerReturned.load());
+        return actionResult;
+    };
+
+    const auto result =
+        writeValue (
+            id,
+            L"0.75");
+    EXPECT_EQ (
+        result.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        result.valuePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        result
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        result.value,
+        L"0.8");
+    EXPECT_EQ (
+        timebase->getText(),
+        "0.8");
+
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *timebase);
+    ASSERT_NE (
+        options,
+        nullptr);
+    options->setPausedState (
+        true);
+    const auto disabledResult =
+        writeValue (
+            id,
+            L"1.0");
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_EQ (
+        timebase->getText(),
+        "0.8");
+    options->setPausedState (
+        false);
+
+    const auto clampedHeightResult =
+        writeValue (
+            channelHeightId,
+            L"2");
+    EXPECT_EQ (
+        clampedHeightResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        clampedHeightResult.value,
+        L"6");
+    EXPECT_EQ (
+        channelHeight->getText(),
+        "6");
+
+    const auto clampedRangeResult =
+        writeValue (
+            voltageRangeId,
+            L"10");
+    EXPECT_EQ (
+        clampedRangeResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        clampedRangeResult.value,
+        L"25");
+    EXPECT_EQ (
+        voltageRange->getText(),
+        "25");
+
+    const auto customRangeResult =
+        writeValue (
+            voltageRangeId,
+            L"333");
+    EXPECT_EQ (
+        customRangeResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        customRangeResult.value,
+        L"333");
+    EXPECT_EQ (
+        voltageRange->getText(),
+        "333");
+
+    options->setSelectedType (
+        ContinuousChannel::Type::
+            AUX);
+    const auto auxAutoResult =
+        writeValue (
+            voltageRangeId,
+            L"Auto");
+    EXPECT_EQ (
+        auxAutoResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        auxAutoResult.value,
+        L"Auto");
+    EXPECT_EQ (
+        auxAutoResult.help,
+        L"Choose the AUX voltage range shown in LFP display 1, in mV, or Auto.");
+    EXPECT_EQ (
+        voltageRange->getText(),
+        "Auto");
+
+    const auto hiddenPaneResult =
+        writeValue (
+            "oe.processor."
+                + String (
+                    processor
+                        ->getNodeId())
+                + ".lfp.display_2.timebase",
+            L"1.0");
+    EXPECT_EQ (
+        hiddenPaneResult
+            .invokeResult,
+        E_FAIL);
 }
 #endif
 

@@ -43,6 +43,37 @@
 
 using namespace LfpViewer;
 
+namespace
+{
+void applyLfpDisplayParameterMetadata (
+    MessageThreadComboBox& comboBox,
+    LfpDisplayNode& processor,
+    int displayNumber,
+    StringRef suffix,
+    StringRef title,
+    StringRef description)
+{
+    comboBox.setComponentID (
+        "oe.processor."
+        + String (
+            processor.getNodeId())
+        + ".lfp.display_"
+        + String (displayNumber)
+        + "."
+        + String (suffix));
+    comboBox.setTitle (
+        String (title));
+    comboBox.setDescription (
+        String (description));
+    comboBox.setHelpText (
+        String (description));
+    comboBox.setAccessible (
+        true);
+    comboBox
+        .invalidateAccessibilityHandler();
+}
+} // namespace
+
 LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplitter* canvasSplit_, LfpTimescale* timescale_, LfpDisplay* lfpDisplay_, LfpDisplayNode* processor_)
     : canvas (canvas_),
       canvasSplit (canvasSplit_),
@@ -57,6 +88,8 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     setBufferedToImage (true);
 
     FontOptions labelFont ("Inter", "Regular", 16.0f);
+    const auto displayNumber =
+        canvasSplit->splitID + 1;
 
     // MAIN OPTIONS
     mainOptionsHolder = std::make_unique<Viewport>();
@@ -82,7 +115,22 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     selectedTimebase = 6;
     selectedTimebaseValue = timebases[selectedTimebase - 1];
 
-    timebaseSelection = std::make_unique<ComboBox> ("Timebase");
+    timebaseSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    timebaseSelection->setName (
+        "Timebase");
+    applyLfpDisplayParameterMetadata (
+        *timebaseSelection,
+        *processor,
+        displayNumber,
+        "timebase",
+        "LFP display "
+            + String (displayNumber)
+            + " timebase",
+        "Choose the time span shown in LFP display "
+            + String (displayNumber)
+            + ", in seconds.");
     for (int i = 0; i < timebases.size(); i++)
         timebaseSelection->addItem (timebases[i], i + 1);
     timebaseSelection->setSelectedId (selectedTimebase, sendNotification);
@@ -111,7 +159,22 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     selectedSpread = 5;
     selectedSpreadValue = spreads[selectedSpread - 1];
 
-    spreadSelection = std::make_unique<ComboBox> ("Spread");
+    spreadSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    spreadSelection->setName (
+        "Spread");
+    applyLfpDisplayParameterMetadata (
+        *spreadSelection,
+        *processor,
+        displayNumber,
+        "channel_height",
+        "LFP display "
+            + String (displayNumber)
+            + " channel height",
+        "Choose the channel height used in LFP display "
+            + String (displayNumber)
+            + ", in pixels.");
     for (int i = 0; i < spreads.size(); i++)
         spreadSelection->addItem (spreads[i], i + 1);
     spreadSelection->setSelectedId (selectedSpread, sendNotification);
@@ -212,7 +275,22 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     selectedVoltageRangeValues[ContinuousChannel::Type::AUX] = voltageRanges[ContinuousChannel::Type::AUX][selectedVoltageRange[ContinuousChannel::Type::AUX] - 1];
     selectedVoltageRangeValues[ContinuousChannel::Type::ADC] = voltageRanges[ContinuousChannel::Type::ADC][selectedVoltageRange[ContinuousChannel::Type::ADC] - 1];
 
-    rangeSelection = std::make_unique<ComboBox> ("Voltage range");
+    rangeSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    rangeSelection->setName (
+        "Voltage range");
+    applyLfpDisplayParameterMetadata (
+        *rangeSelection,
+        *processor,
+        displayNumber,
+        "voltage_range",
+        "LFP display "
+            + String (displayNumber)
+            + " voltage range",
+        "Choose the voltage range shown in LFP display "
+            + String (displayNumber)
+            + " for the selected channel type.");
     for (int i = 0; i < voltageRanges[ContinuousChannel::Type::ELECTRODE].size(); i++)
         rangeSelection->addItem (voltageRanges[ContinuousChannel::Type::ELECTRODE][i], i + 1);
     rangeSelection->setSelectedId (selectedVoltageRange[ContinuousChannel::Type::ELECTRODE], sendNotification);
@@ -224,6 +302,14 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     rangeSelectionLabel->setFont (labelFont);
     rangeSelectionLabel->attachToComponent (rangeSelection.get(), false);
     mainOptions->addAndMakeVisible (rangeSelectionLabel.get());
+
+    updateRangeAccessibilityMetadata();
+    timebaseSelection
+        ->synchroniseAccessibilityState();
+    spreadSelection
+        ->synchroniseAccessibilityState();
+    rangeSelection
+        ->synchroniseAccessibilityState();
 
     // Event overlay
     for (int i = 0; i < 8; i++)
@@ -850,6 +936,8 @@ void LfpDisplayOptions::setRangeSelection (float range, bool canvasMustUpdate)
         canvasSplit->repaint();
         canvasSplit->refresh();
     }
+    rangeSelection
+        ->synchroniseAccessibilityState();
 }
 
 void LfpDisplayOptions::setSpreadSelection (int spread, bool canvasMustUpdate, bool deferDisplayRefresh)
@@ -870,6 +958,8 @@ void LfpDisplayOptions::setSpreadSelection (int spread, bool canvasMustUpdate, b
             canvasSplit->refresh();
         }
     }
+    spreadSelection
+        ->synchroniseAccessibilityState();
 }
 
 void LfpDisplayOptions::togglePauseButton (bool sendUpdate)
@@ -1107,6 +1197,8 @@ void LfpDisplayOptions::setTimebaseAndSelectionText (float timebase)
     }
 
     timescale->setTimebase (canvasSplit->timebase);
+    timebaseSelection
+        ->synchroniseAccessibilityState();
 }
 
 void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
@@ -1414,6 +1506,16 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         canvasSplit->setTriggerChannel (cb->getSelectedId() - 2);
         processor->setParameter (cb->getSelectedId() - 2, float (canvasSplit->splitID));
     }
+
+    if (cb == timebaseSelection.get()
+        || cb == rangeSelection.get()
+        || cb == spreadSelection.get())
+    {
+        static_cast<
+            MessageThreadComboBox*> (
+            cb)
+            ->synchroniseAccessibilityState();
+    }
 }
 
 ContinuousChannel::Type LfpDisplayOptions::getChannelType (int n)
@@ -1465,6 +1567,40 @@ void LfpDisplayOptions::setSelectedType (ContinuousChannel::Type type, bool togg
 
     if (toggleButton)
         typeButtons[type]->setToggleState (true, dontSendNotification);
+
+    updateRangeAccessibilityMetadata();
+    rangeSelection
+        ->synchroniseAccessibilityState();
+}
+
+void LfpDisplayOptions::
+    updateRangeAccessibilityMetadata()
+{
+    const auto displayNumber =
+        canvasSplit->splitID + 1;
+    auto description =
+        "Choose the "
+        + typeNames[selectedChannelType]
+        + " voltage range shown in LFP display "
+        + String (displayNumber)
+        + ", in "
+        + rangeUnits[selectedChannelType];
+    if (selectedChannelType
+        == ContinuousChannel::Type::
+               AUX)
+    {
+        description +=
+            ", or Auto.";
+    }
+    else
+    {
+        description += ".";
+    }
+
+    rangeSelection->setDescription (
+        description);
+    rangeSelection->setHelpText (
+        description);
 }
 
 String LfpDisplayOptions::getTypeName (ContinuousChannel::Type type)
@@ -1749,6 +1885,13 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             canvasSplit->redraw();
 
             lfpDisplay->restoreViewPosition();
+
+            timebaseSelection
+                ->synchroniseAccessibilityState();
+            spreadSelection
+                ->synchroniseAccessibilityState();
+            rangeSelection
+                ->synchroniseAccessibilityState();
 
             //LOGD("    Restored view in ", MS_FROM_START, " milliseconds");
         }
