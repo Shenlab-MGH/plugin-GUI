@@ -48,8 +48,12 @@ public:
         if (! isElementValid())
             return (HRESULT) UIA_E_ELEMENTNOTAVAILABLE;
 
+        const auto& handler = getHandler();
+        if (! handler.isEnabled())
+            return (HRESULT) UIA_E_ELEMENTNOTENABLED;
+
         const auto actions =
-            getHandler().getActions();
+            handler.getActions();
 
         if (actions.invoke (AccessibilityActionType::toggle)
             || actions.invoke (AccessibilityActionType::press))

@@ -69,6 +69,33 @@ Component* findLfpDescendantById (
 }
 
 template <typename ComponentType>
+ComponentType* findLfpDescendant (
+    Component& parent)
+{
+    if (auto* result =
+            dynamic_cast<
+                ComponentType*> (
+                &parent))
+    {
+        return result;
+    }
+
+    for (auto* child :
+         parent.getChildren())
+    {
+        if (auto* result =
+                findLfpDescendant<
+                    ComponentType> (
+                    *child))
+        {
+            return result;
+        }
+    }
+
+    return nullptr;
+}
+
+template <typename ComponentType>
 ComponentType* findLfpAncestor (
     Component& component)
 {
@@ -113,6 +140,8 @@ public:
 enum class LfpWindowsUiaAction
 {
     invoke,
+    toggle,
+    queryToggle,
     select,
     querySelection,
     expand,
@@ -138,9 +167,12 @@ struct LfpWindowsUiaInvokeResult
     bool expandCollapsePatternAvailable =
         false;
     bool valuePatternAvailable = false;
+    BOOL valueReadOnly = FALSE;
     CONTROLTYPEID controlType = 0;
     BOOL enabled = FALSE;
     BOOL selected = FALSE;
+    ToggleState toggleState =
+        ToggleState_Indeterminate;
     ExpandCollapseState expansionState =
         ExpandCollapseState_LeafNode;
     std::wstring name;
@@ -283,6 +315,12 @@ invokeLfpWindowsUiaControl (
                     &togglePattern));
     output.togglePatternAvailable =
         togglePattern != nullptr;
+    if (togglePattern != nullptr)
+    {
+        togglePattern
+            ->get_CurrentToggleState (
+                &output.toggleState);
+    }
 
     Microsoft::WRL::ComPtr<
         IUIAutomationSelectionItemPattern>
@@ -321,6 +359,9 @@ invokeLfpWindowsUiaControl (
         valuePattern != nullptr;
     if (valuePattern != nullptr)
     {
+        valuePattern
+            ->get_CurrentIsReadOnly (
+                &output.valueReadOnly);
         BSTR value = nullptr;
         if (SUCCEEDED (
                 valuePattern
@@ -331,6 +372,57 @@ invokeLfpWindowsUiaControl (
             output.value = value;
         }
         SysFreeString (value);
+    }
+
+    if (action
+        == LfpWindowsUiaAction::
+               queryToggle
+        || action
+               == LfpWindowsUiaAction::
+                      toggle)
+    {
+        if (togglePattern == nullptr)
+        {
+            return finish (
+                E_NOINTERFACE);
+        }
+
+        if (action
+            == LfpWindowsUiaAction::
+                   toggle)
+        {
+            result =
+                togglePattern
+                    ->Toggle();
+        }
+
+        if (SUCCEEDED (result))
+        {
+            result =
+                togglePattern
+                    ->get_CurrentToggleState (
+                        &output.toggleState);
+        }
+        if (SUCCEEDED (result)
+            && valuePattern != nullptr)
+        {
+            BSTR currentValue =
+                nullptr;
+            result =
+                valuePattern
+                    ->get_CurrentValue (
+                        &currentValue);
+            if (SUCCEEDED (result)
+                && currentValue
+                       != nullptr)
+            {
+                output.value =
+                    currentValue;
+            }
+            SysFreeString (
+                currentValue);
+        }
+        return finish (result);
     }
 
     if (action
@@ -1869,6 +1961,497 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesPauseToggleForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    std::array<Component*, 3>
+        pauseControls {};
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".pause";
+        auto* component =
+            findLfpDescendantById (
+                *canvas,
+                id);
+        pauseControls[displayIndex] =
+            component;
+        ASSERT_NE (
+            component,
+            nullptr)
+            << id;
+        auto* handler =
+            component
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                toggleButton);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (
+                    displayNumber)
+                + " pause");
+        const auto description =
+            "Pause or resume live updates in LFP display "
+            + String (
+                displayNumber)
+            + ". Acquisition and recording continue.";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        EXPECT_TRUE (
+            handler->getCurrentState()
+                .isCheckable());
+        EXPECT_FALSE (
+            handler->getCurrentState()
+                .isChecked());
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        toggle));
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_TRUE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "Running");
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *component)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::
+                THREE_HORZ);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        ASSERT_NE (
+            pauseControls[displayIndex],
+            nullptr);
+        EXPECT_EQ (
+            pauseControls[displayIndex]
+                ->getComponentID(),
+            prefix
+                + String (
+                    displayIndex + 1)
+                + ".pause");
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PauseToggleRunsOnMessageThreadAndTracksProgrammaticState)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.";
+    auto* pause =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix
+                    + "pause"));
+    auto* timebase =
+        findLfpDescendantById (
+            *canvas,
+            prefix
+                + "timebase");
+    ASSERT_NE (
+        pause,
+        nullptr);
+    ASSERT_NE (
+        timebase,
+        nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *pause);
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    auto* timescale =
+        findLfpDescendant<
+            LfpViewer::
+                LfpTimescale> (
+            *canvas);
+    ASSERT_NE (
+        options,
+        nullptr);
+    ASSERT_NE (
+        display,
+        nullptr);
+    ASSERT_NE (
+        timescale,
+        nullptr);
+    auto* handler =
+        pause
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+    const auto actions =
+        handler->getActions();
+    LfpThreadTrackingButtonListener
+        listener;
+    pause->addListener (
+        &listener);
+
+    std::atomic<bool>
+        workerReturned { false };
+    bool toggled = false;
+    std::thread worker (
+        [&]
+        {
+            toggled =
+                actions.invoke (
+                    AccessibilityActionType::
+                        toggle);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    worker.join();
+    pause->removeListener (
+        &listener);
+
+    EXPECT_TRUE (toggled);
+    EXPECT_TRUE (
+        workerReturned.load());
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_TRUE (
+        pause->getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Paused");
+    EXPECT_FALSE (
+        timebase->isEnabled());
+    EXPECT_TRUE (
+        display->isPaused());
+    EXPECT_TRUE (
+        timescale
+            ->getPausedState());
+
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_FALSE (
+        pause->getToggleState());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Running");
+    EXPECT_TRUE (
+        timebase->isEnabled());
+    EXPECT_FALSE (
+        display->isPaused());
+    EXPECT_FALSE (
+        timescale
+            ->getPausedState());
+
+    options->setPausedState (
+        true);
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Paused");
+    options->setPausedState (
+        false);
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Running");
+
+    pause->triggerClick();
+    for (int attempt = 0;
+         attempt < 50
+             && ! pause
+                       ->getToggleState();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    EXPECT_TRUE (
+        pause->getToggleState());
+    EXPECT_TRUE (
+        display->isPaused());
+    EXPECT_TRUE (
+        timescale
+            ->getPausedState());
+
+    pause->triggerClick();
+    for (int attempt = 0;
+         attempt < 50
+             && pause
+                    ->getToggleState();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    EXPECT_FALSE (
+        pause->getToggleState());
+    EXPECT_FALSE (
+        display->isPaused());
+    EXPECT_FALSE (
+        timescale
+            ->getPausedState());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PauseToggleActionsIgnoreDisabledAndDestroyedControls)
+{
+    AccessibilityActions
+        retainedActions;
+    {
+        auto canvas =
+            std::make_unique<
+                LfpViewer::
+                    LfpDisplayCanvas> (
+                processor,
+                LfpViewer::
+                    SplitLayouts::SINGLE,
+                false);
+        canvas->updateSettings();
+        canvas->setSize (600, 800);
+        canvas->addToDesktop (0);
+        canvas->setVisible (true);
+
+        const auto prefix =
+            "oe.processor."
+            + String (
+                processor->getNodeId())
+            + ".lfp.display_";
+        auto* visiblePause =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + "1.pause"));
+        ASSERT_NE (
+            visiblePause,
+            nullptr);
+        ASSERT_TRUE (
+            visiblePause->isShowing());
+
+        auto* visibleHandler =
+            visiblePause
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            visibleHandler,
+            nullptr);
+        retainedActions =
+            visibleHandler
+                ->getActions();
+
+        visiblePause->setEnabled (
+            false);
+        EXPECT_FALSE (
+            visibleHandler
+                ->isEnabled());
+        bool disabledActionFound =
+            false;
+        std::thread disabledWorker (
+            [&]
+            {
+                disabledActionFound =
+                    retainedActions
+                        .invoke (
+                            AccessibilityActionType::
+                                toggle);
+            });
+        disabledWorker.join();
+        EXPECT_TRUE (
+            disabledActionFound);
+        EXPECT_FALSE (
+            visiblePause
+                ->getToggleState());
+    }
+
+    bool staleActionFound =
+        false;
+    std::thread staleWorker (
+        [&]
+        {
+            staleActionFound =
+                retainedActions
+                    .invoke (
+                        AccessibilityActionType::
+                            toggle);
+        });
+    staleWorker.join();
+    EXPECT_TRUE (
+        staleActionFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SingleLayoutSpaceKeyTogglesEveryDisplayPause)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    std::array<Button*, 3>
+        pauseControls {};
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        pauseControls[displayIndex] =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + String (
+                            displayIndex + 1)
+                        + ".pause"));
+        ASSERT_NE (
+            pauseControls[displayIndex],
+            nullptr);
+        EXPECT_FALSE (
+            pauseControls[displayIndex]
+                ->getToggleState());
+    }
+
+    EXPECT_TRUE (
+        canvas->keyPressed (
+            KeyPress (
+                KeyPress::spaceKey,
+                ModifierKeys(),
+                ' ')));
+    for (auto* pause :
+         pauseControls)
+    {
+        EXPECT_TRUE (
+            pause
+                ->getToggleState());
+    }
+
+    EXPECT_TRUE (
+        canvas->keyPressed (
+            KeyPress (
+                KeyPress::spaceKey,
+                ModifierKeys(),
+                ' ')));
+    for (auto* pause :
+         pauseControls)
+    {
+        EXPECT_FALSE (
+            pause
+                ->getToggleState());
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
         ProgrammaticDisplayParameterUpdatesRefreshAccessibleValues)
 {
     auto canvas =
@@ -2434,6 +3017,220 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (
         hiddenPaneResult
             .invokeResult,
+        E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerTogglesPause)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_1.";
+    const auto id =
+        prefix + "pause";
+    auto* pause =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    auto* timebase =
+        findLfpDescendantById (
+            *canvas,
+            prefix
+                + "timebase");
+    ASSERT_NE (
+        pause,
+        nullptr);
+    ASSERT_NE (
+        timebase,
+        nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+    const auto wideId =
+        std::wstring (
+            id.toWideCharPointer());
+
+    const auto runAction =
+        [&] (
+            LfpWindowsUiaAction action,
+            bool expectedPaused)
+    {
+        LfpWindowsUiaInvokeResult
+            actionResult;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        wideId,
+                        action);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && (! workerReturned.load()
+                     || pause
+                                ->getToggleState()
+                            != expectedPaused);
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        worker.join();
+        EXPECT_TRUE (
+            workerReturned.load());
+        return actionResult;
+    };
+
+    const auto pausedResult =
+        runAction (
+            LfpWindowsUiaAction::
+                toggle,
+            true);
+    EXPECT_EQ (
+        pausedResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        pausedResult.controlType,
+        UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (
+        pausedResult.enabled,
+        TRUE);
+    EXPECT_EQ (
+        pausedResult.name,
+        L"LFP display 1 pause");
+    EXPECT_EQ (
+        pausedResult.help,
+        L"Pause or resume live updates in LFP display 1. Acquisition and recording continue.");
+    EXPECT_EQ (
+        pausedResult
+            .togglePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        pausedResult
+            .togglePatternAvailable);
+    EXPECT_EQ (
+        pausedResult
+            .toggleState,
+        ToggleState_On);
+    EXPECT_EQ (
+        pausedResult
+            .valuePatternResult,
+        S_OK);
+    EXPECT_TRUE (
+        pausedResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        pausedResult
+            .valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        pausedResult.value,
+        L"Paused");
+    EXPECT_TRUE (
+        pause->getToggleState());
+    EXPECT_FALSE (
+        timebase->isEnabled());
+
+    const auto runningResult =
+        runAction (
+            LfpWindowsUiaAction::
+                toggle,
+            false);
+    EXPECT_EQ (
+        runningResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        runningResult
+            .toggleState,
+        ToggleState_Off);
+    EXPECT_EQ (
+        runningResult.value,
+        L"Running");
+    EXPECT_FALSE (
+        pause->getToggleState());
+    EXPECT_TRUE (
+        timebase->isEnabled());
+
+    pause->setEnabled (
+        false);
+    const auto disabledResult =
+        runAction (
+            LfpWindowsUiaAction::
+                toggle,
+            false);
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_FALSE (
+        pause->getToggleState());
+
+    LfpWindowsUiaInvokeResult
+        hiddenPaneResult;
+    std::atomic<bool>
+        hiddenWorkerReturned { false };
+    std::thread hiddenWorker (
+        [&]
+        {
+            hiddenPaneResult =
+                invokeLfpWindowsUiaControl (
+                    window,
+                    std::wstring (
+                        (prefix
+                         .replace (
+                             "display_1.",
+                             "display_2.")
+                         + "pause")
+                            .toWideCharPointer()),
+                    LfpWindowsUiaAction::
+                        queryToggle);
+            hiddenWorkerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! hiddenWorkerReturned
+                       .load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    hiddenWorker.join();
+    EXPECT_TRUE (
+        hiddenWorkerReturned.load());
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
         E_FAIL);
 }
 #endif

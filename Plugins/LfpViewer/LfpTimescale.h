@@ -68,6 +68,12 @@ public:
     /** Set paused state (called by options interface */
     void setPausedState (bool isPaused);
 
+    /** Returns whether timescale navigation is paused. */
+    bool getPausedState() const
+    {
+        return isPaused;
+    }
+
     /** Timer callback -- used to throttle scrolling */
     void timerCallback() override;
 

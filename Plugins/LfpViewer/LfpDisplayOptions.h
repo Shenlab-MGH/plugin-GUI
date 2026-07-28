@@ -38,6 +38,35 @@
 namespace LfpViewer
 {
 
+struct LfpPauseButtonAccessibilityState;
+
+/** A pause control with worker-safe UI Automation state and actions. */
+class TESTABLE LfpPauseButton : public UtilityButton
+{
+public:
+    explicit LfpPauseButton (String label);
+    ~LfpPauseButton() override;
+
+    /** Publishes the current state for accessibility providers. */
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+private:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void focusGained (
+        FocusChangeType cause) override;
+    void focusLost (
+        FocusChangeType cause) override;
+
+    std::shared_ptr<
+        LfpPauseButtonAccessibilityState>
+        accessibilityState;
+};
+
 /**
  
     Holds the LfpDisplay UI controls
@@ -215,7 +244,7 @@ private:
     std::unique_ptr<Label> ttlWordLabel;
     std::unique_ptr<Label> ttlWordNameLabel;
 
-    std::unique_ptr<UtilityButton> pauseButton;
+    std::unique_ptr<LfpPauseButton> pauseButton;
 
     std::unique_ptr<ComboBox> colourSchemeOptionSelection;
     std::unique_ptr<Label> colourSchemeOptionLabel;

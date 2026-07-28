@@ -207,7 +207,7 @@ public:
     void pause (bool shouldPause);
 
     /** Returns true if the display is paused */
-    bool isPaused();
+    TESTABLE bool isPaused();
 
     /** Sets the time offset for the display */
     void setTimeOffset (float offset);

@@ -37,14 +37,324 @@
 #include "ShowHideOptionsButton.h"
 #include "SupersampledBitmapPlotter.h"
 
+#include <atomic>
 #include <math.h>
+#include <mutex>
 
 #define MS_FROM_START Time::highResolutionTicksToSeconds (Time::getHighResolutionTicks() - start) * 1000
 
 using namespace LfpViewer;
 
+struct LfpViewer::
+    LfpPauseButtonAccessibilityState
+{
+    void attach (
+        Button* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+        enabled.store (false);
+        checked.store (false);
+        focused.store (false);
+    }
+
+    void synchronise (
+        String titleToUse,
+        String descriptionToUse,
+        String helpToUse,
+        bool isChecked,
+        bool isEnabled,
+        bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (textMutex);
+            title = std::move (
+                titleToUse);
+            description =
+                std::move (
+                    descriptionToUse);
+            help = std::move (
+                helpToUse);
+        }
+
+        checked.store (
+            isChecked);
+        enabled.store (
+            isEnabled);
+        focused.store (
+            isFocused);
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (textMutex);
+        return help;
+    }
+
+    bool isChecked() const
+    {
+        return checked.load();
+    }
+
+    bool isAvailable() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+    void performToggleOnMessageThread()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        auto* currentButton =
+            button.getComponent();
+        if (currentButton == nullptr
+            || ! currentButton
+                     ->isEnabled())
+        {
+            return;
+        }
+
+        currentButton
+            ->setToggleState (
+                ! currentButton
+                       ->getToggleState(),
+                sendNotification);
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool>
+        checked { false };
+    std::atomic<bool>
+        enabled { true };
+    std::atomic<bool>
+        focused { false };
+    Component::SafePointer<Button>
+        button;
+};
+
 namespace
 {
+class LfpPauseButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit LfpPauseButtonAccessibilityValue (
+        std::shared_ptr<
+            LfpPauseButtonAccessibilityState>
+            stateToUse)
+        : state (
+              std::move (
+                  stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->isChecked()
+                   ? String ("Paused")
+                   : String ("Running");
+    }
+
+private:
+    std::shared_ptr<
+        LfpPauseButtonAccessibilityState>
+        state;
+};
+
+class LfpPauseButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    LfpPauseButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            LfpPauseButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::
+                  toggleButton,
+              createActions (
+                  stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<
+                      LfpPauseButtonAccessibilityValue> (
+                      stateToUse) }),
+          state (
+              std::move (
+                  stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable()
+                .withCheckable();
+        if (state->isChecked())
+        {
+            current =
+                current.withChecked();
+        }
+        if (state->isFocused())
+        {
+            current =
+                current.withFocused();
+        }
+        return current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription()
+        const override
+    {
+        return state
+            ->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state
+            ->isAvailable();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            LfpPauseButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::
+                    toggle,
+                [state]
+                {
+                    if (! state
+                              ->isAvailable())
+                    {
+                        return;
+                    }
+
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager
+                        == nullptr)
+                    {
+                        return;
+                    }
+
+                    if (messageManager
+                            ->isThisTheMessageThread())
+                    {
+                        state
+                            ->performToggleOnMessageThread();
+                        return;
+                    }
+
+                    MessageManager::callSync (
+                        [state]
+                        {
+                            state
+                                ->performToggleOnMessageThread();
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        LfpPauseButtonAccessibilityState>
+        state;
+};
+
+void applyLfpDisplayControlMetadata (
+    Component& component,
+    LfpDisplayNode& processor,
+    int displayNumber,
+    StringRef suffix,
+    StringRef title,
+    StringRef description)
+{
+    component.setComponentID (
+        "oe.processor."
+        + String (
+            processor.getNodeId())
+        + ".lfp.display_"
+        + String (displayNumber)
+        + "."
+        + String (suffix));
+    component.setTitle (
+        String (title));
+    component.setDescription (
+        String (description));
+    component.setHelpText (
+        String (description));
+    component.setAccessible (
+        true);
+    component
+        .invalidateAccessibilityHandler();
+}
+
 void applyLfpDisplayParameterMetadata (
     MessageThreadComboBox& comboBox,
     LfpDisplayNode& processor,
@@ -73,6 +383,89 @@ void applyLfpDisplayParameterMetadata (
         .invalidateAccessibilityHandler();
 }
 } // namespace
+
+LfpPauseButton::LfpPauseButton (
+    String label)
+    : UtilityButton (
+          std::move (label)),
+      accessibilityState (
+          std::make_shared<
+              LfpPauseButtonAccessibilityState>())
+{
+    accessibilityState->attach (
+        this);
+    setClickingTogglesState (
+        true);
+    refreshAccessibilityState();
+}
+
+LfpPauseButton::~LfpPauseButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+LfpPauseButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        LfpPauseButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void LfpPauseButton::
+    refreshAccessibilityState()
+{
+    auto title = getTitle();
+    if (title.isEmpty())
+        title = getName();
+    auto help = getHelpText();
+    if (help.isEmpty())
+        help = getDescription();
+
+    accessibilityState
+        ->synchronise (
+            std::move (title),
+            getDescription(),
+            std::move (help),
+            getToggleState(),
+            Component::isEnabled(),
+            hasKeyboardFocus (
+                false));
+}
+
+void LfpPauseButton::
+    buttonStateChanged()
+{
+    UtilityButton::
+        buttonStateChanged();
+    refreshAccessibilityState();
+}
+
+void LfpPauseButton::
+    enablementChanged()
+{
+    UtilityButton::
+        enablementChanged();
+    refreshAccessibilityState();
+}
+
+void LfpPauseButton::focusGained (
+    FocusChangeType cause)
+{
+    UtilityButton::focusGained (
+        cause);
+    refreshAccessibilityState();
+}
+
+void LfpPauseButton::focusLost (
+    FocusChangeType cause)
+{
+    UtilityButton::focusLost (
+        cause);
+    refreshAccessibilityState();
+}
 
 LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplitter* canvasSplit_, LfpTimescale* timescale_, LfpDisplay* lfpDisplay_, LfpDisplayNode* processor_)
     : canvas (canvas_),
@@ -340,14 +733,31 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     mainOptions->addAndMakeVisible (ttlWordNameLabel.get());
 
     // Pause button
-    pauseButton = std::make_unique<UtilityButton> ("Pause");
+    pauseButton =
+        std::make_unique<
+            LfpPauseButton> (
+            "Pause");
+    const auto pauseDescription =
+        "Pause or resume live updates in LFP display "
+        + String (displayNumber)
+        + ". Acquisition and recording continue.";
+    applyLfpDisplayControlMetadata (
+        *pauseButton,
+        *processor,
+        displayNumber,
+        "pause",
+        "LFP display "
+            + String (displayNumber)
+            + " pause",
+        pauseDescription);
     pauseButton->setRadius (5.0f);
     pauseButton->setEnabledState (true);
     pauseButton->setCorners (true, true, true, true);
     pauseButton->addListener (this);
-    pauseButton->setClickingTogglesState (true);
     pauseButton->setToggleState (false, sendNotification);
     mainOptions->addAndMakeVisible (pauseButton.get());
+    pauseButton
+        ->refreshAccessibilityState();
 
     // Colour scheme
     Array<String> colourSchemeNames = lfpDisplay->getColourSchemeNameArray();
