@@ -4645,8 +4645,7 @@ TEST_F (LfpDisplayNodeTests,
 
     LfpThreadTrackingButtonListener listener;
     button->addListener (&listener);
-    (*spikeRaster)->setSelectedId (2, sendNotification);
-    options->comboBoxChanged (*spikeRaster);
+    (*spikeRaster)->setSelectedId (2, sendNotificationSync);
     EXPECT_TRUE (display->getMedianOffsetPlotting());
     EXPECT_TRUE (button->getToggleState());
     EXPECT_EQ (value->getCurrentValueAsString(), "On");
@@ -4656,17 +4655,14 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_TRUE (display->getMedianOffsetPlotting());
     EXPECT_TRUE (button->getToggleState());
     EXPECT_EQ (value->getCurrentValueAsString(), "On");
-    (*spikeRaster)->setSelectedId (1, sendNotification);
-    options->comboBoxChanged (*spikeRaster);
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
     EXPECT_FALSE (display->getMedianOffsetPlotting());
     EXPECT_FALSE (button->getToggleState());
     EXPECT_EQ (value->getCurrentValueAsString(), "Off");
 
     options->setMedianOffset (true);
-    (*spikeRaster)->setSelectedId (2, sendNotification);
-    options->comboBoxChanged (*spikeRaster);
-    (*spikeRaster)->setSelectedId (1, sendNotification);
-    options->comboBoxChanged (*spikeRaster);
+    (*spikeRaster)->setSelectedId (2, sendNotificationSync);
+    (*spikeRaster)->setSelectedId (1, sendNotificationSync);
     EXPECT_TRUE (display->getMedianOffsetPlotting());
     EXPECT_TRUE (button->getToggleState());
     EXPECT_EQ (value->getCurrentValueAsString(), "On");
