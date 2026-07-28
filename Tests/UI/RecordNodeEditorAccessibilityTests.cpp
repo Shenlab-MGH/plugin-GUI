@@ -96,6 +96,23 @@ public:
     }
 };
 
+class StreamMonitorClickListener final
+    : public Button::Listener
+{
+public:
+    void buttonClicked (Button*) override
+    {
+        clickUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        clickCount.fetch_add (1);
+    }
+
+    std::atomic<int> clickCount { 0 };
+    std::atomic<bool>
+        clickUsedMessageThread { false };
+};
+
 Component* findDescendantById (
     Component& parent,
     const String& componentId)
@@ -517,6 +534,123 @@ TEST_F (RecordNodeEditorAccessibilityTests,
         handler->getValueInterface()
             ->getCurrentValueAsString(),
         "8 of 8 channels selected; FIFO 88%");
+}
+
+TEST_F (RecordNodeEditorAccessibilityTests,
+        StreamMonitorProvidersAndActionsAreWorkerSafe)
+{
+    auto audioComponent =
+        std::make_unique<AudioComponent>();
+    auto controlPanel =
+        std::make_unique<ControlPanel> (
+            processorGraph.get(),
+            audioComponent.get(),
+            true);
+    controlPanel->updateRecordEngineList();
+
+    TestRecordNode recordNode;
+    const auto streamId =
+        recordNode.addTestStream (8);
+    auto monitor =
+        std::make_unique<StreamMonitor> (
+            &recordNode,
+            streamId);
+    applySemanticMetadata (
+        *monitor,
+        "oe.processor.100.streams.stream_probe_ap.recording_channels",
+        "Probe AP recording channels",
+        "Choose recorded channels and inspect FIFO usage.");
+    monitor->updateChannelCount (4);
+    monitor->setFillPercentage (0.5f);
+
+    StreamMonitorClickListener listener;
+    monitor->addListener (&listener);
+    auto handler =
+        monitor->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+
+    String workerTitle;
+    String workerDescription;
+    String workerHelp;
+    String workerValue;
+    bool workerEnabled = false;
+    std::thread reader (
+        [&]
+        {
+            workerTitle = handler->getTitle();
+            workerDescription =
+                handler->getDescription();
+            workerHelp = handler->getHelp();
+            workerValue =
+                handler->getValueInterface()
+                    ->getCurrentValueAsString();
+            workerEnabled = handler->isEnabled();
+        });
+    reader.join();
+
+    EXPECT_EQ (
+        workerTitle,
+        "Probe AP recording channels");
+    EXPECT_EQ (
+        workerDescription,
+        "Choose recorded channels and inspect FIFO usage.");
+    EXPECT_EQ (workerHelp, workerDescription);
+    EXPECT_EQ (
+        workerValue,
+        "4 of 8 channels selected; FIFO 50%");
+    EXPECT_TRUE (workerEnabled);
+
+    const auto actions = handler->getActions();
+    const auto invokePress =
+        [&]
+        {
+            std::atomic<bool> completed { false };
+            bool invoked = false;
+            std::thread worker (
+                [&]
+                {
+                    invoked = actions.invoke (
+                        AccessibilityActionType::press);
+                    completed.store (true);
+                });
+            while (! completed.load())
+            {
+                MessageManager::getInstance()
+                    ->runDispatchLoopUntil (10);
+            }
+            worker.join();
+            return invoked;
+        };
+
+    EXPECT_TRUE (invokePress());
+    for (int attempt = 0;
+         attempt < 20
+             && listener.clickCount.load() == 0;
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    EXPECT_EQ (listener.clickCount.load(), 1);
+    EXPECT_TRUE (
+        listener.clickUsedMessageThread.load());
+
+    monitor->setEnabled (false);
+    EXPECT_FALSE (handler->isEnabled());
+    EXPECT_TRUE (invokePress());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.clickCount.load(), 1);
+
+    handler.reset();
+    monitor.reset();
+    EXPECT_TRUE (invokePress());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.clickCount.load(), 1);
 }
 
 TEST_F (RecordNodeEditorAccessibilityTests,

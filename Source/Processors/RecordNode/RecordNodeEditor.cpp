@@ -179,6 +179,98 @@ private:
     std::atomic<bool> enabled { true };
 };
 
+struct StreamMonitorAccessibilityState
+{
+    void attach (StreamMonitor* monitorToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        monitor = monitorToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        monitor = nullptr;
+        enabled.store (false);
+        focused.store (false);
+    }
+
+    StreamMonitor* getMonitorOnMessageThread() const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return monitor;
+    }
+
+    void synchronise (String valueToUse,
+                      String titleToUse,
+                      String descriptionToUse,
+                      String helpToUse,
+                      bool isEnabled,
+                      bool isFocused)
+    {
+        {
+            const std::lock_guard<std::mutex> lock (textMutex);
+            value = std::move (valueToUse);
+            title = std::move (titleToUse);
+            description = std::move (descriptionToUse);
+            help = std::move (helpToUse);
+        }
+
+        enabled.store (isEnabled);
+        focused.store (isFocused);
+    }
+
+    String getValue() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return value;
+    }
+
+    String getTitle() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return title;
+    }
+
+    String getDescription() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return description;
+    }
+
+    String getHelp() const
+    {
+        const std::lock_guard<std::mutex> lock (textMutex);
+        return help;
+    }
+
+    bool isEnabled() const
+    {
+        return enabled.load();
+    }
+
+    bool isFocused() const
+    {
+        return focused.load();
+    }
+
+private:
+    mutable std::mutex textMutex;
+    String value;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> enabled { true };
+    std::atomic<bool> focused { false };
+    StreamMonitor* monitor = nullptr;
+};
+
 namespace
 {
 struct SyncMonitorAccessibilityRegistry
@@ -228,6 +320,67 @@ void unregisterSyncMonitor (SyncMonitor* monitor)
     {
         auto& registry =
             getSyncMonitorAccessibilityRegistry();
+        const std::lock_guard<std::mutex> lock (registry.mutex);
+        const auto found = registry.states.find (monitor);
+        if (found == registry.states.end())
+            return;
+
+        state = found->second;
+        registry.states.erase (found);
+    }
+
+    state->detach();
+}
+
+struct StreamMonitorAccessibilityRegistry
+{
+    std::mutex mutex;
+    std::unordered_map<
+        StreamMonitor*,
+        std::shared_ptr<StreamMonitorAccessibilityState>>
+        states;
+};
+
+StreamMonitorAccessibilityRegistry&
+getStreamMonitorAccessibilityRegistry()
+{
+    static auto* registry =
+        new StreamMonitorAccessibilityRegistry();
+    return *registry;
+}
+
+std::shared_ptr<StreamMonitorAccessibilityState>
+registerStreamMonitor (StreamMonitor* monitor)
+{
+    auto state =
+        std::make_shared<StreamMonitorAccessibilityState>();
+    state->attach (monitor);
+
+    auto& registry =
+        getStreamMonitorAccessibilityRegistry();
+    const std::lock_guard<std::mutex> lock (registry.mutex);
+    registry.states[monitor] = state;
+    return state;
+}
+
+std::shared_ptr<StreamMonitorAccessibilityState>
+getStreamMonitorState (StreamMonitor* monitor)
+{
+    auto& registry =
+        getStreamMonitorAccessibilityRegistry();
+    const std::lock_guard<std::mutex> lock (registry.mutex);
+    const auto found = registry.states.find (monitor);
+    return found != registry.states.end()
+               ? found->second
+               : nullptr;
+}
+
+void unregisterStreamMonitor (StreamMonitor* monitor)
+{
+    std::shared_ptr<StreamMonitorAccessibilityState> state;
+    {
+        auto& registry =
+            getStreamMonitorAccessibilityRegistry();
         const std::lock_guard<std::mutex> lock (registry.mutex);
         const auto found = registry.states.find (monitor);
         if (found == registry.states.end())
@@ -306,6 +459,106 @@ public:
 
 private:
     std::shared_ptr<SyncMonitorAccessibilityState> state;
+};
+
+class StreamMonitorAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit StreamMonitorAccessibilityValue (
+        std::shared_ptr<StreamMonitorAccessibilityState> stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (const String&) override { jassertfalse; }
+    String getCurrentValueAsString() const override
+    {
+        return state->getValue();
+    }
+
+private:
+    std::shared_ptr<StreamMonitorAccessibilityState> state;
+};
+
+class StreamMonitorAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    StreamMonitorAccessibilityHandler (
+        StreamMonitor& monitor,
+        std::shared_ptr<StreamMonitorAccessibilityState> stateToUse)
+        : AccessibilityHandler (
+              monitor,
+              AccessibilityRole::button,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<StreamMonitorAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto current = AccessibleState().withFocusable();
+        return state->isFocused()
+                   ? current.withFocused()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isEnabled();
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<StreamMonitorAccessibilityState>& state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::press,
+                [state]
+                {
+                    auto* messageManager =
+                        MessageManager::getInstanceWithoutCreating();
+                    if (messageManager == nullptr)
+                        return;
+
+                    messageManager->callSync (
+                        [state]
+                        {
+                            auto* monitor =
+                                state->getMonitorOnMessageThread();
+                            if (monitor == nullptr
+                                || ! monitor->isEnabled())
+                            {
+                                return;
+                            }
+
+                            monitor->triggerClick();
+                        });
+                });
+    }
+
+    std::shared_ptr<StreamMonitorAccessibilityState> state;
 };
 
 class DiskMonitorAccessibilityValue final
@@ -740,24 +993,32 @@ StreamMonitor::StreamMonitor (RecordNode* rn, uint64 id)
     selectedChannels = 0;
     totalChannels = rn->getDataStream (streamId)->getChannelCount();
 
+    registerStreamMonitor (this);
     startTimerHz (10);
 }
 
-StreamMonitor::~StreamMonitor() {}
+StreamMonitor::~StreamMonitor()
+{
+    stopTimer();
+    unregisterStreamMonitor (this);
+}
 
 std::unique_ptr<AccessibilityHandler>
 StreamMonitor::createAccessibilityHandler()
 {
-    return createReadOnlyButtonTextAccessibilityHandler (
+    synchroniseAccessibilityState();
+
+    auto state = getStreamMonitorState (this);
+    if (state == nullptr)
+    {
+        state = registerStreamMonitor (this);
+        synchroniseAccessibilityState();
+    }
+
+    return std::make_unique<
+        StreamMonitorAccessibilityHandler> (
         *this,
-        [safeMonitor =
-             Component::SafePointer<StreamMonitor> (
-                 this)]
-        {
-            return safeMonitor != nullptr
-                       ? safeMonitor->getAccessibleValue()
-                       : String();
-        });
+        std::move (state));
 }
 
 String StreamMonitor::getAccessibleValue() const
@@ -775,12 +1036,61 @@ String StreamMonitor::getAccessibleValue() const
            + String (fifoPercent) + "%";
 }
 
+void StreamMonitor::synchroniseAccessibilityState()
+{
+    if (auto state = getStreamMonitorState (this))
+    {
+        const auto description = getDescription();
+        const auto help = getHelpText().isNotEmpty()
+                              ? getHelpText()
+                              : description;
+        state->synchronise (
+            getAccessibleValue(),
+            getTitle(),
+            description,
+            help,
+            Component::isEnabled(),
+            hasKeyboardFocus (true));
+    }
+}
+
+void StreamMonitor::setFillPercentage (float fill)
+{
+    fillPercentage = fill;
+    repaint();
+    synchroniseAccessibilityState();
+
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::valueChanged);
+}
+
 void StreamMonitor::timerCallback()
 {
     if (((RecordNode*) processor)->recordThread->isThreadRunning())
         setFillPercentage (((RecordNode*) processor)->fifoUsage[streamId]);
     else
         setFillPercentage (0.0);
+}
+
+void StreamMonitor::enablementChanged()
+{
+    Button::enablementChanged();
+    synchroniseAccessibilityState();
+}
+
+void StreamMonitor::focusGained (
+    FocusChangeType cause)
+{
+    Button::focusGained (cause);
+    synchroniseAccessibilityState();
+}
+
+void StreamMonitor::focusLost (
+    FocusChangeType cause)
+{
+    Button::focusLost (cause);
+    synchroniseAccessibilityState();
 }
 
 void StreamMonitor::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -815,6 +1125,7 @@ void StreamMonitor::updateChannelCount (int selected)
 
     selectedChannels = selected;
     repaint();
+    synchroniseAccessibilityState();
 
     if (auto* handler =
             getAccessibilityHandler())

@@ -153,6 +153,9 @@ public:
     /** Updates the display */
     void timerCallback() override;
 
+    /** Updates the FIFO fill and its accessibility value */
+    void setFillPercentage (float percentage);
+
     /** Draws the monitor with custom text */
     void paintButton (Graphics& g, bool isMouseOver, bool isButtonDown) override;
 
@@ -165,6 +168,10 @@ public:
 
 private:
     String getAccessibleValue() const;
+    void synchroniseAccessibilityState();
+    void enablementChanged() override;
+    void focusGained (FocusChangeType cause) override;
+    void focusLost (FocusChangeType cause) override;
 
     uint64 streamId;
     int selectedChannels;
