@@ -25,6 +25,7 @@
 
 #include "../../AccessClass.h"
 #include "../../UI/EditorViewport.h"
+#include "../../UI/SemanticComponent.h"
 
 #include "../Editors/StreamSelector.h"
 #include "../Settings/DataStream.h"
@@ -36,6 +37,18 @@ SplitterEditor::SplitterEditor (GenericProcessor* parentNode)
     desiredWidth = 95;
 
     pipelineSelectorA = std::make_unique<ImageButton> ("Pipeline A");
+    applySemanticMetadata (
+        *pipelineSelectorA,
+        "oe.processor."
+            + String (
+                parentNode
+                    ->getNodeId())
+            + ".route.output.a",
+        "Splitter output A",
+        "Show splitter output path A in the signal chain.");
+    pipelineSelectorA->setRadioGroupId (
+        2101,
+        dontSendNotification);
 
     Image normalImageA = ImageCache::getFromMemory (BinaryData::PipelineB01_png, BinaryData::PipelineB01_pngSize);
     Image downImageA = ImageCache::getFromMemory (BinaryData::PipelineA01_png, BinaryData::PipelineA01_pngSize);
@@ -50,6 +63,18 @@ SplitterEditor::SplitterEditor (GenericProcessor* parentNode)
     addAndMakeVisible (pipelineSelectorA.get());
 
     pipelineSelectorB = std::make_unique<ImageButton> ("Pipeline B");
+    applySemanticMetadata (
+        *pipelineSelectorB,
+        "oe.processor."
+            + String (
+                parentNode
+                    ->getNodeId())
+            + ".route.output.b",
+        "Splitter output B",
+        "Show splitter output path B in the signal chain.");
+    pipelineSelectorB->setRadioGroupId (
+        2101,
+        dontSendNotification);
 
     pipelineSelectorB->setImages (true, true, true, normalImageB, 1.0f, Colours::white.withAlpha (0.0f), normalImageB, 1.0f, Colours::black.withAlpha (0.0f), downImageB, 1.0f, Colours::white.withAlpha (0.0f));
 

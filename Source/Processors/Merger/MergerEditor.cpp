@@ -25,6 +25,7 @@
 #include "../../AccessClass.h"
 #include "../../UI/EditorViewport.h"
 #include "../../UI/GraphViewer.h"
+#include "../../UI/SemanticComponent.h"
 #include "../MessageCenter/MessageCenterEditor.h"
 #include "../ProcessorGraph/ProcessorGraph.h"
 #include "Merger.h"
@@ -39,6 +40,18 @@ MergerEditor::MergerEditor (GenericProcessor* parentNode)
     desiredWidth = 90;
 
     pipelineSelectorA = std::make_unique<ImageButton> ("Pipeline A");
+    applySemanticMetadata (
+        *pipelineSelectorA,
+        "oe.processor."
+            + String (
+                parentNode
+                    ->getNodeId())
+            + ".route.input.a",
+        "Merger input A",
+        "Show merger input path A in the signal chain.");
+    pipelineSelectorA->setRadioGroupId (
+        2102,
+        dontSendNotification);
 
     Image normalImageA = ImageCache::getFromMemory (BinaryData::MergerB01_png, BinaryData::MergerB01_pngSize);
     Image downImageA = ImageCache::getFromMemory (BinaryData::MergerA01_png, BinaryData::MergerA01_pngSize);
@@ -53,6 +66,18 @@ MergerEditor::MergerEditor (GenericProcessor* parentNode)
     addAndMakeVisible (pipelineSelectorA.get());
 
     pipelineSelectorB = std::make_unique<ImageButton> ("Pipeline B");
+    applySemanticMetadata (
+        *pipelineSelectorB,
+        "oe.processor."
+            + String (
+                parentNode
+                    ->getNodeId())
+            + ".route.input.b",
+        "Merger input B",
+        "Show merger input path B in the signal chain.");
+    pipelineSelectorB->setRadioGroupId (
+        2102,
+        dontSendNotification);
 
     pipelineSelectorB->setImages (true, true, true, normalImageB, 1.0f, Colours::white.withAlpha (0.0f), normalImageB, 1.0f, Colours::black.withAlpha (0.0f), downImageB, 1.0f, Colours::white.withAlpha (0.0f));
 

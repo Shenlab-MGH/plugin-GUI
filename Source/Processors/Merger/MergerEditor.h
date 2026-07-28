@@ -25,6 +25,7 @@
 #define __MERGEREDITOR_H_33F644A8__
 
 #include "../../../JuceLibraryCode/JuceHeader.h"
+#include "../../TestableExport.h"
 #include "../Editors/GenericEditor.h"
 
 class StreamSelectorButton;
@@ -39,8 +40,8 @@ class DataStream;
 
 */
 
-class MergerEditor : public GenericEditor,
-                     public Button::Listener
+class TESTABLE MergerEditor : public GenericEditor,
+                              public Button::Listener
 
 {
 public:

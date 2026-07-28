@@ -25,6 +25,7 @@
 #define __SPLITTER_H_A75239F7__
 
 #include "../../../JuceLibraryCode/JuceHeader.h"
+#include "../../TestableExport.h"
 #include "../GenericProcessor/GenericProcessor.h"
 
 #include <stdio.h>
@@ -43,7 +44,7 @@ class DataStream;
 
 */
 
-class Splitter : public GenericProcessor
+class TESTABLE Splitter : public GenericProcessor
 {
 public:
     /** Available splitter output paths */

@@ -25,6 +25,7 @@
 #define __MERGER_H_ED548E77__
 
 #include "../../../JuceLibraryCode/JuceHeader.h"
+#include "../../TestableExport.h"
 #include "../GenericProcessor/GenericProcessor.h"
 
 #include <stdio.h>
@@ -41,7 +42,7 @@
 
 */
 
-class Merger : public GenericProcessor
+class TESTABLE Merger : public GenericProcessor
 {
 public:
     /** Constructor*/
