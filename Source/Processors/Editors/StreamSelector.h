@@ -214,6 +214,9 @@ public:
     /** Used to enable and disable a given stream*/
     void setStreamEnabledState (uint16 streamId, bool isEnabled);
 
+    /** Applies the existing filter stream processing parameter. */
+    bool setStreamProcessingEnabled (uint16 streamId, bool isEnabled);
+
     /** Called when popup window is deleted */
     void componentBeingDeleted (Component& component) override;
 

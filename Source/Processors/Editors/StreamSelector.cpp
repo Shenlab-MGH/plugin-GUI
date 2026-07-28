@@ -33,6 +33,7 @@
 #include "../Settings/DataStream.h"
 #include "../../UI/SemanticComponent.h"
 
+#include <atomic>
 #include <mutex>
 
 class StreamSelectorAccessibilityValueState
@@ -190,6 +191,378 @@ String getStreamSemanticId (const GenericEditor& editor,
            + "." + getStreamSemanticSegment (stream);
 }
 
+class StreamEnableButton;
+
+class StreamEnableButtonAccessibilityState
+{
+public:
+    bool synchronise (
+        bool enabled)
+    {
+        return publishedState.exchange (
+                   enabled)
+               != enabled;
+    }
+
+    bool getPublishedState() const
+    {
+        return publishedState.load();
+    }
+
+    uint64 getBindingGeneration() const
+    {
+        return bindingGeneration.load();
+    }
+
+    void advanceBinding()
+    {
+        bindingGeneration.fetch_add (1);
+    }
+
+    void attach (
+        StreamEnableButton* buttonToUse)
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = buttonToUse;
+    }
+
+    void detach()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        button = nullptr;
+    }
+
+    StreamEnableButton*
+        getButtonOnMessageThread (
+            uint64 expectedBindingGeneration)
+        const
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        return bindingGeneration.load()
+                       == expectedBindingGeneration
+                   ? button
+                   : nullptr;
+    }
+
+private:
+    std::atomic<bool> publishedState { true };
+    std::atomic<uint64>
+        bindingGeneration { 1 };
+    StreamEnableButton* button = nullptr;
+};
+
+class StreamEnableButtonAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit StreamEnableButtonAccessibilityValue (
+        std::shared_ptr<
+            StreamEnableButtonAccessibilityState>
+            stateToUse)
+        : state (std::move (
+              stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (
+        const String&) override
+    {
+        jassertfalse;
+    }
+
+    String getCurrentValueAsString()
+        const override
+    {
+        return state->getPublishedState()
+                   ? String ("On")
+                   : String ("Off");
+    }
+
+private:
+    std::shared_ptr<
+        StreamEnableButtonAccessibilityState>
+        state;
+};
+
+class StreamEnableButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    StreamEnableButtonAccessibilityHandler (
+        StreamEnableButton& button,
+        std::shared_ptr<
+            StreamEnableButtonAccessibilityState>
+            stateToUse);
+
+    AccessibleState getCurrentState()
+        const override
+    {
+        auto accessibleState =
+            AccessibilityHandler::getCurrentState()
+                .withCheckable();
+
+        return state->getPublishedState()
+                   ? accessibleState.withChecked()
+                   : accessibleState;
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<
+            StreamEnableButtonAccessibilityState>&
+            state);
+
+    std::shared_ptr<
+        StreamEnableButtonAccessibilityState>
+        state;
+};
+
+class StreamEnableButton final : public Button
+{
+public:
+    StreamEnableButton()
+        : Button (
+              "Stream processing enabled"),
+          accessibilityState (
+              std::make_shared<
+                  StreamEnableButtonAccessibilityState>())
+    {
+        accessibilityState->attach (
+            this);
+        onClick =
+            [this]
+            {
+                toggleProcessingOnMessageThread();
+            };
+    }
+
+    ~StreamEnableButton() override
+    {
+        accessibilityState->detach();
+    }
+
+    void configure (
+        StreamSelectorTable& selectorToUse,
+        const DataStream& stream,
+        const String& tableSemanticId,
+        bool processingEnabled)
+    {
+        if (selector
+                != &selectorToUse
+            || streamId
+                   != stream.getStreamId())
+        {
+            accessibilityState
+                ->advanceBinding();
+        }
+
+        selector = &selectorToUse;
+        streamId = stream.getStreamId();
+        applySemanticMetadata (
+            *this,
+            tableSemanticId
+                + "."
+                + getStreamSemanticSegment (
+                    stream)
+                + ".processing_enabled",
+            stream.getName()
+                + " processing enabled",
+            "Enable or disable processing for "
+                + stream.getName()
+                + " from source node "
+                + String (
+                    stream.getSourceNodeId())
+                + ".");
+        const auto* parameter =
+            stream.getParameter (
+                "enable_stream");
+        setEnabled (
+            parameter != nullptr
+            && parameter->isEnabled());
+        setPublishedState (
+            processingEnabled,
+            false);
+    }
+
+    void setPublishedState (
+        bool enabled,
+        bool notify)
+    {
+        const auto changed =
+            accessibilityState->synchronise (
+                enabled);
+        repaint();
+
+        if (changed
+            && notify)
+        {
+            if (auto* handler =
+                    getAccessibilityHandler())
+            {
+                handler->notifyAccessibilityEvent (
+                    AccessibilityEvent::
+                        valueChanged);
+            }
+        }
+    }
+
+    std::unique_ptr<AccessibilityHandler>
+        createAccessibilityHandler() override
+    {
+        return std::make_unique<
+            StreamEnableButtonAccessibilityHandler> (
+            *this,
+            accessibilityState);
+    }
+
+    void toggleProcessingOnMessageThread()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        auto* selectorToUse = selector;
+        const auto streamIdToUse =
+            streamId;
+        const auto desiredState =
+            ! accessibilityState
+                   ->getPublishedState();
+
+        if (selectorToUse != nullptr)
+        {
+            selectorToUse
+                ->setStreamProcessingEnabled (
+                    streamIdToUse,
+                    desiredState);
+        }
+    }
+
+private:
+    void paintButton (
+        Graphics& g,
+        bool isMouseOver,
+        bool isButtonDown) override
+    {
+        const auto bounds =
+            getLocalBounds()
+                .toFloat()
+                .reduced (2.0f);
+        auto colour =
+            findColour (
+                ThemeColours::defaultText);
+        if (isMouseOver
+            || isButtonDown
+            || ! isEnabled())
+        {
+            colour =
+                colour.withAlpha (
+                    0.6f);
+        }
+
+        g.setColour (
+            colour);
+        g.drawRect (
+            bounds,
+            1.0f);
+
+        if (accessibilityState
+                ->getPublishedState())
+        {
+            Path tick;
+            tick.startNewSubPath (
+                bounds.getX()
+                    + bounds.getWidth()
+                          * 0.2f,
+                bounds.getCentreY());
+            tick.lineTo (
+                bounds.getX()
+                    + bounds.getWidth()
+                          * 0.43f,
+                bounds.getBottom()
+                    - bounds.getHeight()
+                          * 0.2f);
+            tick.lineTo (
+                bounds.getRight()
+                    - bounds.getWidth()
+                          * 0.15f,
+                bounds.getY()
+                    + bounds.getHeight()
+                          * 0.2f);
+            g.strokePath (
+                tick,
+                PathStrokeType (
+                    1.5f));
+        }
+    }
+
+    StreamSelectorTable* selector = nullptr;
+    uint16 streamId = 0;
+    std::shared_ptr<
+        StreamEnableButtonAccessibilityState>
+        accessibilityState;
+};
+
+StreamEnableButtonAccessibilityHandler::
+    StreamEnableButtonAccessibilityHandler (
+        StreamEnableButton& button,
+        std::shared_ptr<
+            StreamEnableButtonAccessibilityState>
+            stateToUse)
+    : AccessibilityHandler (
+          button,
+          AccessibilityRole::toggleButton,
+          createActions (
+              stateToUse),
+          AccessibilityHandler::Interfaces {
+              std::make_unique<
+                  StreamEnableButtonAccessibilityValue> (
+                  stateToUse) }),
+      state (std::move (
+          stateToUse))
+{
+}
+
+AccessibilityActions
+StreamEnableButtonAccessibilityHandler::
+    createActions (
+        const std::shared_ptr<
+            StreamEnableButtonAccessibilityState>&
+            state)
+{
+    const auto bindingGeneration =
+        state->getBindingGeneration();
+    return AccessibilityActions()
+        .addAction (
+            AccessibilityActionType::toggle,
+            [state,
+             bindingGeneration]
+            {
+                MessageManager::callSync (
+                    [state,
+                     bindingGeneration]
+                    {
+                        if (auto* button =
+                                state
+                                    ->getButtonOnMessageThread (
+                                        bindingGeneration))
+                        {
+                            button
+                                ->toggleProcessingOnMessageThread();
+                        }
+                    });
+            });
+}
+
 class AccessibleStreamTableListBox final : public TableListBox
 {
 public:
@@ -264,10 +637,9 @@ void StreamTableModel::cellClicked (int rowNumber, int columnId, const MouseEven
 
         if (result == 1)
         {
-            if (auto* param = streams[rowNumber]->getParameter ("enable_stream"))
-            {
-                param->setNextValue (! streamState);
-            }
+            owner->setStreamProcessingEnabled (
+                streams[rowNumber]->getStreamId(),
+                ! streamState);
         }
 
         return;
@@ -315,6 +687,26 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
             "Current digital event state for " + stream->getName() + ".");
 
         return ttlMonitor;
+    }
+    else if (columnId == StreamTableModel::Columns::ENABLED)
+    {
+        auto* toggle =
+            dynamic_cast<
+                StreamEnableButton*> (
+                existingComponentToUpdate);
+
+        if (toggle == nullptr)
+            toggle = new StreamEnableButton();
+
+        const auto* stream =
+            streams[rowNumber];
+        toggle->configure (
+            *owner,
+            *stream,
+            table->getComponentID(),
+            owner->checkStream (
+                stream));
+        return toggle;
     }
     else if (columnId == StreamTableModel::Columns::START_TIME)
     {
@@ -531,7 +923,7 @@ StreamSelectorTable::StreamSelectorTable (GenericEditor* ed_) : editor (ed_),
     tableModel->table = streamTable.get();
 
     addAndMakeVisible (streamTable.get());
-    streamTable->setBounds (2, 20, 232, 70);
+    streamTable->setBounds (2, 20, 250, 70);
     streamTable->getViewport()->setScrollBarsShown (true, false, true, false);
     streamTable->getViewport()->setScrollBarThickness (10);
 
@@ -543,7 +935,7 @@ StreamSelectorTable::StreamSelectorTable (GenericEditor* ed_) : editor (ed_),
         "Open the full data stream table for " + processorName
             + " (node " + String (processorId) + ").");
     addAndMakeVisible (expanderButton.get());
-    expanderButton->setBounds (222, 4, 15, 15);
+    expanderButton->setBounds (240, 4, 15, 15);
     expanderButton->addListener (this);
 }
 
@@ -568,6 +960,8 @@ TableListBox* StreamSelectorTable::createTableView (bool expanded)
     table->setHeader (std::make_unique<TableHeaderComponent>());
 
     table->getHeader().addColumn (" ", StreamTableModel::Columns::SELECTED, 12, 12, 12, TableHeaderComponent::notResizableOrSortable);
+    if (editor->getProcessor()->isFilter())
+        table->getHeader().addColumn ("ON", StreamTableModel::Columns::ENABLED, 18, 18, 18, TableHeaderComponent::notResizableOrSortable);
     table->getHeader().addColumn ("NAME", StreamTableModel::Columns::NAME, 94, 94, 94, TableHeaderComponent::notResizableOrSortable);
     table->getHeader().addColumn ("DELAY", StreamTableModel::Columns::DELAY, 50, 50, 50, TableHeaderComponent::notResizableOrSortable);
     table->getHeader().addColumn ("TTL", StreamTableModel::Columns::TTL_LINE_STATES, 60, 60, 60, TableHeaderComponent::notResizableOrSortable);
@@ -612,7 +1006,9 @@ void StreamSelectorTable::buttonClicked (Button* button)
     {
         auto* table = createTableView (true);
 
-        int width = 316;
+        int width = editor->getProcessor()->isFilter()
+                        ? 334
+                        : 316;
 
         if (isRecordNode)
             width += 160;
@@ -663,7 +1059,9 @@ void StreamSelectorTable::componentBeingDeleted (Component& component)
 
 int StreamSelectorTable::getDesiredWidth()
 {
-    return 240;
+    return editor->getProcessor()->isFilter()
+               ? 258
+               : 240;
 }
 
 bool StreamSelectorTable::checkStream (const DataStream* streamToCheck)
@@ -798,10 +1196,118 @@ void StreamSelectorTable::timerCallback()
 
 void StreamSelectorTable::setStreamEnabledState (uint16 streamId, bool isEnabled)
 {
-    //LOGD("Setting state for stream ", streamId, ":  ", isEnabled);
+    if (! MessageManager::getInstance()
+              ->isThisTheMessageThread())
+    {
+        MessageManager::callAsync (
+            [safeSelector =
+                 Component::SafePointer<
+                     StreamSelectorTable> (
+                     this),
+             streamId,
+             isEnabled]
+            {
+                if (safeSelector
+                    != nullptr)
+                {
+                    safeSelector
+                        ->setStreamEnabledState (
+                            streamId,
+                            isEnabled);
+                }
+            });
+        return;
+    }
+
     streamStates[streamId] = isEnabled;
+
+    auto updateToggle =
+        [this,
+         streamId,
+         isEnabled] (
+            TableListBox* table)
+        {
+            if (table == nullptr)
+                return;
+
+            for (int row = 0;
+                 row < streams.size();
+                 ++row)
+            {
+                if (streams[row]
+                        ->getStreamId()
+                    != streamId)
+                {
+                    continue;
+                }
+
+                if (auto* toggle =
+                        dynamic_cast<
+                            StreamEnableButton*> (
+                            table->getCellComponent (
+                                StreamTableModel::
+                                    Columns::ENABLED,
+                                row)))
+                {
+                    toggle->setPublishedState (
+                        isEnabled,
+                        true);
+                }
+                break;
+            }
+        };
+
+    updateToggle (
+        streamTable.get());
+    if (tableModel->table
+        != streamTable.get())
+    {
+        updateToggle (
+            tableModel->table);
+    }
+
     tableModel->table->repaint();
     streamTable->repaint();
+}
+
+bool StreamSelectorTable::
+    setStreamProcessingEnabled (
+        uint16 streamId,
+        bool isEnabled)
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+
+    if (! editor->getProcessor()
+              ->isFilter())
+    {
+        return false;
+    }
+
+    for (auto* stream : streams)
+    {
+        if (stream->getStreamId()
+            != streamId)
+        {
+            continue;
+        }
+
+        auto* parameter =
+            stream->getParameter (
+                "enable_stream");
+        if (parameter == nullptr
+            || ! parameter->isEnabled())
+        {
+            return false;
+        }
+
+        parameter->setNextValue (
+            isEnabled);
+        return true;
+    }
+
+    return false;
 }
 
 void StreamSelectorTable::resized()
@@ -1018,27 +1524,6 @@ void StreamSelectorTable::remove (const DataStream* stream)
 
     publishCurrentStreamAccessibilityValue();
 }
-
-// StreamEnableButton::StreamEnableButton (const String& name) : Button (name),
-//                                                               isEnabled (true)
-// {
-// }
-
-// void StreamEnableButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
-// {
-//     if (! getToggleState())
-//     {
-//         g.setColour (Colours::darkgrey);
-//         g.drawRect (0, 0, getWidth(), getHeight(), 1.0);
-//         g.drawLine (0, 0, getWidth(), getHeight(), 1.0);
-//         g.drawLine (0, getHeight(), getWidth(), 0, 1.0);
-
-//         return;
-//     }
-
-//     g.setColour (Colours::black);
-//     g.drawRect (0, 0, getWidth(), getHeight(), 1.0);
-// }
 
 ExpanderButton::ExpanderButton() : Button ("Expander")
 {

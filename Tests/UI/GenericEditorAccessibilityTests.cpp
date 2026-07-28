@@ -2,6 +2,7 @@
 #include "../../Source/Processors/Editors/ElectrodeButtons.h"
 #include "../../Source/Processors/Editors/StreamSelector.h"
 #include "../../Source/Processors/GenericProcessor/GenericProcessor.h"
+#include "../../Source/Processors/ProcessorGraph/ProcessorGraph.h"
 #include "../../Source/Processors/Settings/DataStream.h"
 #include "../../Source/UI/EditorViewport.h"
 #include "gtest/gtest.h"
@@ -99,6 +100,51 @@ public:
     }
 
     void process (AudioBuffer<float>&) override {}
+};
+
+class TestStreamToggleProcessor final
+    : public GenericProcessor
+{
+public:
+    TestStreamToggleProcessor()
+        : GenericProcessor (
+              "Test Processor")
+    {
+        setProcessorType (
+            Plugin::Processor::FILTER);
+    }
+
+    void process (
+        AudioBuffer<float>&) override
+    {
+    }
+
+    void parameterChangeRequest (
+        Parameter* parameter) override
+    {
+        parameterChangeUsedMessageThread.store (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        parameter->updateValue();
+        parameter->valueChanged();
+
+        if (parameter->getName()
+                == "enable_stream"
+            && parameter->getStreamId()
+                   > 0)
+        {
+            getEditor()
+                ->streamEnabledStateChanged (
+                    parameter->getStreamId(),
+                    static_cast<bool> (
+                        parameter->getValue()));
+        }
+    }
+
+    std::atomic<bool>
+        parameterChangeUsedMessageThread {
+            false
+        };
 };
 
 class TestDataStream final : public DataStream
@@ -1295,6 +1341,423 @@ TEST (GenericEditorAccessibilityTests,
         handler->getValueInterface()
             ->getCurrentValueAsString(),
         "Probe LFP (source 101)");
+}
+
+TEST (GenericEditorAccessibilityTests,
+      ExposesStreamProcessingAsMessageThreadToggle)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    auto processorGraph =
+        std::make_unique<
+            ProcessorGraph> (
+            true);
+    TestStreamToggleProcessor processor;
+    processor.setNodeId (100);
+    auto* editor =
+        dynamic_cast<GenericEditor*> (
+            processor.createEditor());
+    ASSERT_NE (editor, nullptr);
+    editor->setVisible (true);
+    editor->addToDesktop (0);
+    auto* selector =
+        dynamic_cast<
+            StreamSelectorTable*> (
+            findDescendantBySemanticId (
+                *editor,
+                "oe.processor.100.streams"));
+    ASSERT_NE (selector, nullptr);
+    TestDataStream stream ({ "Probe AP",
+                             "Neuropixels action-potential stream",
+                             "probe.ap",
+                             30000.0f,
+                             true },
+                           101);
+    stream.addProcessor (&processor);
+    stream.addParameter (
+        new BooleanParameter (
+            &stream,
+            Parameter::STREAM_SCOPE,
+            "enable_stream",
+            "Enable",
+            "Enable processing for this stream.",
+            true));
+
+    selector->add (&stream);
+    selector->finishedUpdate();
+
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            *selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    const auto getToggle =
+        [table]
+        {
+            return dynamic_cast<Button*> (
+                table->getCellComponent (
+                    StreamTableModel::Columns::
+                        ENABLED,
+                    0));
+        };
+    auto* toggle = getToggle();
+    ASSERT_NE (toggle, nullptr);
+    EXPECT_EQ (
+        toggle->getComponentID(),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.processing_enabled");
+    EXPECT_EQ (
+        toggle->getTitle(),
+        "Probe AP processing enabled");
+
+    auto* handler =
+        toggle->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::toggleButton);
+    ASSERT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    auto* enableStreamParameter =
+        stream.getParameter (
+            "enable_stream");
+    ASSERT_NE (
+        enableStreamParameter,
+        nullptr);
+    enableStreamParameter->setEnabled (
+        false);
+    table->updateContent();
+    toggle = getToggle();
+    ASSERT_NE (toggle, nullptr);
+    handler =
+        toggle->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_FALSE (
+        toggle->isEnabled());
+    EXPECT_FALSE (
+        handler->isEnabled());
+
+    enableStreamParameter->setEnabled (
+        true);
+    table->updateContent();
+    toggle = getToggle();
+    ASSERT_NE (toggle, nullptr);
+    handler =
+        toggle->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_TRUE (
+        toggle->isEnabled());
+    EXPECT_TRUE (
+        handler->isEnabled());
+    EXPECT_TRUE (
+        toggle->getAccessibilityHandler()
+            ->getCurrentState()
+            .isChecked());
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::toggle));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_FALSE (
+        static_cast<bool> (
+            stream.getParameter ("enable_stream")
+                ->getValue()));
+    EXPECT_FALSE (
+        selector->checkStream (
+            &stream));
+    toggle = getToggle();
+    ASSERT_NE (toggle, nullptr);
+    handler =
+        toggle->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        processor
+            .parameterChangeUsedMessageThread
+            .load());
+
+    processorGraph
+        ->getUndoManager()
+        ->undo();
+    EXPECT_TRUE (
+        static_cast<bool> (
+            stream.getParameter ("enable_stream")
+                ->getValue()));
+    EXPECT_TRUE (
+        getToggle()
+            ->getAccessibilityHandler()
+            ->getCurrentState()
+            .isChecked());
+
+    processorGraph
+        ->getUndoManager()
+        ->redo();
+    EXPECT_FALSE (
+        static_cast<bool> (
+            stream.getParameter ("enable_stream")
+                ->getValue()));
+    EXPECT_FALSE (
+        getToggle()
+            ->getAccessibilityHandler()
+            ->getCurrentState()
+            .isChecked());
+
+    stream.getParameter (
+              "enable_stream")
+        ->setNextValue (
+            true);
+    EXPECT_TRUE (
+        getToggle()
+            ->getAccessibilityHandler()
+            ->getCurrentState()
+            .isChecked());
+
+    std::thread externalWorker (
+        [selector,
+         streamId =
+             stream.getStreamId()]
+        {
+            selector
+                ->setStreamEnabledState (
+                    streamId,
+                    false);
+        });
+    externalWorker.join();
+    EXPECT_TRUE (
+        selector->checkStream (
+            &stream));
+
+    for (int attempt = 0;
+         attempt < 20
+             && selector->checkStream (
+                    &stream);
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    EXPECT_FALSE (
+        selector->checkStream (
+            &stream));
+    EXPECT_FALSE (
+        getToggle()
+            ->getAccessibilityHandler()
+            ->getCurrentState()
+            .isChecked());
+}
+
+TEST (GenericEditorAccessibilityTests,
+      StaleStreamToggleCannotFollowAReusedCell)
+{
+    ScopedGenericEditorTestApplication application;
+    ASSERT_TRUE (application.wasInitialised());
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    auto processorGraph =
+        std::make_unique<
+            ProcessorGraph> (
+            true);
+    TestStreamToggleProcessor processor;
+    processor.setNodeId (100);
+    auto* editor =
+        dynamic_cast<GenericEditor*> (
+            processor.createEditor());
+    ASSERT_NE (editor, nullptr);
+    editor->setVisible (true);
+    editor->addToDesktop (0);
+    auto* selector =
+        dynamic_cast<
+            StreamSelectorTable*> (
+            findDescendantBySemanticId (
+                *editor,
+                "oe.processor.100.streams"));
+    ASSERT_NE (selector, nullptr);
+    TestDataStream first ({ "Probe AP",
+                            "First probe stream",
+                            "probe.ap",
+                            30000.0f,
+                            true },
+                          101);
+    TestDataStream second ({ "Probe LFP",
+                             "Second probe stream",
+                             "probe.lfp",
+                             2500.0f,
+                             true },
+                           102);
+    for (auto* stream :
+         { &first,
+           &second })
+    {
+        stream->addProcessor (
+            &processor);
+        stream->addParameter (
+            new BooleanParameter (
+                stream,
+                Parameter::STREAM_SCOPE,
+                "enable_stream",
+                "Enable",
+                "Enable processing for this stream.",
+                true));
+    }
+
+    selector->add (&first);
+    selector->finishedUpdate();
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            *selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    auto* originalToggle =
+        table->getCellComponent (
+            StreamTableModel::Columns::ENABLED,
+            0);
+    ASSERT_NE (originalToggle, nullptr);
+    auto* originalHandler =
+        originalToggle
+            ->getAccessibilityHandler();
+    ASSERT_NE (originalHandler, nullptr);
+    auto staleActions =
+        originalHandler->getActions();
+
+    selector->beginUpdate();
+    selector->add (&second);
+    selector->finishedUpdate();
+    auto* reusedToggle =
+        table->getCellComponent (
+            StreamTableModel::Columns::ENABLED,
+            0);
+    ASSERT_EQ (
+        reusedToggle,
+        originalToggle);
+    EXPECT_EQ (
+        reusedToggle->getComponentID(),
+        "oe.processor.100.streams.table.source_102.stream_probe_lfp.processing_enabled");
+
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            invoked.store (
+                staleActions.invoke (
+                    AccessibilityActionType::toggle));
+        });
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_TRUE (
+        static_cast<bool> (
+            second.getParameter (
+                      "enable_stream")
+                ->getValue()));
+    EXPECT_TRUE (
+        selector->checkStream (
+            &second));
+
+    auto queuedAfterDestruction =
+        reusedToggle
+            ->getAccessibilityHandler()
+            ->getActions();
+    selector->beginUpdate();
+    selector->finishedUpdate();
+    EXPECT_EQ (
+        table->getCellComponent (
+            StreamTableModel::Columns::ENABLED,
+            0),
+        nullptr);
+
+    invoked.store (false);
+    std::thread teardownWorker (
+        [&]
+        {
+            invoked.store (
+                queuedAfterDestruction.invoke (
+                    AccessibilityActionType::toggle));
+        });
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    teardownWorker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_TRUE (
+        static_cast<bool> (
+            second.getParameter (
+                      "enable_stream")
+                ->getValue()));
+}
+
+TEST (GenericEditorAccessibilityTests,
+      OmitsStreamProcessingToggleForNonFilters)
+{
+    MessageManager::getInstance();
+    MessageManagerLock lock;
+    TestStreamProcessor processor (
+        100,
+        Plugin::Processor::SOURCE);
+    InspectableGenericEditor editor (&processor);
+    auto& selector = editor.getStreamSelector();
+    TestDataStream stream ({ "Probe AP",
+                             "Neuropixels action-potential stream",
+                             "probe.ap",
+                             30000.0f,
+                             true },
+                           101);
+
+    selector.add (&stream);
+    selector.finishedUpdate();
+
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    EXPECT_EQ (
+        table->getCellComponent (
+            StreamTableModel::Columns::ENABLED,
+            0),
+        nullptr);
 }
 
 TEST (GenericEditorAccessibilityTests, SelectingStreamRowUpdatesEditor)

@@ -286,7 +286,7 @@ public:
     void setEnabled (bool shouldBeEnabled);
 
     /** Returns true if the parameter is enabled */
-    bool isEnabled() { return isEnabledFlag; }
+    bool isEnabled() const { return isEnabledFlag; }
 
     /** Returns the colour any visualization of this parameter should use */
     Colour getColour();
