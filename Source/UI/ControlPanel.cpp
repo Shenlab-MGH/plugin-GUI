@@ -39,8 +39,11 @@ const int SIZE_AUDIO_EDITOR_MAX_WIDTH = 500;
 struct MessageThreadToggleButtonAccessibilityState
 {
     explicit MessageThreadToggleButtonAccessibilityState (
-        bool initialState)
-        : publishedState (initialState)
+        bool initialState,
+        bool publishesExpandedStateToUse = false)
+        : publishedState (initialState),
+          publishesExpandedState (
+              publishesExpandedStateToUse)
     {
     }
 
@@ -54,6 +57,11 @@ struct MessageThreadToggleButtonAccessibilityState
     bool getPublishedState() const
     {
         return publishedState.load();
+    }
+
+    bool shouldPublishExpandedState() const
+    {
+        return publishesExpandedState;
     }
 
     void attach (
@@ -83,6 +91,7 @@ struct MessageThreadToggleButtonAccessibilityState
 
 private:
     std::atomic<bool> publishedState;
+    const bool publishesExpandedState;
     Button* button = nullptr;
 };
 
@@ -155,6 +164,18 @@ public:
             AccessibilityHandler::getCurrentState()
                 .withCheckable();
 
+        if (state->shouldPublishExpandedState())
+        {
+            accessibleState =
+                state->getPublishedState()
+                    ? accessibleState
+                          .withExpandable()
+                          .withExpanded()
+                    : accessibleState
+                          .withExpandable()
+                          .withCollapsed();
+        }
+
         return state->getPublishedState()
                    ? accessibleState.withChecked()
                    : accessibleState;
@@ -194,10 +215,18 @@ private:
                     });
             };
 
-        return AccessibilityActions()
-            .addAction (
-                AccessibilityActionType::toggle,
+        auto actions =
+            AccessibilityActions()
+                .addAction (
+                    AccessibilityActionType::toggle,
+                    toggle);
+        if (state->shouldPublishExpandedState())
+        {
+            actions = actions.addAction (
+                AccessibilityActionType::showMenu,
                 toggle);
+        }
+        return actions;
     }
 
     std::shared_ptr<
@@ -401,11 +430,43 @@ void ForceNewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool i
 }
 
 RecordingOptionsButton::RecordingOptionsButton()
+    : accessibilityState (
+          std::make_shared<
+              MessageThreadToggleButtonAccessibilityState> (
+              false,
+              true))
 {
+    accessibilityState->attach (
+        this);
     applySemanticMetadata (*this,
                            "oe.control.recording.options",
                            "Recording options",
                            "Show or hide recording options.");
+}
+
+RecordingOptionsButton::
+    ~RecordingOptionsButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+RecordingOptionsButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        MessageThreadToggleButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void RecordingOptionsButton::
+    buttonStateChanged()
+{
+    CustomArrowButton::buttonStateChanged();
+    accessibilityState
+        ->synchronise (
+            getToggleState());
 }
 
 FilenameEditorButton::FilenameEditorButton()

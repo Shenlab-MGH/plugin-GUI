@@ -33,6 +33,18 @@ public:
         createAccessibilityHandler;
 };
 
+class InspectableRecordingOptionsButton final
+    : public RecordingOptionsButton
+{
+public:
+    using RecordingOptionsButton::
+        createAccessibilityHandler;
+
+    void paint (Graphics&) override
+    {
+    }
+};
+
 class ThreadRecordingButtonListener final : public Button::Listener
 {
 public:
@@ -810,6 +822,123 @@ TEST (ControlPanelAccessibilityTests,
     EXPECT_FALSE (
         handler->getCurrentState()
             .isChecked());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+}
+
+TEST (ControlPanelAccessibilityTests,
+      RecordingOptionsTogglePublishesExpandedOnMessageThread)
+{
+    auto* messageManager =
+        MessageManager::getInstance();
+    MessageManagerLock lock;
+    InspectableRecordingOptionsButton
+        recordingOptions;
+    ThreadRecordingButtonListener listener;
+    recordingOptions.addListener (
+        &listener);
+
+    auto handler =
+        recordingOptions
+            .createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        handler->getActions().contains (
+            AccessibilityActionType::showMenu));
+    EXPECT_FALSE (
+        handler->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpandable());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isCollapsed());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isExpanded());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Off");
+
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> invoked { false };
+    std::thread worker (
+        [&]
+        {
+            workerEntered.store (true);
+            invoked.store (
+                handler->getActions().invoke (
+                    AccessibilityActionType::showMenu));
+        });
+
+    while (! workerEntered.load())
+        std::this_thread::yield();
+
+    EXPECT_EQ (
+        listener.callCount.load(),
+        0);
+
+    for (int attempt = 0;
+         attempt < 20
+             && ! invoked.load();
+         ++attempt)
+    {
+        messageManager->runDispatchLoopUntil (
+            10);
+    }
+    worker.join();
+
+    EXPECT_TRUE (invoked.load());
+    EXPECT_EQ (
+        listener.callCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener.usedMessageThread.load());
+    EXPECT_TRUE (
+        recordingOptions
+            .getToggleState());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpandable());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpanded());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "On");
+
+    recordingOptions.setToggleState (
+        false,
+        dontSendNotification);
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isChecked());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isExpandable());
+    EXPECT_TRUE (
+        handler->getCurrentState()
+            .isCollapsed());
+    EXPECT_FALSE (
+        handler->getCurrentState()
+            .isExpanded());
     EXPECT_EQ (
         handler->getValueInterface()
             ->getCurrentValueAsString(),

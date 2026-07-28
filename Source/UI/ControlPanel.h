@@ -104,6 +104,18 @@ class TESTABLE RecordingOptionsButton : public CustomArrowButton
 {
 public:
     RecordingOptionsButton();
+    ~RecordingOptionsButton() override;
+
+    /** Keeps UI Automation toggle actions on the JUCE message thread. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
+protected:
+    void buttonStateChanged() override;
+
+private:
+    std::shared_ptr<
+        MessageThreadToggleButtonAccessibilityState>
+        accessibilityState;
 };
 
 /** 
