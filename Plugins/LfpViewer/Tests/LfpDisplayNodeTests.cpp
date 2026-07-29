@@ -268,6 +268,7 @@ enum class LfpWindowsUiaAction
 struct LfpWindowsUiaInvokeResult
 {
     HRESULT invokeResult = E_PENDING;
+    HRESULT focusResult = E_PENDING;
     HRESULT invokePatternResult =
         E_PENDING;
     HRESULT togglePatternResult =
@@ -680,6 +681,10 @@ invokeLfpWindowsUiaControl (
             == LfpWindowsUiaAction::
                    expand)
         {
+            output.focusResult =
+                element->SetFocus();
+            if (FAILED (output.focusResult))
+                return finish (output.focusResult);
             result =
                 expandCollapsePattern
                     ->Expand();
@@ -7149,6 +7154,10 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
     EXPECT_TRUE (subtractOffset->getToggleState());
 
+    writeFromWorker ("OFF");
+    EXPECT_EQ (spikeRaster->getText(), "OFF");
+    EXPECT_FALSE (display->getSpikeRasterPlotting());
+    EXPECT_FALSE (subtractOffset->getToggleState());
     writeFromWorker ("-100");
     EXPECT_EQ (spikeRaster->getText(), "-100");
     EXPECT_EQ (value->getCurrentValueAsString(), "-100");
@@ -7405,6 +7414,7 @@ TEST_F (LfpDisplayNodeTests,
     const auto expandResult =
         runAction (id, LfpWindowsUiaAction::expand);
     EXPECT_EQ (expandResult.invokeResult, S_OK);
+    EXPECT_EQ (expandResult.focusResult, S_OK);
     EXPECT_TRUE (spikeRaster->isPopupActive());
     MessageManager::getInstance()
         ->runDispatchLoopUntil (30);
@@ -7428,6 +7438,15 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (spikeRaster->getText(), "-125");
     EXPECT_TRUE (display->getSpikeRasterPlotting());
     EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
+    const auto offBeforePresetResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "OFF");
+    EXPECT_EQ (offBeforePresetResult.invokeResult, S_OK);
+    EXPECT_EQ (spikeRaster->getText(), "OFF");
+    EXPECT_FALSE (display->getSpikeRasterPlotting());
+    EXPECT_FALSE (subtractOffset->getToggleState());
     const auto presetValueResult =
         runAction (
             id,
@@ -7439,9 +7458,19 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_TRUE (display->getSpikeRasterPlotting());
     EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -150.0f);
     EXPECT_TRUE (subtractOffset->getToggleState());
+    const auto offAfterPresetResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "OFF");
+    EXPECT_EQ (offAfterPresetResult.invokeResult, S_OK);
+    EXPECT_EQ (spikeRaster->getText(), "OFF");
+    EXPECT_FALSE (display->getSpikeRasterPlotting());
+    EXPECT_FALSE (subtractOffset->getToggleState());
     const auto reexpandResult =
         runAction (id, LfpWindowsUiaAction::expand);
     EXPECT_EQ (reexpandResult.invokeResult, S_OK);
+    EXPECT_EQ (reexpandResult.focusResult, S_OK);
     EXPECT_TRUE (spikeRaster->isPopupActive());
 
     spikeRaster->setEnabled (false);
