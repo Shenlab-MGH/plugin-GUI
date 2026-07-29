@@ -5516,6 +5516,19 @@ TEST_F (LfpDisplayNodeTests,
             ->streamSelection
             ->getText(),
         "Ambiguous data streams");
+    EXPECT_EQ (
+        splitter
+            ->streamSelection
+            ->getNumItems(),
+        0);
+    PopupMenu::MenuItemIterator
+        ambiguousChoice (
+            *splitter
+                 ->streamSelection
+                 ->getRootMenu(),
+            false);
+    EXPECT_FALSE (
+        ambiguousChoice.next());
 }
 
 TEST_F (LfpDisplayNodeTests,

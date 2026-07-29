@@ -1272,6 +1272,19 @@ void LfpDisplaySplitter::updateSettings()
 
     Array<DisplayBuffer*> availableBuffers = processor->getDisplayBuffers();
 
+    if (hasAmbiguousStreamKeys (
+            availableBuffers))
+    {
+        LOGE (
+            "LFP Viewer cannot select a data stream because multiple streams have the same stable key.");
+        streamSelection->clear (
+            dontSendNotification);
+        clearStreamSelection (
+            "Ambiguous data streams");
+        isUpdating = false;
+        return;
+    }
+
     streamSelection->clear (dontSendNotification);
 
     for (auto buffer : availableBuffers)
