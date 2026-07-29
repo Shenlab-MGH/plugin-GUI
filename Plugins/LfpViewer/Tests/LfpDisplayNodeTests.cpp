@@ -7497,6 +7497,576 @@ TEST_F (LfpDisplayNodeTests,
 #endif
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesClipWarningForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const std::array<String, 2> choices {
+        "OFF",
+        "ON"
+    };
+    const std::array<String, 2> choiceIds {
+        "off",
+        "on"
+    };
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".clip_warning";
+        auto* clipWarning =
+            dynamic_cast<MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (clipWarning, nullptr)
+            << id;
+        EXPECT_EQ (
+            clipWarning->getName(),
+            "Clip Warning");
+        EXPECT_EQ (
+            clipWarning->getNumItems(),
+            static_cast<int> (choices.size()));
+        for (int choiceIndex = 0;
+             choiceIndex
+             < static_cast<int> (choices.size());
+             ++choiceIndex)
+        {
+            EXPECT_EQ (
+                clipWarning->getItemText (
+                    choiceIndex),
+                choices[choiceIndex]);
+        }
+
+        int choiceIndex = 0;
+        for (PopupMenu::MenuItemIterator iterator (
+                 *clipWarning->getRootMenu(),
+                 false);
+             iterator.next();)
+        {
+            ASSERT_LT (
+                choiceIndex,
+                static_cast<int> (
+                    choiceIds.size()));
+            EXPECT_EQ (
+                iterator.getItem().accessibilityId,
+                id
+                    + ".choice."
+                    + choiceIds[choiceIndex]);
+            ++choiceIndex;
+        }
+        EXPECT_EQ (
+            choiceIndex,
+            static_cast<int> (choiceIds.size()));
+
+        auto* handler =
+            clipWarning->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (displayNumber)
+                + " clip warning");
+        const auto description =
+            "Choose whether LFP display "
+            + String (displayNumber)
+            + " marks samples clipped by the current display range: OFF hides clip markers; ON draws a white marker at the clipped edge. This affects display rendering only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        auto* value =
+            handler->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_FALSE (value->isReadOnly());
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            "OFF");
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::press));
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::showMenu));
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::expand));
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::collapse));
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::LfpDisplayOptions> (
+                *clipWarning)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    std::vector<Label*> labels;
+    collectLfpDescendants (*canvas, labels);
+    EXPECT_EQ (
+        std::count_if (
+            labels.begin(),
+            labels.end(),
+            [] (const Label* label)
+            {
+                return label->getName()
+                       == "ClipWarningLabel";
+            }),
+        3);
+    for (const auto* label : labels)
+    {
+        if (label->getName()
+            == "ClipWarningLabel")
+        {
+            EXPECT_FALSE (label->isAccessible());
+        }
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ClipWarningWorkerValueTracksRenderingAndSurvivesTeardown)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.clip_warning";
+    auto* clipWarning =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    ASSERT_NE (clipWarning, nullptr);
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (split, nullptr);
+    auto retainedHandler =
+        clipWarning->createAccessibilityHandler();
+    ASSERT_NE (retainedHandler, nullptr);
+    auto* value =
+        retainedHandler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+    const auto retainedActions =
+        retainedHandler->getActions();
+
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    LfpThreadTrackingComboBoxListener listener;
+    clipWarning->addListener (&listener);
+    std::atomic<bool> workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            value->setValueAsString ("ON");
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (worker, workerReturned);
+    clipWarning->removeListener (&listener);
+
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (
+        listener.callbackUsedMessageThread.load());
+    EXPECT_EQ (clipWarning->getSelectedId(), 2);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "ON");
+    EXPECT_TRUE (split->drawClipWarning);
+
+    value->setValueAsString ("OFF");
+    EXPECT_EQ (clipWarning->getSelectedId(), 1);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawClipWarning);
+
+    value->setValueAsString ("unsupported");
+    EXPECT_EQ (clipWarning->getSelectedId(), 1);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawClipWarning);
+
+    clipWarning->setEnabled (false);
+    value->setValueAsString ("ON");
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    EXPECT_EQ (clipWarning->getSelectedId(), 1);
+    EXPECT_FALSE (split->drawClipWarning);
+
+    canvas.reset();
+    value->setValueAsString ("ON");
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    workerReturned.store (false);
+    bool staleActionFound = false;
+    std::thread staleWorker (
+        [&]
+        {
+            staleActionFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::press);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        workerReturned);
+    EXPECT_TRUE (staleActionFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ClipWarningValueSurvivesZeroChannelsBufferRemovalAndXmlRestore)
+{
+    auto zeroChannelTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (zeroChannelProcessor->getNodeId())
+        + ".lfp.display_1.clip_warning";
+    auto* clipWarning =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    ASSERT_NE (clipWarning, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::LfpDisplayOptions> (
+            *clipWarning);
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (options, nullptr);
+    ASSERT_NE (split, nullptr);
+    auto* value =
+        clipWarning
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    value->setValueAsString ("ON");
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "ON");
+    EXPECT_TRUE (split->drawClipWarning);
+    canvas->removeBufferForDisplay (0);
+    value->setValueAsString ("OFF");
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawClipWarning);
+
+    value->setValueAsString ("ON");
+    XmlElement onRoot ("ROOT");
+    options->saveParameters (&onRoot);
+    auto* onPane =
+        onRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (onPane, nullptr);
+    EXPECT_EQ (
+        onPane->getIntAttribute (
+            "clipWarning"),
+        2);
+
+    value->setValueAsString ("OFF");
+    LfpThreadTrackingComboBoxListener listener;
+    clipWarning->addListener (&listener);
+    options->loadParameters (&onRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "ON");
+    EXPECT_TRUE (split->drawClipWarning);
+
+    XmlElement offRoot (onRoot);
+    auto* offPane =
+        offRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (offPane, nullptr);
+    offPane->setAttribute ("clipWarning", 1);
+    options->loadParameters (&offRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawClipWarning);
+
+    XmlElement missingRoot (onRoot);
+    auto* missingPane =
+        missingRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (missingPane, nullptr);
+    missingPane->removeAttribute ("clipWarning");
+    options->loadParameters (&missingRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawClipWarning);
+
+    XmlElement malformedRoot (onRoot);
+    auto* malformedPane =
+        malformedRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (malformedPane, nullptr);
+    malformedPane->setAttribute (
+        "clipWarning",
+        999);
+    options->loadParameters (&malformedRoot);
+    clipWarning->removeListener (&listener);
+    EXPECT_EQ (listener.callbackCount.load(), 0);
+    EXPECT_EQ (clipWarning->getSelectedId(), 1);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawClipWarning);
+}
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWritesAndSelectsClipWarning)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix + "1.clip_warning";
+    auto* clipWarning =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    ASSERT_NE (clipWarning, nullptr);
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (split, nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto runAction =
+        [&] (StringRef targetId,
+             LfpWindowsUiaAction action,
+             StringRef newValue = {})
+    {
+        LfpWindowsUiaInvokeResult result;
+        std::atomic<bool> workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (targetId)
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (newValue)
+                                .toWideCharPointer()));
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return result;
+    };
+
+    const auto description =
+        L"Choose whether LFP display 1 marks samples clipped by the current display range: OFF hides clip markers; ON draws a white marker at the clipped edge. This affects display rendering only; acquisition and recording are unaffected.";
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 clip warning");
+    EXPECT_EQ (
+        initialResult.help,
+        description);
+    EXPECT_TRUE (
+        initialResult.valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult.valueReadOnly,
+        FALSE);
+    EXPECT_TRUE (
+        initialResult
+            .expandCollapsePatternAvailable);
+    EXPECT_TRUE (
+        initialResult.invokePatternAvailable);
+    EXPECT_EQ (initialResult.value, L"OFF");
+
+    const auto setValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "ON");
+    EXPECT_EQ (
+        setValueResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (setValueResult.value, L"ON");
+    EXPECT_EQ (clipWarning->getSelectedId(), 2);
+    EXPECT_TRUE (split->drawClipWarning);
+
+    const auto offResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "OFF");
+    EXPECT_EQ (offResult.invokeResult, S_OK);
+    EXPECT_EQ (offResult.value, L"OFF");
+    EXPECT_FALSE (split->drawClipWarning);
+
+    const auto expandResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::expand);
+    EXPECT_EQ (
+        expandResult.focusResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.invokeResult,
+        S_OK);
+    EXPECT_TRUE (clipWarning->isPopupActive());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    const auto selectResult =
+        runAction (
+            id + ".choice.on",
+            LfpWindowsUiaAction::select);
+    EXPECT_EQ (
+        selectResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (clipWarning->getSelectedId(), 2);
+    EXPECT_TRUE (split->drawClipWarning);
+
+    clipWarning->setEnabled (false);
+    const auto disabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "OFF");
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    clipWarning->setEnabled (true);
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix + "2.clip_warning",
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
+        E_FAIL);
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (
+        closedDrawerResult.invokeResult,
+        E_FAIL);
+}
+#endif
+
+TEST_F (LfpDisplayNodeTests,
         ColourGroupingWorkerSelectsByShankOnMessageThread)
 {
     auto canvas =

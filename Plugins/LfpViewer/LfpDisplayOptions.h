@@ -377,7 +377,9 @@ private:
     std::unique_ptr<ComboBox> saturationWarningSelection; // optionally raise hell if the actual data is saturating
     std::unique_ptr<Label> saturationWarningLabel;
 
-    std::unique_ptr<ComboBox> clipWarningSelection; // optinally draw (subtle) warning if data is clipped in display
+    std::unique_ptr<
+        MessageThreadComboBox>
+        clipWarningSelection; // optinally draw (subtle) warning if data is clipped in display
     std::unique_ptr<Label> clipWarningLabel;
 
     // CHANNELS SECTION

@@ -1626,16 +1626,56 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     clipThresholds.add ("OFF");
     clipThresholds.add ("ON");
 
-    clipWarningSelection = std::make_unique<ComboBox> ("Clip Warning");
+    clipWarningSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    clipWarningSelection->setName (
+        "Clip Warning");
+    const auto clipWarningDescription =
+        "Choose whether LFP display "
+        + String (displayNumber)
+        + " marks samples clipped by the current display range: OFF hides clip markers; ON draws a white marker at the clipped edge. This affects display rendering only; acquisition and recording are unaffected.";
+    applyLfpDisplayParameterMetadata (
+        *clipWarningSelection,
+        *processor,
+        displayNumber,
+        "clip_warning",
+        "LFP display "
+            + String (displayNumber)
+            + " clip warning",
+        clipWarningDescription);
     for (int i = 0; i < clipThresholds.size(); i++)
         clipWarningSelection->addItem (clipThresholds[i], i + 1);
+    const std::array<String, 2>
+        clipWarningChoiceIds {
+            "off",
+            "on"
+        };
+    int clipWarningChoiceIndex = 0;
+    for (PopupMenu::MenuItemIterator iterator (
+             *clipWarningSelection->getRootMenu(),
+             false);
+         iterator.next();)
+    {
+        iterator.getItem().accessibilityId =
+            clipWarningSelection->getComponentID()
+            + ".choice."
+            + clipWarningChoiceIds[
+                  clipWarningChoiceIndex++];
+    }
     clipWarningSelection->setSelectedId (1, dontSendNotification);
     clipWarningSelection->addListener (this);
     clipWarningSelection->setEditableText (false);
+    clipWarningSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
     extendedOptions->addAndMakeVisible (clipWarningSelection.get());
+    clipWarningSelection
+        ->synchroniseAccessibilityState();
 
     clipWarningLabel = std::make_unique<Label> ("ClipWarningLabel", "Clip warning:");
     clipWarningLabel->setFont (labelFont);
+    clipWarningLabel->setAccessible (false);
     clipWarningLabel->attachToComponent (clipWarningSelection.get(), true);
     extendedOptions->addAndMakeVisible (clipWarningLabel.get());
 
@@ -2721,6 +2761,29 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         spikeRasterSelection
             ->synchroniseAccessibilityState();
     }
+
+    if (cb == clipWarningSelection.get())
+    {
+        const auto selectedId =
+            cb->getSelectedId() == 2
+                ? 2
+                : 1;
+        if (cb->getSelectedId()
+            != selectedId)
+        {
+            cb->setSelectedId (
+                selectedId,
+                dontSendNotification);
+        }
+
+        canvasSplit->drawClipWarning =
+            selectedId == 2;
+        canvasSplit->redraw();
+        clipWarningSelection
+            ->synchroniseAccessibilityState();
+        return;
+    }
+
     if (canvasSplit->getNumChannels() == 0)
         return;
 
@@ -2880,19 +2943,6 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         else
         {
             canvasSplit->drawSaturationWarning = false;
-        }
-
-        canvasSplit->redraw();
-    }
-    else if (cb == clipWarningSelection.get())
-    {
-        if (cb->getSelectedId() == 1)
-        {
-            canvasSplit->drawClipWarning = false;
-        }
-        else
-        {
-            canvasSplit->drawClipWarning = true;
         }
 
         canvasSplit->redraw();
@@ -3297,10 +3347,18 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
                 ->synchroniseAccessibilityState();
 
             // CLIP WARNING
-            int clipWarning = xmlNode->getIntAttribute ("clipWarning", 1);
+            const int clipWarning =
+                xmlNode->getIntAttribute (
+                    "clipWarning",
+                    1)
+                        == 2
+                    ? 2
+                    : 1;
             clipWarningSelection->setSelectedId (clipWarning, dontSendNotification);
-            if (clipWarning == 2)
-                canvasSplit->drawClipWarning = true;
+            canvasSplit->drawClipWarning =
+                clipWarning == 2;
+            clipWarningSelection
+                ->synchroniseAccessibilityState();
 
             // SATURATION WARNING
             saturationWarningSelection->setSelectedId (xmlNode->getIntAttribute ("satWarning"), dontSendNotification);
