@@ -111,6 +111,48 @@ LfpStableChannelIdentity::
             runtimeUuid));
 }
 
+std::shared_ptr<
+    const LfpStableChannelIdentity>
+LfpStableChannelIdentityBindingSlot::
+    get() const noexcept
+{
+    return std::atomic_load_explicit (
+        &current,
+        std::memory_order_acquire);
+}
+
+void LfpStableChannelIdentityBindingSlot::
+    revoke() noexcept
+{
+    const auto snapshot = get();
+    if (snapshot != nullptr)
+    {
+        snapshot
+            ->revokeAgentActionability();
+    }
+    std::atomic_store_explicit (
+        &current,
+        std::shared_ptr<
+            const LfpStableChannelIdentity>(),
+        std::memory_order_release);
+}
+
+void LfpStableChannelIdentityBindingSlot::
+    publishSuccessor (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            blueprint)
+{
+    revoke();
+    const auto successor =
+        blueprint
+            ->createSuccessorGeneration();
+    std::atomic_store_explicit (
+        &current,
+        successor,
+        std::memory_order_release);
+}
+
 const LfpStableChannelKey*
 LfpStableChannelIdentity::
     getStableChannelKey() const noexcept

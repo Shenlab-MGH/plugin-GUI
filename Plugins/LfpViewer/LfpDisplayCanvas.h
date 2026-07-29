@@ -154,6 +154,10 @@ public:
     bool optionsDrawerIsOpen;
 
 private:
+    void setDisplaySplitVisible (
+        int splitIndex,
+        bool shouldBeVisible);
+
     LfpDisplayNode* processor;
 
     OwnedArray<LfpDisplaySplitter> displaySplits;
@@ -248,6 +252,9 @@ public:
 
     /** Whether this pane can currently expose agent mutation targets. */
     bool isIdentityTargetAvailable() const noexcept;
+
+    /** Revokes current generations before production pane state mutation. */
+    void prepareIdentityTargetUnavailable();
 
     void visibilityChanged() override;
     void enablementChanged() override;

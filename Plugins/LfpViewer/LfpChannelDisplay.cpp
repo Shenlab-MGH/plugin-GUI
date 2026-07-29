@@ -58,7 +58,6 @@ LfpChannelDisplay::LfpChannelDisplay (LfpDisplaySplitter* c, LfpDisplay* d, LfpD
 
 LfpChannelDisplay::~LfpChannelDisplay()
 {
-    invalidateStableChannelIdentity();
 }
 
 void LfpChannelDisplay::resized()
@@ -91,32 +90,15 @@ const String& LfpChannelDisplay::getUnits() const
 }
 
 void LfpChannelDisplay::
-    bindStableChannelIdentity (
+    bindStableChannelIdentitySlot (
         std::shared_ptr<
-            const LfpStableChannelIdentity>
-            identity)
+            LfpStableChannelIdentityBindingSlot>
+            slot)
 {
     std::atomic_store_explicit (
-        &stableChannelIdentity,
+        &stableChannelIdentityBindingSlot,
         std::move (
-            identity),
-        std::memory_order_release);
-}
-
-void LfpChannelDisplay::
-    invalidateStableChannelIdentity()
-{
-    const auto identity =
-        getStableChannelIdentity();
-    if (identity != nullptr)
-    {
-        identity
-            ->revokeAgentActionability();
-    }
-    std::atomic_store_explicit (
-        &stableChannelIdentity,
-        std::shared_ptr<
-            const LfpStableChannelIdentity>(),
+            slot),
         std::memory_order_release);
 }
 
@@ -125,9 +107,13 @@ std::shared_ptr<
 LfpChannelDisplay::
     getStableChannelIdentity() const noexcept
 {
-    return std::atomic_load_explicit (
-        &stableChannelIdentity,
-        std::memory_order_acquire);
+    const auto slot =
+        std::atomic_load_explicit (
+            &stableChannelIdentityBindingSlot,
+            std::memory_order_acquire);
+    return slot != nullptr
+        ? slot->get()
+        : nullptr;
 }
 
 void LfpChannelDisplay::setEnabledState (bool state)
@@ -140,11 +126,18 @@ void LfpChannelDisplay::setEnabledState (bool state)
     if (isEnabled == state)
         return;
 
+    if (! state
+        && display != nullptr)
+    {
+        display
+            ->revokeStableChannelIdentityForChannel (
+                chan);
+    }
     isEnabled = state;
     if (display != nullptr)
     {
         display
-            ->refreshStableChannelIdentityAvailability();
+            ->requestStableChannelIdentityAvailabilityRefresh();
     }
 }
 
@@ -153,11 +146,18 @@ void LfpChannelDisplay::setHidden (bool isHidden_)
     if (isHidden == isHidden_)
         return;
 
+    if (isHidden_
+        && display != nullptr)
+    {
+        display
+            ->revokeStableChannelIdentityForChannel (
+                chan);
+    }
     isHidden = isHidden_;
     if (display != nullptr)
     {
         display
-            ->refreshStableChannelIdentityAvailability();
+            ->requestStableChannelIdentityAvailabilityRefresh();
     }
 }
 
@@ -167,7 +167,7 @@ void LfpChannelDisplay::visibilityChanged()
     if (display != nullptr)
     {
         display
-            ->refreshStableChannelIdentityAvailability();
+            ->requestStableChannelIdentityAvailabilityRefresh();
     }
 }
 
@@ -177,7 +177,7 @@ void LfpChannelDisplay::enablementChanged()
     if (display != nullptr)
     {
         display
-            ->refreshStableChannelIdentityAvailability();
+            ->requestStableChannelIdentityAvailabilityRefresh();
     }
 }
 

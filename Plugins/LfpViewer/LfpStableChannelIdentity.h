@@ -26,6 +26,7 @@ namespace LfpViewer
 {
 class DisplayBuffer;
 class LfpStableChannelIdentity;
+class LfpStableChannelIdentityBindingSlot;
 
 /**
     Resolves copied channel snapshots against the complete current stream set.
@@ -96,6 +97,10 @@ public:
 
     bool isAgentActionable() const noexcept;
 
+private:
+    friend class LfpDisplay;
+    friend class LfpStableChannelIdentityBindingSlot;
+
     /** Permanently revokes this component generation. */
     void revokeAgentActionability() const noexcept;
 
@@ -104,7 +109,6 @@ public:
         const LfpStableChannelIdentity>
     createSuccessorGeneration() const;
 
-private:
     friend TESTABLE std::vector<
         std::shared_ptr<
             const LfpStableChannelIdentity>>
@@ -144,6 +148,32 @@ private:
     const std::shared_ptr<
         GenerationState>
         generationState;
+};
+
+/**
+    One atomic publication point shared by a channel and its info component.
+
+    Mutation is restricted to LfpDisplay; providers can only load snapshots.
+ */
+class LfpStableChannelIdentityBindingSlot final
+{
+public:
+    std::shared_ptr<
+        const LfpStableChannelIdentity>
+    get() const noexcept;
+
+private:
+    friend class LfpDisplay;
+
+    void revoke() noexcept;
+    void publishSuccessor (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            blueprint);
+
+    std::shared_ptr<
+        const LfpStableChannelIdentity>
+        current;
 };
 
 inline bool LfpStableChannelIdentity::

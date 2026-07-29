@@ -195,6 +195,7 @@ void LfpDisplay::updateRange (int i)
 
 void LfpDisplay::setNumChannels (int newChannelCount)
 {
+    beginStableChannelIdentityBulkMutation();
     invalidateStableChannelIdentities();
 
     if (numChans > newChannelCount)
@@ -207,6 +208,18 @@ void LfpDisplay::setNumChannels (int newChannelCount)
 
         channels.removeLast (numChans - newChannelCount);
         channelInfo.removeLast (numChans - newChannelCount);
+    }
+    stableChannelIdentityBindingSlots.resize (
+        static_cast<size_t> (
+            newChannelCount));
+    if (savedChannelState.size()
+        < newChannelCount)
+    {
+        savedChannelState.insertMultiple (
+            savedChannelState.size(),
+            true,
+            newChannelCount
+                - savedChannelState.size());
     }
 
     totalHeight = 0;
@@ -236,6 +249,23 @@ void LfpDisplay::setNumChannels (int newChannelCount)
                 lfpInfo = channelInfo[i];
             }
 
+            auto& identitySlot =
+                stableChannelIdentityBindingSlots[
+                    static_cast<size_t> (
+                        i)];
+            if (identitySlot == nullptr)
+            {
+                identitySlot =
+                    std::make_shared<
+                        LfpStableChannelIdentityBindingSlot>();
+            }
+            lfpChan
+                ->bindStableChannelIdentitySlot (
+                    identitySlot);
+            lfpInfo
+                ->bindStableChannelIdentitySlot (
+                    identitySlot);
+
             lfpChan->setChannelHeight (canvasSplit->getChannelHeight());
             lfpInfo->setChannelHeight (canvasSplit->getChannelHeight());
 
@@ -250,6 +280,7 @@ void LfpDisplay::setNumChannels (int newChannelCount)
     }
 
     numChans = newChannelCount;
+    endStableChannelIdentityBulkMutation();
 }
 
 void LfpDisplay::setColours()
@@ -343,20 +374,25 @@ void LfpDisplay::setColours()
 void LfpDisplay::
     invalidateStableChannelIdentities()
 {
-    for (auto* channel :
-         channels)
+    for (const auto& slot :
+         stableChannelIdentityBindingSlots)
     {
-        channel
-            ->invalidateStableChannelIdentity();
+        if (slot != nullptr)
+            slot->revoke();
     }
-    for (auto* info :
-         channelInfo)
+    for (const auto& blueprint :
+         stableChannelIdentityBlueprints)
     {
-        info
-            ->invalidateStableChannelIdentity();
+        if (blueprint != nullptr)
+        {
+            blueprint
+                ->revokeAgentActionability();
+        }
     }
     stableChannelIdentityBlueprints
         .clear();
+    stableChannelIdentityRefreshPending =
+        false;
 }
 
 void LfpDisplay::
@@ -369,28 +405,80 @@ void LfpDisplay::
     invalidateStableChannelIdentities();
     stableChannelIdentityBlueprints =
         identities;
+    for (const auto& blueprint :
+         stableChannelIdentityBlueprints)
+    {
+        if (blueprint != nullptr)
+        {
+            blueprint
+                ->revokeAgentActionability();
+        }
+    }
     const auto count =
         jmin (
             channels.size(),
             channelInfo.size(),
             static_cast<int> (
-                identities.size()));
+                identities.size()),
+            static_cast<int> (
+                stableChannelIdentityBindingSlots
+                    .size()));
+    const auto drawableMask =
+        createCurrentDrawableChannelMask();
+    const bool paneIsAvailable =
+        canvasSplit != nullptr
+        && canvasSplit
+               ->isIdentityTargetAvailable();
     for (int index = 0;
          index < count;
          ++index)
     {
-        channels[index]
-            ->bindStableChannelIdentity (
-                identities[
-                    static_cast<size_t> (
-                        index)]);
-        channelInfo[index]
-            ->bindStableChannelIdentity (
-                identities[
-                    static_cast<size_t> (
-                        index)]);
+        const auto& blueprint =
+            stableChannelIdentityBlueprints[
+                static_cast<size_t> (
+                    index)];
+#if BUILD_TESTS
+        notifyStableIdentityLifecycleTestHook (
+            StableIdentityLifecycleTestPhase::
+                beforePairPublication,
+            index);
+#endif
+#if BUILD_TESTS
+        notifyStableIdentityLifecycleTestHook (
+            StableIdentityLifecycleTestPhase::
+                afterChannelPublicationBeforeInfo,
+            index);
+#endif
+        auto* channel = channels[index];
+        auto* info = channelInfo[index];
+        const bool pairIsAvailable =
+            paneIsAvailable
+            && drawableMask[
+                   static_cast<size_t> (
+                       index)]
+            && channel->getEnabledState()
+            && info->getEnabledState()
+            && ! channel->getHidden()
+            && ! info->getHidden()
+            && channel->isVisible()
+            && info->isVisible()
+            && channel->Component::isEnabled()
+            && info->Component::isEnabled();
+        if (pairIsAvailable)
+        {
+            stableChannelIdentityBindingSlots[
+                static_cast<size_t> (
+                    index)]
+                ->publishSuccessor (
+                    blueprint);
+        }
+#if BUILD_TESTS
+        notifyStableIdentityLifecycleTestHook (
+            StableIdentityLifecycleTestPhase::
+                afterPairPublication,
+            index);
+#endif
     }
-    refreshStableChannelIdentityAvailability();
 }
 
 void LfpDisplay::
@@ -402,33 +490,32 @@ void LfpDisplay::
             channelInfo.size(),
             static_cast<int> (
                 stableChannelIdentityBlueprints
+                    .size()),
+            static_cast<int> (
+                stableChannelIdentityBindingSlots
                     .size()));
     const bool paneIsAvailable =
         canvasSplit != nullptr
         && canvasSplit
                ->isIdentityTargetAvailable();
+    const auto drawableMask =
+        createCurrentDrawableChannelMask();
 
     for (int index = 0;
          index < count;
          ++index)
     {
+#if BUILD_TESTS
+        ++stableIdentityAvailabilityWorkForTests;
+#endif
         auto* channel = channels[index];
         auto* info = channelInfo[index];
-        bool isDrawable = false;
-        for (const auto& track :
-             drawableChannels)
-        {
-            if (track.channel == channel
-                && track.channelInfo == info)
-            {
-                isDrawable = true;
-                break;
-            }
-        }
 
         const bool pairIsAvailable =
             paneIsAvailable
-            && isDrawable
+            && drawableMask[
+                   static_cast<size_t> (
+                       index)]
             && channel->getEnabledState()
             && info->getEnabledState()
             && ! channel->getHidden()
@@ -439,43 +526,301 @@ void LfpDisplay::
             && info->Component::isEnabled();
         if (! pairIsAvailable)
         {
-            channel
-                ->invalidateStableChannelIdentity();
-            info
-                ->invalidateStableChannelIdentity();
+            stableChannelIdentityBindingSlots[
+                static_cast<size_t> (
+                    index)]
+                ->revoke();
             continue;
         }
 
-        const auto channelIdentity =
-            channel
-                ->getStableChannelIdentity();
-        const auto infoIdentity =
-            info
-                ->getStableChannelIdentity();
-        if (channelIdentity != nullptr
-            && channelIdentity
-                   == infoIdentity)
+        const auto& slot =
+            stableChannelIdentityBindingSlots[
+                static_cast<size_t> (
+                    index)];
+        if (slot->get() != nullptr)
         {
             continue;
         }
 
-        const auto successor =
+        slot->publishSuccessor (
             stableChannelIdentityBlueprints[
                 static_cast<size_t> (
-                    index)]
-                ->createSuccessorGeneration();
-        stableChannelIdentityBlueprints[
-            static_cast<size_t> (
-                index)] =
-            successor;
-        channel
-            ->bindStableChannelIdentity (
-                successor);
-        info
-            ->bindStableChannelIdentity (
-                successor);
+                    index)]);
     }
 }
+
+void LfpDisplay::
+    prepareStableChannelIdentityTargetUnavailable()
+{
+    for (const auto& slot :
+         stableChannelIdentityBindingSlots)
+    {
+        if (slot != nullptr)
+            slot->revoke();
+    }
+#if BUILD_TESTS
+    notifyStableIdentityLifecycleTestHook (
+        StableIdentityLifecycleTestPhase::
+            beforePaneVisibilityMutation,
+        -1);
+#endif
+}
+
+void LfpDisplay::
+    requestStableChannelIdentityAvailabilityRefresh()
+{
+    if (stableChannelIdentityBulkMutationDepth
+        > 0)
+    {
+        stableChannelIdentityRefreshPending =
+            true;
+        return;
+    }
+    refreshStableChannelIdentityAvailability();
+}
+
+void LfpDisplay::
+    revokeStableChannelIdentityForChannel (
+        int channelIndex)
+{
+    if (channelIndex < 0
+        || channelIndex
+               >= static_cast<int> (
+                   stableChannelIdentityBindingSlots
+                       .size()))
+    {
+        return;
+    }
+    const auto& slot =
+        stableChannelIdentityBindingSlots[
+            static_cast<size_t> (
+                channelIndex)];
+    if (slot != nullptr)
+        slot->revoke();
+#if BUILD_TESTS
+    notifyStableIdentityLifecycleTestHook (
+        StableIdentityLifecycleTestPhase::
+            beforeChannelStateMutation,
+        channelIndex);
+#endif
+}
+
+void LfpDisplay::
+    beginStableChannelIdentityBulkMutation()
+{
+    ++stableChannelIdentityBulkMutationDepth;
+}
+
+void LfpDisplay::
+    endStableChannelIdentityBulkMutation()
+{
+    jassert (
+        stableChannelIdentityBulkMutationDepth
+        > 0);
+    --stableChannelIdentityBulkMutationDepth;
+    if (stableChannelIdentityBulkMutationDepth
+            == 0
+        && stableChannelIdentityRefreshPending)
+    {
+        stableChannelIdentityRefreshPending =
+            false;
+        refreshStableChannelIdentityAvailability();
+    }
+}
+
+std::vector<uint8_t>
+LfpDisplay::
+    createCurrentDrawableChannelMask() const
+{
+    std::vector<uint8_t> mask (
+        static_cast<size_t> (
+            channels.size()),
+        0);
+    for (const auto& track :
+         drawableChannels)
+    {
+#if BUILD_TESTS
+        ++stableIdentityAvailabilityWorkForTests;
+#endif
+        if (track.channel == nullptr
+            || track.channelInfo == nullptr)
+        {
+            continue;
+        }
+        const auto index =
+            track.channel
+                ->getChannelNumber();
+        if (index >= 0
+            && index < channels.size()
+            && channels[index]
+                   == track.channel
+            && channelInfo[index]
+                   == track.channelInfo)
+        {
+            mask[
+                static_cast<size_t> (
+                    index)] =
+                1;
+        }
+    }
+    return mask;
+}
+
+std::vector<uint8_t>
+LfpDisplay::
+    createDesiredDrawableChannelMask() const
+{
+    std::vector<uint8_t> mask (
+        static_cast<size_t> (
+            channels.size()),
+        0);
+    if (singleChan >= 0)
+    {
+        if (singleChan >= 0
+            && singleChan < channels.size())
+        {
+            mask[
+                static_cast<size_t> (
+                    singleChan)] =
+                1;
+        }
+        return mask;
+    }
+
+    Array<int> filteredChannels;
+    if (canvasSplit->displayBuffer)
+    {
+        filteredChannels =
+            canvasSplit
+                ->getFilteredChannels();
+    }
+    int filterChannelIndex = 0;
+    for (int index = 0;
+         index < channels.size();
+         ++index)
+    {
+#if BUILD_TESTS
+        ++stableIdentityAvailabilityWorkForTests;
+#endif
+        const int channelNumber =
+            filteredChannels.size()
+            ? canvasSplit
+                  ->displayBuffer
+                  ->channelMetadata[
+                      index]
+                  .description
+                  .getIntValue()
+            : -1;
+        while (
+            filterChannelIndex
+                < filteredChannels.size()
+            && channelNumber
+                   > filteredChannels[
+                       filterChannelIndex])
+        {
+            ++filterChannelIndex;
+        }
+        const bool passesFilter =
+            filteredChannels.isEmpty()
+            || (filterChannelIndex
+                    < filteredChannels.size()
+                && channelNumber
+                       == filteredChannels[
+                           filterChannelIndex]);
+        if (passesFilter)
+        {
+            if (displaySkipAmt == 0
+                || ((filteredChannels.size()
+                         ? filterChannelIndex
+                         : index)
+                    % displaySkipAmt
+                    == 0))
+            {
+                mask[
+                    static_cast<size_t> (
+                        index)] =
+                    1;
+            }
+            ++filterChannelIndex;
+        }
+    }
+    return mask;
+}
+
+void LfpDisplay::
+    revokeOutgoingStableChannelIdentities (
+        const std::vector<uint8_t>&
+            desiredDrawableMask)
+{
+    const auto currentMask =
+        createCurrentDrawableChannelMask();
+    const auto count =
+        jmin (
+            static_cast<int> (
+                currentMask.size()),
+            static_cast<int> (
+                desiredDrawableMask
+                    .size()),
+            static_cast<int> (
+                stableChannelIdentityBindingSlots
+                    .size()));
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        if (currentMask[
+                static_cast<size_t> (
+                    index)]
+            && ! desiredDrawableMask[
+                static_cast<size_t> (
+                    index)])
+        {
+            stableChannelIdentityBindingSlots[
+                static_cast<size_t> (
+                    index)]
+                ->revoke();
+        }
+    }
+}
+
+#if BUILD_TESTS
+void LfpDisplay::
+    setStableIdentityLifecycleTestHook (
+        std::function<void (
+            StableIdentityLifecycleTestPhase,
+            int)> hook)
+{
+    stableIdentityLifecycleTestHook =
+        std::move (
+            hook);
+}
+
+void LfpDisplay::
+    resetStableIdentityAvailabilityWorkForTests()
+{
+    stableIdentityAvailabilityWorkForTests =
+        0;
+}
+
+uint64 LfpDisplay::
+    getStableIdentityAvailabilityWorkForTests() const noexcept
+{
+    return stableIdentityAvailabilityWorkForTests;
+}
+
+void LfpDisplay::
+    notifyStableIdentityLifecycleTestHook (
+        StableIdentityLifecycleTestPhase phase,
+        int channelIndex)
+{
+    if (stableIdentityLifecycleTestHook)
+    {
+        stableIdentityLifecycleTestHook (
+            phase,
+            channelIndex);
+    }
+}
+#endif
 
 void LfpDisplay::setActiveColourSchemeIdx (int index)
 {
@@ -1113,6 +1458,7 @@ void LfpDisplay::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w
 
 void LfpDisplay::toggleSingleChannel (LfpChannelTrack drawableChannel)
 {
+    beginStableChannelIdentityBulkMutation();
     if (! getSingleChannelState())
     {
         singleChan = drawableChannel.channel->getChannelNumber();
@@ -1130,6 +1476,7 @@ void LfpDisplay::toggleSingleChannel (LfpChannelTrack drawableChannel)
         reactivateChannels();
         rebuildDrawableChannelsList();
     }
+    endStableChannelIdentityBulkMutation();
 }
 
 void LfpDisplay::reactivateChannels()
@@ -1140,6 +1487,12 @@ void LfpDisplay::reactivateChannels()
 
 void LfpDisplay::rebuildDrawableChannelsList()
 {
+    beginStableChannelIdentityBulkMutation();
+    const auto desiredDrawableMask =
+        createDesiredDrawableChannelMask();
+    revokeOutgoingStableChannelIdentities (
+        desiredDrawableMask);
+
     if (getSingleChannelState())
     {
         int newHeight = viewport->getHeight();
@@ -1161,6 +1514,12 @@ void LfpDisplay::rebuildDrawableChannelsList()
             {
                 LfpChannelTrack lfpChannelTrack { channels[channelIndex], channelInfo[channelIndex] };
 
+#if BUILD_TESTS
+                notifyStableIdentityLifecycleTestHook (
+                    StableIdentityLifecycleTestPhase::
+                        beforeDrawableHierarchyMutation,
+                    channelIndex);
+#endif
                 removeAllChildren();
 
                 // disable unused channels
@@ -1201,7 +1560,9 @@ void LfpDisplay::rebuildDrawableChannelsList()
                 }
             }
 
-            refreshStableChannelIdentityAvailability();
+            stableChannelIdentityRefreshPending =
+                true;
+            endStableChannelIdentityBulkMutation();
             return;
         }
         else
@@ -1212,6 +1573,12 @@ void LfpDisplay::rebuildDrawableChannelsList()
         }
     }
 
+#if BUILD_TESTS
+    notifyStableIdentityLifecycleTestHook (
+        StableIdentityLifecycleTestPhase::
+            beforeDrawableHierarchyMutation,
+        -1);
+#endif
     removeAllChildren(); // start with clean slate
 
     Array<LfpChannelTrack> channelsToDraw; // all visible channels will be added to this array
@@ -1365,7 +1732,9 @@ void LfpDisplay::rebuildDrawableChannelsList()
     setColours();
 
     resized();
-    refreshStableChannelIdentityAvailability();
+    stableChannelIdentityRefreshPending =
+        true;
+    endStableChannelIdentityBulkMutation();
 
     //LOGD("Finished standard channel rebuild.");
 }

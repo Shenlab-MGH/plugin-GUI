@@ -26,11 +26,102 @@
 #include <TestFixtures.h>
 #include <algorithm>
 #include <memory>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace
 {
 using namespace LfpViewer;
+
+template <typename Identity,
+          typename = void>
+struct CanMintSuccessorGeneration
+    : std::false_type
+{
+};
+
+template <typename Identity>
+struct CanMintSuccessorGeneration<
+    Identity,
+    std::void_t<decltype (
+        std::declval<const Identity&>()
+            .createSuccessorGeneration())>>
+    : std::true_type
+{
+};
+
+template <typename Identity,
+          typename = void>
+struct CanRevokeGeneration
+    : std::false_type
+{
+};
+
+template <typename Identity>
+struct CanRevokeGeneration<
+    Identity,
+    std::void_t<decltype (
+        std::declval<const Identity&>()
+            .revokeAgentActionability())>>
+    : std::true_type
+{
+};
+
+static_assert (
+    ! CanMintSuccessorGeneration<
+        LfpStableChannelIdentity>::value,
+    "Identity providers must not mint active successor generations");
+static_assert (
+    ! CanRevokeGeneration<
+        LfpStableChannelIdentity>::value,
+    "Identity providers must have a read-only snapshot API");
+
+template <typename Display,
+          typename = void>
+struct CanPublishIdentityGenerations
+    : std::false_type
+{
+};
+
+template <typename Display>
+struct CanPublishIdentityGenerations<
+    Display,
+    std::void_t<decltype (
+        std::declval<Display&>()
+            .bindStableChannelIdentities (
+                std::declval<const std::vector<
+                    std::shared_ptr<
+                        const LfpStableChannelIdentity>>&>()))>>
+    : std::true_type
+{
+};
+
+template <typename Display,
+          typename = void>
+struct CanRefreshIdentityGenerations
+    : std::false_type
+{
+};
+
+template <typename Display>
+struct CanRefreshIdentityGenerations<
+    Display,
+    std::void_t<decltype (
+        std::declval<Display&>()
+            .refreshStableChannelIdentityAvailability())>>
+    : std::true_type
+{
+};
+
+static_assert (
+    ! CanPublishIdentityGenerations<
+        LfpDisplay>::value,
+    "Providers must not publish identity generations through LfpDisplay");
+static_assert (
+    ! CanRefreshIdentityGenerations<
+        LfpDisplay>::value,
+    "Providers must not activate identity generations through LfpDisplay");
 
 DisplayBuffer::ChannelMetadata makeIdentityMetadata (
     String identifier,
@@ -1031,5 +1122,423 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     EXPECT_FALSE (
         retained
             ->isAgentActionable());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        HiddenPaneBindingNeverPublishesAnActiveGeneration)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::THREE_VERT,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3u);
+    auto* third = splitters[2];
+    canvas->setLayout (
+        SplitLayouts::TWO_VERT);
+    ASSERT_FALSE (third->isVisible());
+
+    bool observedPairPublication =
+        false;
+    bool publishedActiveWhileHidden =
+        false;
+    third->lfpDisplay
+        ->setStableIdentityLifecycleTestHook (
+            [&] (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase
+                        phase,
+                int channelIndex)
+            {
+                if (phase
+                        == LfpDisplay::
+                               StableIdentityLifecycleTestPhase::
+                                   afterPairPublication
+                    && channelIndex == 0)
+                {
+                    observedPairPublication =
+                        true;
+                    const auto identity =
+                        third->lfpDisplay
+                            ->channels[0]
+                            ->getStableChannelIdentity();
+                    publishedActiveWhileHidden =
+                        identity != nullptr
+                        && identity
+                               ->isAgentActionable();
+                }
+            });
+
+    canvas->updateSettings();
+
+    EXPECT_TRUE (
+        observedPairPublication);
+    EXPECT_FALSE (
+        publishedActiveWhileHidden);
+    EXPECT_EQ (
+        third->lfpDisplay
+            ->channels[0]
+            ->getStableChannelIdentity(),
+        nullptr);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        PairPublicationHasNoOneSidedObservableState)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer = splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+
+    bool observedPublicationBoundary =
+        false;
+    bool pairWasConsistent =
+        true;
+    display
+        ->setStableIdentityLifecycleTestHook (
+            [&] (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase
+                        phase,
+                int channelIndex)
+            {
+                if (phase
+                        == LfpDisplay::
+                               StableIdentityLifecycleTestPhase::
+                                   afterChannelPublicationBeforeInfo
+                    && channelIndex == 0)
+                {
+                    observedPublicationBoundary =
+                        true;
+                    std::shared_ptr<
+                        const LfpStableChannelIdentity>
+                        channelSnapshot;
+                    std::shared_ptr<
+                        const LfpStableChannelIdentity>
+                        infoSnapshot;
+                    std::thread worker (
+                        [&]
+                        {
+                            channelSnapshot =
+                                display->channels[0]
+                                    ->getStableChannelIdentity();
+                            infoSnapshot =
+                                display->channelInfo[0]
+                                    ->getStableChannelIdentity();
+                        });
+                    worker.join();
+                    pairWasConsistent =
+                        channelSnapshot
+                        == infoSnapshot;
+                }
+            });
+    buffer->channelMetadata
+        .getReference (0)
+        .uuid = Uuid();
+
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+
+    EXPECT_TRUE (
+        observedPublicationBoundary);
+    EXPECT_TRUE (
+        pairWasConsistent);
+    EXPECT_EQ (
+        display->channels[0]
+            ->getStableChannelIdentity(),
+        display->channelInfo[0]
+            ->getStableChannelIdentity());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        SkipRevokesOutgoingGenerationBeforeHierarchyMutation)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    ASSERT_GE (display->channels.size(), 2);
+    auto* outgoing =
+        display->channels[1];
+    const auto retained =
+        outgoing
+            ->getStableChannelIdentity();
+    ASSERT_TRUE (
+        retained
+            ->isAgentActionable());
+
+    bool observedPreMutationBoundary =
+        false;
+    bool wasRevokedBeforeMutation =
+        false;
+    bool hierarchyWasIntact =
+        false;
+    display
+        ->setStableIdentityLifecycleTestHook (
+            [&] (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase
+                        phase,
+                int)
+            {
+                if (phase
+                    == LfpDisplay::
+                           StableIdentityLifecycleTestPhase::
+                               beforeDrawableHierarchyMutation)
+                {
+                    observedPreMutationBoundary =
+                        true;
+                    wasRevokedBeforeMutation =
+                        ! retained
+                              ->isAgentActionable();
+                    hierarchyWasIntact =
+                        outgoing
+                            ->getParentComponent()
+                        == display;
+                }
+            });
+
+    display
+        ->setChannelDisplaySkipAmount (
+            2);
+
+    EXPECT_TRUE (
+        observedPreMutationBoundary);
+    EXPECT_TRUE (
+        wasRevokedBeforeMutation);
+    EXPECT_TRUE (
+        hierarchyWasIntact);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        PaneGenerationIsRevokedBeforeVisibilityMutation)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::THREE_VERT,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3u);
+    auto* third = splitters[2];
+    const auto retained =
+        third->lfpDisplay
+            ->channels[0]
+            ->getStableChannelIdentity();
+    ASSERT_TRUE (
+        retained
+            ->isAgentActionable());
+
+    bool observedBoundary = false;
+    bool revokedBeforeVisibility =
+        false;
+    bool paneWasStillVisible =
+        false;
+    third->lfpDisplay
+        ->setStableIdentityLifecycleTestHook (
+            [&] (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase
+                        phase,
+                int)
+            {
+                if (phase
+                    == LfpDisplay::
+                           StableIdentityLifecycleTestPhase::
+                               beforePaneVisibilityMutation)
+                {
+                    observedBoundary = true;
+                    revokedBeforeVisibility =
+                        ! retained
+                              ->isAgentActionable();
+                    paneWasStillVisible =
+                        third->isVisible();
+                }
+            });
+
+    canvas->setLayout (
+        SplitLayouts::TWO_VERT);
+
+    EXPECT_TRUE (observedBoundary);
+    EXPECT_TRUE (
+        revokedBeforeVisibility);
+    EXPECT_TRUE (
+        paneWasStillVisible);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        ChannelGenerationIsRevokedBeforeEnabledStateMutation)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    auto* channel =
+        display->channels[0];
+    const auto retained =
+        channel
+            ->getStableChannelIdentity();
+    ASSERT_TRUE (
+        retained
+            ->isAgentActionable());
+
+    bool observedBoundary = false;
+    bool revokedBeforeState =
+        false;
+    bool channelWasStillEnabled =
+        false;
+    display
+        ->setStableIdentityLifecycleTestHook (
+            [&] (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase
+                        phase,
+                int channelIndex)
+            {
+                if (phase
+                        == LfpDisplay::
+                               StableIdentityLifecycleTestPhase::
+                                   beforeChannelStateMutation
+                    && channelIndex == 0
+                    && ! observedBoundary)
+                {
+                    observedBoundary = true;
+                    revokedBeforeState =
+                        ! retained
+                              ->isAgentActionable();
+                    channelWasStillEnabled =
+                        channel
+                            ->getEnabledState();
+                }
+            });
+
+    display->setEnabledState (
+        false,
+        0,
+        true);
+
+    EXPECT_TRUE (observedBoundary);
+    EXPECT_TRUE (
+        revokedBeforeState);
+    EXPECT_TRUE (
+        channelWasStillEnabled);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        RealDisplayBulkTransitionsHaveLinearAvailabilityWork)
+{
+    constexpr int channelCount = 12000;
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer =
+        splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    for (int channel =
+             buffer->channelMetadata
+                 .size();
+         channel < channelCount;
+         ++channel)
+    {
+        buffer->channelMetadata
+            .add (
+            makeIdentityMetadata (
+                "large.real."
+                    + String (channel),
+                101,
+                channel));
+    }
+    buffer->numChannels =
+        channelCount;
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+    ASSERT_EQ (
+        display->channels.size(),
+        channelCount);
+    ASSERT_GE (
+        display->savedChannelState
+            .size(),
+        channelCount);
+
+    display
+        ->resetStableIdentityAvailabilityWorkForTests();
+    display
+        ->setChannelDisplaySkipAmount (
+            2);
+    display
+        ->setChannelDisplaySkipAmount (
+            0);
+    ASSERT_FALSE (
+        display->drawableChannels
+            .isEmpty());
+    display
+        ->toggleSingleChannel (
+            display->drawableChannels[0]);
+
+    EXPECT_LE (
+        display
+            ->getStableIdentityAvailabilityWorkForTests(),
+        static_cast<uint64> (
+            channelCount * 20));
 }
 } // namespace

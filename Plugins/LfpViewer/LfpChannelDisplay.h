@@ -127,15 +127,6 @@ public:
     /** Return the units string for this channel */
     const String& getUnits() const;
 
-    /** Binds a copied immutable identity for this component generation. */
-    void bindStableChannelIdentity (
-        std::shared_ptr<
-            const LfpStableChannelIdentity>
-            identity);
-
-    /** Invalidates this component as an agent mutation target. */
-    void invalidateStableChannelIdentity();
-
     /** Returns the immutable identity currently bound to this component. */
     TESTABLE std::shared_ptr<
         const LfpStableChannelIdentity>
@@ -217,6 +208,16 @@ protected:
     LfpDisplay* display;
     LfpDisplayOptions* options;
 
+private:
+    friend class LfpDisplay;
+
+    void bindStableChannelIdentitySlot (
+        std::shared_ptr<
+            LfpStableChannelIdentityBindingSlot>
+            slot);
+
+protected:
+
     bool isSelected;
     bool isHidden;
 
@@ -235,8 +236,8 @@ protected:
     String units;
 
     std::shared_ptr<
-        const LfpStableChannelIdentity>
-        stableChannelIdentity;
+        LfpStableChannelIdentityBindingSlot>
+        stableChannelIdentityBindingSlot;
 
     FontOptions channelFont;
 

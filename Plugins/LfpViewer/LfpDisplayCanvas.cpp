@@ -226,6 +226,23 @@ void LfpDisplayCanvas::enablementChanged()
     }
 }
 
+void LfpDisplayCanvas::setDisplaySplitVisible (
+    int splitIndex,
+    bool shouldBeVisible)
+{
+    auto* split =
+        displaySplits[
+            splitIndex];
+    if (! shouldBeVisible
+        && split->isVisible())
+    {
+        split
+            ->prepareIdentityTargetUnavailable();
+    }
+    split->setVisible (
+        shouldBeVisible);
+}
+
 void LfpDisplayCanvas::resized()
 {
     if (isLoading)
@@ -235,26 +252,26 @@ void LfpDisplayCanvas::resized()
 
     if (selectedLayout == SINGLE)
     {
-        displaySplits[0]->setVisible (true);
+        setDisplaySplitVisible (0, true);
 
         displaySplits[0]->deselect(); // to remove boundary
         displaySplits[0]->options->setVisible (true);
         displaySplits[1]->options->setVisible (false);
         displaySplits[2]->options->setVisible (false);
 
-        displaySplits[1]->setVisible (false);
+        setDisplaySplitVisible (1, false);
         displaySplits[1]->setBounds (0, 0, 0, 0);
-        displaySplits[2]->setVisible (false);
+        setDisplaySplitVisible (2, false);
         displaySplits[2]->setBounds (0, 0, 0, 0);
 
         displaySplits[0]->setBounds (0, 0, getWidth(), getHeight());
     }
     else if (selectedLayout == TWO_VERT)
     {
-        displaySplits[0]->setVisible (true);
-        displaySplits[1]->setVisible (true);
+        setDisplaySplitVisible (0, true);
+        setDisplaySplitVisible (1, true);
 
-        displaySplits[2]->setVisible (false);
+        setDisplaySplitVisible (2, false);
         displaySplits[2]->setBounds (0, 0, 0, 0);
 
         displaySplits[0]->setBounds (0,
@@ -279,9 +296,9 @@ void LfpDisplayCanvas::resized()
     }
     else if (selectedLayout == THREE_VERT)
     {
-        displaySplits[0]->setVisible (true);
-        displaySplits[1]->setVisible (true);
-        displaySplits[2]->setVisible (true);
+        setDisplaySplitVisible (0, true);
+        setDisplaySplitVisible (1, true);
+        setDisplaySplitVisible (2, true);
 
         displaySplits[0]->setBounds (0,
                                      0,
@@ -311,10 +328,10 @@ void LfpDisplayCanvas::resized()
     }
     else if (selectedLayout == TWO_HORZ)
     {
-        displaySplits[0]->setVisible (true);
-        displaySplits[1]->setVisible (true);
+        setDisplaySplitVisible (0, true);
+        setDisplaySplitVisible (1, true);
 
-        displaySplits[2]->setVisible (false);
+        setDisplaySplitVisible (2, false);
         displaySplits[2]->setBounds (0, 0, 0, 0);
 
         displaySplits[0]->setBounds (0,
@@ -338,9 +355,9 @@ void LfpDisplayCanvas::resized()
     }
     else
     {
-        displaySplits[0]->setVisible (true);
-        displaySplits[1]->setVisible (true);
-        displaySplits[2]->setVisible (true);
+        setDisplaySplitVisible (0, true);
+        setDisplaySplitVisible (1, true);
+        setDisplaySplitVisible (2, true);
 
         displaySplits[0]->setBounds (0,
                                      0,
@@ -1087,6 +1104,16 @@ bool LfpDisplaySplitter::
         && canvas != nullptr
         && canvas->isVisible()
         && canvas->isEnabled();
+}
+
+void LfpDisplaySplitter::
+    prepareIdentityTargetUnavailable()
+{
+    if (lfpDisplay != nullptr)
+    {
+        lfpDisplay
+            ->prepareStableChannelIdentityTargetUnavailable();
+    }
 }
 
 void LfpDisplaySplitter::visibilityChanged()

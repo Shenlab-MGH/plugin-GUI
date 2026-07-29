@@ -72,18 +72,24 @@ public:
     /** Updates the number of displayed channels */
     TESTABLE void setNumChannels (int numChannels);
 
-    /** Invalidates all channel and info identity bindings. */
-    void invalidateStableChannelIdentities();
+#if BUILD_TESTS
+    enum class StableIdentityLifecycleTestPhase
+    {
+        beforePairPublication,
+        afterChannelPublicationBeforeInfo,
+        afterPairPublication,
+        beforeDrawableHierarchyMutation,
+        beforePaneVisibilityMutation,
+        beforeChannelStateMutation
+    };
 
-    /** Binds one shared immutable identity to each channel/info pair. */
-    void bindStableChannelIdentities (
-        const std::vector<
-            std::shared_ptr<
-                const LfpStableChannelIdentity>>&
-            identities);
-
-    /** Revokes hidden/disabled targets and rebinds newly available targets. */
-    void refreshStableChannelIdentityAvailability();
+    TESTABLE void setStableIdentityLifecycleTestHook (
+        std::function<void (
+            StableIdentityLifecycleTestPhase,
+            int)> hook);
+    TESTABLE void resetStableIdentityAvailabilityWorkForTests();
+    TESTABLE uint64 getStableIdentityAvailabilityWorkForTests() const noexcept;
+#endif
 
     /** Returns the number of display channels*/
     TESTABLE int getNumChannels();
@@ -183,7 +189,7 @@ public:
     void setColourGrouping (const String& i);
 
     /** Sets whether a particular channel is enabled */
-    void setEnabledState (bool state, int chan, bool updateSavedChans = true);
+    TESTABLE void setEnabledState (bool state, int chan, bool updateSavedChans = true);
 
     /** Returns whether a particular channel is enabled */
     bool getEnabledState (int chan);
@@ -256,7 +262,7 @@ public:
         LfpChannelTrack drawableChannel);
 
     /** Reconstructs the list of drawableChannels based on ordering and filterning parameters */
-    void rebuildDrawableChannelsList();
+    TESTABLE void rebuildDrawableChannelsList();
 
     /** Updates the channel range, after the channel type has been set*/
     void updateRange (int i);
@@ -317,8 +323,38 @@ public:
     int totalPixelsFilled;
 
 private:
+    friend class LfpChannelDisplay;
+    friend class LfpDisplayCanvas;
+    friend class LfpDisplaySplitter;
+
     /** Used to throttle refresh speed when scrolling backwards */
     void timerCallback() override;
+
+    /** Invalidates all channel and info identity bindings. */
+    void invalidateStableChannelIdentities();
+    /** Binds one shared immutable identity to each channel/info pair. */
+    void bindStableChannelIdentities (
+        const std::vector<
+            std::shared_ptr<
+                const LfpStableChannelIdentity>>&
+            identities);
+    /** Revokes hidden/disabled targets and rebinds newly available targets. */
+    void refreshStableChannelIdentityAvailability();
+    /** Pre-revokes every current generation before a pane becomes unavailable. */
+    void prepareStableChannelIdentityTargetUnavailable();
+
+    void requestStableChannelIdentityAvailabilityRefresh();
+    void revokeStableChannelIdentityForChannel (
+        int channelIndex);
+    void beginStableChannelIdentityBulkMutation();
+    void endStableChannelIdentityBulkMutation();
+    std::vector<uint8_t>
+    createCurrentDrawableChannelMask() const;
+    std::vector<uint8_t>
+    createDesiredDrawableChannelMask() const;
+    void revokeOutgoingStableChannelIdentities (
+        const std::vector<uint8_t>&
+            desiredDrawableMask);
 
     int singleChan;
 
@@ -348,6 +384,24 @@ private:
         std::shared_ptr<
             const LfpStableChannelIdentity>>
         stableChannelIdentityBlueprints;
+    std::vector<
+        std::shared_ptr<
+            LfpStableChannelIdentityBindingSlot>>
+        stableChannelIdentityBindingSlots;
+    int stableChannelIdentityBulkMutationDepth = 0;
+    bool stableChannelIdentityRefreshPending = false;
+
+#if BUILD_TESTS
+    void notifyStableIdentityLifecycleTestHook (
+        StableIdentityLifecycleTestPhase phase,
+        int channelIndex);
+
+    std::function<void (
+        StableIdentityLifecycleTestPhase,
+        int)>
+        stableIdentityLifecycleTestHook;
+    mutable uint64 stableIdentityAvailabilityWorkForTests = 0;
+#endif
 
     String colourGrouping;
 
