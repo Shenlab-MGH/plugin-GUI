@@ -990,17 +990,11 @@ invokeLfpWindowsUiaControl (
     Microsoft::WRL::ComPtr<
         IUIAutomationElement>
         element;
-    result =
-        findExactlyOneLfpWindowsUiaElement (
-            *rootElement.Get(),
-            *idCondition.Get(),
-            output.matchingElementCount,
-            element);
-    if (result == S_FALSE
-        && output.matchingElementCount == 0
-        && automationId.find (
-               L".choice.")
-               != std::wstring::npos)
+    const auto isChoiceAutomationId =
+        automationId.find (
+            L".choice.")
+        != std::wstring::npos;
+    if (isChoiceAutomationId)
     {
         result =
             findLfpWindowsUiaChoicePopupElement (
@@ -1009,6 +1003,15 @@ invokeLfpWindowsUiaControl (
                 *rootElement.Get(),
                 *idCondition.Get(),
                 automationId,
+                output.matchingElementCount,
+                element);
+    }
+    else
+    {
+        result =
+            findExactlyOneLfpWindowsUiaElement (
+                *rootElement.Get(),
+                *idCondition.Get(),
                 output.matchingElementCount,
                 element);
     }
@@ -1346,11 +1349,10 @@ invokeLfpWindowsUiaControl (
         result =
             selectionItemPattern
                 ->Select();
-        if (SUCCEEDED (result)
-            && automationId.find (
-                   L".choice.")
-                   != std::wstring::npos)
+        if (isChoiceAutomationId)
         {
+            const auto selectResult =
+                result;
             valuePattern.Reset();
             expandCollapsePattern.Reset();
             selectionItemPattern.Reset();
@@ -1365,7 +1367,7 @@ invokeLfpWindowsUiaControl (
                 drainLfpWindowsUiaChoiceSelectionCallbacks();
             return finish (
                 SUCCEEDED (callbacksDrained)
-                    ? result
+                    ? selectResult
                     : callbacksDrained);
         }
         if (SUCCEEDED (result))
