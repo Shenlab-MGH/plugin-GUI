@@ -7054,6 +7054,16 @@ TEST_F (LfpDisplayNodeTests,
                 label->isAccessible());
         }
     }
+    EXPECT_EQ (
+        std::count_if (
+            labels.begin(),
+            labels.end(),
+            [] (const Label* label)
+            {
+                return label->getName()
+                       == "SpikeRasterLabel";
+            }),
+        3);
 }
 
 TEST_F (LfpDisplayNodeTests,
@@ -7138,6 +7148,17 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_TRUE (display->getSpikeRasterPlotting());
     EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
     EXPECT_TRUE (subtractOffset->getToggleState());
+
+    writeFromWorker ("-100");
+    EXPECT_EQ (spikeRaster->getText(), "-100");
+    EXPECT_EQ (value->getCurrentValueAsString(), "-100");
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -100.0f);
+    EXPECT_TRUE (subtractOffset->getToggleState());
+    writeFromWorker ("OFF");
+    EXPECT_EQ (spikeRaster->getText(), "OFF");
+    EXPECT_FALSE (display->getSpikeRasterPlotting());
+    EXPECT_FALSE (subtractOffset->getToggleState());
 
     for (const auto& testCase :
          std::array<std::pair<String, String>, 4> {
@@ -7261,13 +7282,28 @@ TEST_F (LfpDisplayNodeTests,
 
     XmlElement savedRoot ("ROOT");
     options->saveParameters (&savedRoot);
-    auto* savedPane =
-        savedRoot.getChildByName ("LFPDISPLAY0");
-    ASSERT_NE (savedPane, nullptr);
-    savedPane->setAttribute ("spikeRaster", "OFF");
+    XmlElement offRoot (savedRoot);
+    auto* offPane =
+        offRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (offPane, nullptr);
+    offPane->setAttribute ("spikeRaster", "OFF");
     LfpThreadTrackingComboBoxListener listener;
     spikeRaster->addListener (&listener);
+    options->loadParameters (&offRoot);
     options->loadParameters (&savedRoot);
+    spikeRaster->removeListener (&listener);
+    EXPECT_EQ (listener.callbackCount.load(), 0);
+    EXPECT_EQ (value->getCurrentValueAsString(), "-125");
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
+
+    XmlElement defaultRoot (savedRoot);
+    auto* defaultPane =
+        defaultRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (defaultPane, nullptr);
+    defaultPane->removeAttribute ("spikeRaster");
+    spikeRaster->addListener (&listener);
+    options->loadParameters (&defaultRoot);
     spikeRaster->removeListener (&listener);
     EXPECT_EQ (listener.callbackCount.load(), 0);
     EXPECT_EQ (value->getCurrentValueAsString(), "OFF");
@@ -7301,8 +7337,14 @@ TEST_F (LfpDisplayNodeTests,
             findLfpDescendantById (*canvas, id));
     auto* display =
         findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    auto* subtractOffset =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix + "1.subtract_offset"));
     ASSERT_NE (spikeRaster, nullptr);
     ASSERT_NE (display, nullptr);
+    ASSERT_NE (subtractOffset, nullptr);
     const auto window =
         static_cast<HWND> (canvas->getWindowHandle());
     ASSERT_NE (window, nullptr);
@@ -7386,6 +7428,17 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (spikeRaster->getText(), "-125");
     EXPECT_TRUE (display->getSpikeRasterPlotting());
     EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
+    const auto presetValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "-150");
+    EXPECT_EQ (presetValueResult.invokeResult, S_OK);
+    EXPECT_EQ (presetValueResult.value, L"-150");
+    EXPECT_EQ (spikeRaster->getText(), "-150");
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -150.0f);
+    EXPECT_TRUE (subtractOffset->getToggleState());
     const auto reexpandResult =
         runAction (id, LfpWindowsUiaAction::expand);
     EXPECT_EQ (reexpandResult.invokeResult, S_OK);
