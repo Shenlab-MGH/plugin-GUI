@@ -260,6 +260,12 @@ public:
     /** Returns the number of channels NOT hidden for display */
     int getNumChannelsVisible();
 
+    TESTABLE float getDrawableSampleRate()
+        const noexcept
+    {
+        return sampleRate;
+    }
+
     /** Returns true if channel polarity is inverted*/
     bool getInputInvertedState();
 
@@ -407,6 +413,10 @@ private:
     friend class LfpDisplayOptions;
 
     bool selectStreamByKeyOnMessageThread (
+        const String& streamKey,
+        bool fallBackToFirst,
+        NotificationType notification);
+    bool selectAndRefreshStreamByKeyOnMessageThread (
         const String& streamKey,
         bool fallBackToFirst,
         NotificationType notification);

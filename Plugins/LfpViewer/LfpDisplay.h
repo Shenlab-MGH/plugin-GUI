@@ -72,7 +72,7 @@ public:
     void setNumChannels (int numChannels);
 
     /** Returns the number of display channels*/
-    int getNumChannels();
+    TESTABLE int getNumChannels();
 
     /** Returns the overall display height (for scrolling purposes) */
     int getTotalHeight();

@@ -3763,7 +3763,7 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             int64 start = Time::getHighResolutionTicks();
 
             canvasSplit
-                ->selectStreamByKeyOnMessageThread (
+                ->selectAndRefreshStreamByKeyOnMessageThread (
                     streamKey,
                     true,
                     dontSendNotification);

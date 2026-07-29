@@ -140,7 +140,10 @@ void LfpDisplayNode::updateSettings()
             displayBufferMap.erase (displayBuffer->id);
             toDelete.add (displayBuffer);
 
-            for (auto splitID : displayBuffer->displays)
+            const auto affectedDisplays =
+                displayBuffer->displays;
+            for (auto splitID :
+                 affectedDisplays)
             {
                 LfpDisplayEditor* ed = (LfpDisplayEditor*) getEditor();
                 ed->removeBufferForDisplay (

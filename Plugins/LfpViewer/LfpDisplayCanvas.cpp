@@ -1820,13 +1820,10 @@ void LfpDisplaySplitter::setDrawableStream (uint16 sp)
         return;
     }
 
-    if (selectStreamByKeyOnMessageThread (
-            stream->getKey(),
-            false,
-            dontSendNotification))
-    {
-        updateSettings();
-    }
+    selectAndRefreshStreamByKeyOnMessageThread (
+        stream->getKey(),
+        false,
+        dontSendNotification);
 }
 
 bool LfpDisplaySplitter::selectStreamByKey (
@@ -1847,11 +1844,14 @@ bool LfpDisplaySplitter::selectStreamByKey (
                         ->isEnabled())
                 return false;
 
-            return safeSplitter
-                ->selectStreamByKeyOnMessageThread (
+            const auto selected =
+                safeSplitter
+                ->selectAndRefreshStreamByKeyOnMessageThread (
                     streamKey,
                     fallBackToFirst,
                     sendNotificationSync);
+            return selected
+                && safeSplitter != nullptr;
         };
 
     auto* messageManager =
@@ -1869,6 +1869,31 @@ bool LfpDisplaySplitter::selectStreamByKey (
     return MessageManager::callSync (
                performSelection)
         .value_or (false);
+}
+
+bool LfpDisplaySplitter::
+    selectAndRefreshStreamByKeyOnMessageThread (
+        const String& streamKey,
+        bool fallBackToFirst,
+        NotificationType notification)
+{
+    Component::SafePointer<
+        LfpDisplaySplitter>
+        safeSplitter (this);
+    const auto selected =
+        safeSplitter
+            ->selectStreamByKeyOnMessageThread (
+                streamKey,
+                fallBackToFirst,
+                notification);
+    if (! selected
+        || safeSplitter == nullptr)
+    {
+        return false;
+    }
+
+    safeSplitter->updateSettings();
+    return safeSplitter != nullptr;
 }
 
 bool LfpDisplaySplitter::

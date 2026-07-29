@@ -117,7 +117,7 @@ public:
     int getChannelNumber();
 
     /** Return the assigned channel name */
-    String getName();
+    TESTABLE String getName();
 
     /** Set the units string used for display */
     void setUnits (const String& newUnits);
