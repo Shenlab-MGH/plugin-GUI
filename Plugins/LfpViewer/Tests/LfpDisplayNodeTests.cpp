@@ -237,6 +237,33 @@ private:
         canvas;
 };
 
+class LfpDestroyCanvasComboBoxListener final
+    : public ComboBox::Listener
+{
+public:
+    explicit LfpDestroyCanvasComboBoxListener (
+        std::unique_ptr<
+            LfpViewer::
+                LfpDisplayCanvas>&
+            canvasToDestroy)
+        : canvas (
+              canvasToDestroy)
+    {
+    }
+
+    void comboBoxChanged (
+        ComboBox*) override
+    {
+        canvas.reset();
+    }
+
+private:
+    std::unique_ptr<
+        LfpViewer::
+            LfpDisplayCanvas>&
+        canvas;
+};
+
 void joinLfpWorkerOrAbort (
     std::thread& worker,
     const std::atomic<bool>&
@@ -3175,7 +3202,6 @@ TEST_F (LfpDisplayNodeTests,
                 LfpViewer::
                     LfpDisplayNode> (
                 Plugin::Processor::SINK);
-
     const auto buffers =
         multiStreamProcessor
             ->getDisplayBuffers();
@@ -3215,6 +3241,14 @@ TEST_F (LfpDisplayNodeTests,
                 LfpViewer::
                     LfpDisplayNode> (
                 Plugin::Processor::SINK);
+    auto* multiStreamSource =
+        dynamic_cast<
+            FakeSourceNode*> (
+            multiStreamTester
+                ->getSourceNode());
+    ASSERT_NE (
+        multiStreamSource,
+        nullptr);
     auto canvas =
         std::make_unique<
             LfpViewer::
@@ -3229,135 +3263,199 @@ TEST_F (LfpDisplayNodeTests,
         getDisplaySplitters (
             *canvas);
     ASSERT_EQ (splitters.size(), 3);
-    auto* splitter = splitters[0];
     const auto buffers =
         multiStreamProcessor
             ->getDisplayBuffers();
     ASSERT_EQ (buffers.size(), 3);
-    const auto firstId =
-        buffers[0]->id;
-    const auto firstKey =
-        buffers[0]->streamKey;
-    const auto secondId =
-        buffers[1]->id;
-    const auto secondKey =
-        buffers[1]->streamKey;
-
-    splitter
-        ->streamSelection
-        ->setSelectedId (
-            secondId,
-            sendNotificationSync);
-    ASSERT_EQ (
-        splitter->displayBuffer,
-        buffers[1]);
+    const std::array<int, 3>
+        selectedBufferIndices {
+            1,
+            2,
+            1
+        };
     XmlElement savedRoot ("ROOT");
-    splitter->options
-        ->saveParameters (
-            &savedRoot);
-    auto* savedPane =
-        savedRoot
-            .getChildByName (
-                "LFPDISPLAY0");
-    ASSERT_NE (savedPane, nullptr);
-    ASSERT_EQ (
-        savedPane
-            ->getStringAttribute (
-                "stream_key"),
-        secondKey);
+    for (int paneIndex = 0;
+         paneIndex < 3;
+         ++paneIndex)
+    {
+        const auto bufferIndex =
+            selectedBufferIndices[
+                paneIndex];
+        splitters[paneIndex]
+            ->streamSelection
+            ->setSelectedId (
+                buffers[bufferIndex]
+                    ->id,
+                sendNotificationSync);
+        splitters[paneIndex]
+            ->options
+            ->saveParameters (
+                &savedRoot);
+    }
 
-    splitter
-        ->streamSelection
-        ->setSelectedId (
-            firstId,
-            sendNotificationSync);
-    ASSERT_EQ (
-        splitter->displayBuffer,
-        buffers[0]);
+    const auto verifyPaneState =
+        [&] (int paneIndex,
+             int expectedBufferIndex)
+        {
+            auto* splitter =
+                splitters[paneIndex];
+            auto* expectedBuffer =
+                buffers[
+                    expectedBufferIndex];
+            EXPECT_EQ (
+                splitter
+                    ->selectedStreamKey,
+                expectedBuffer
+                    ->streamKey);
+            EXPECT_EQ (
+                splitter
+                    ->selectedStreamId,
+                expectedBuffer->id);
+            EXPECT_EQ (
+                splitter
+                    ->displayBuffer,
+                expectedBuffer);
+            EXPECT_EQ (
+                splitter
+                    ->streamSelection
+                    ->getSelectedId(),
+                expectedBuffer->id);
+            EXPECT_EQ (
+                splitter
+                    ->streamSelection
+                    ->getText(),
+                expectedBuffer->name);
+            for (int bufferIndex = 0;
+                 bufferIndex < 3;
+                 ++bufferIndex)
+            {
+                EXPECT_EQ (
+                    buffers[bufferIndex]
+                        ->displays
+                        .contains (
+                            paneIndex),
+                    bufferIndex
+                        == expectedBufferIndex);
+            }
+        };
 
-    splitter->options
-        ->loadParameters (
-            &savedRoot);
+    for (int paneIndex = 0;
+         paneIndex < 3;
+         ++paneIndex)
+    {
+        splitters[paneIndex]
+            ->streamSelection
+            ->setSelectedId (
+                buffers[0]->id,
+                sendNotificationSync);
+        splitters[paneIndex]
+            ->options
+            ->loadParameters (
+                &savedRoot);
+        verifyPaneState (
+            paneIndex,
+            selectedBufferIndices[
+                paneIndex]);
+    }
 
-    XmlElement restoredRoot (
+    XmlElement staleRoot (
+        savedRoot);
+    for (int paneIndex = 0;
+         paneIndex < 3;
+         ++paneIndex)
+    {
+        auto* pane =
+            staleRoot
+                .getChildByName (
+                    "LFPDISPLAY"
+                    + String (
+                        paneIndex));
+        ASSERT_NE (pane, nullptr);
+        pane->setAttribute (
+            "stream_key",
+            "missing|stream");
+        splitters[paneIndex]
+            ->options
+            ->loadParameters (
+                &staleRoot);
+        verifyPaneState (
+            paneIndex,
+            0);
+    }
+
+    XmlElement missingRoot (
+        savedRoot);
+    for (int paneIndex = 0;
+         paneIndex < 3;
+         ++paneIndex)
+    {
+        auto* pane =
+            missingRoot
+                .getChildByName (
+                    "LFPDISPLAY"
+                    + String (
+                        paneIndex));
+        ASSERT_NE (pane, nullptr);
+        pane->removeAttribute (
+            "stream_key");
+        splitters[paneIndex]
+            ->options
+            ->loadParameters (
+                &missingRoot);
+        verifyPaneState (
+            paneIndex,
+            0);
+    }
+
+    for (int paneIndex = 0;
+         paneIndex < 3;
+         ++paneIndex)
+    {
+        canvas
+            ->removeBufferForDisplay (
+                paneIndex,
+                splitters[paneIndex]
+                    ->displayBuffer);
+    }
+    multiStreamSource
+        ->setStreamCountPreservingExisting (
+            3,
+            0);
+    multiStreamTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    XmlElement zeroRoot (
         "ROOT");
-    splitter->options
-        ->saveParameters (
-            &restoredRoot);
-    auto* restoredPane =
-        restoredRoot
-            .getChildByName (
-                "LFPDISPLAY0");
-    ASSERT_NE (
-        restoredPane,
-        nullptr);
-    EXPECT_EQ (
-        restoredPane
-            ->getStringAttribute (
-                "stream_key"),
-        secondKey);
-    EXPECT_EQ (
-        splitter->selectedStreamId,
-        secondId);
-    EXPECT_EQ (
-        splitter->displayBuffer,
-        buffers[1]);
-    EXPECT_EQ (
-        splitter
-            ->streamSelection
-            ->getSelectedId(),
-        secondId);
-    EXPECT_EQ (
-        splitter
-            ->streamSelection
-            ->getText(),
-        buffers[1]->name);
-
-    savedPane->setAttribute (
-        "stream_key",
-        "missing|stream");
-    splitter->options
-        ->loadParameters (
-            &savedRoot);
-    EXPECT_EQ (
-        splitter->selectedStreamKey,
-        firstKey);
-    EXPECT_EQ (
-        splitter->selectedStreamId,
-        firstId);
-    EXPECT_EQ (
-        splitter->displayBuffer,
-        buffers[0]);
-    EXPECT_EQ (
-        splitter
-            ->streamSelection
-            ->getSelectedId(),
-        firstId);
-
-    savedPane->removeAttribute (
-        "stream_key");
-    splitter
-        ->streamSelection
-        ->setSelectedId (
-            secondId,
-            sendNotificationSync);
-    splitter->options
-        ->loadParameters (
-            &savedRoot);
-    EXPECT_EQ (
-        splitter->selectedStreamKey,
-        firstKey);
-    EXPECT_EQ (
-        splitter->selectedStreamId,
-        firstId);
-    EXPECT_EQ (
-        splitter->displayBuffer,
-        buffers[0]);
-    EXPECT_EQ (
-        splitter
-            ->streamSelection
-            ->getSelectedId(),
-        firstId);
+    for (int paneIndex = 0;
+         paneIndex < 3;
+         ++paneIndex)
+    {
+        splitters[paneIndex]
+            ->options
+            ->saveParameters (
+                &zeroRoot);
+        splitters[paneIndex]
+            ->options
+            ->loadParameters (
+                &zeroRoot);
+        EXPECT_TRUE (
+            splitters[paneIndex]
+                ->selectedStreamKey
+                .isEmpty());
+        EXPECT_EQ (
+            splitters[paneIndex]
+                ->selectedStreamId,
+            0);
+        EXPECT_EQ (
+            splitters[paneIndex]
+                ->displayBuffer,
+            nullptr);
+        EXPECT_EQ (
+            splitters[paneIndex]
+                ->streamSelection
+                ->getSelectedId(),
+            0);
+    }
 }
 
 TEST_F (LfpDisplayNodeTests,
@@ -3878,6 +3976,530 @@ TEST_F (LfpDisplayNodeTests,
             ->streamSelection
             ->getText(),
         expectedText);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        StableKeySelectionFromWorkerRunsOnMessageThreadAndSynchronisesState)
+{
+    auto multiStreamTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* multiStreamProcessor =
+        multiStreamTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            multiStreamProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (splitters.size(), 3);
+    auto* splitter = splitters[0];
+    const auto buffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    ASSERT_TRUE (
+        buffers[0]->displays
+            .contains (0));
+    ASSERT_FALSE (
+        buffers[1]->displays
+            .contains (0));
+    auto streamHandler =
+        splitter
+            ->streamSelection
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        streamHandler,
+        nullptr);
+    auto* streamValue =
+        streamHandler
+            ->getValueInterface();
+    ASSERT_NE (
+        streamValue,
+        nullptr);
+    LfpThreadTrackingComboBoxListener
+        listener;
+    splitter
+        ->streamSelection
+        ->addListener (
+            &listener);
+    std::atomic<bool>
+        workerReturned { false };
+    bool selectionResult = false;
+    std::thread worker (
+        [&]
+        {
+            selectionResult =
+                splitter
+                    ->selectStreamByKey (
+                        buffers[1]
+                            ->streamKey);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+    splitter
+        ->streamSelection
+        ->removeListener (
+            &listener);
+
+    EXPECT_TRUE (
+        selectionResult);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        buffers[1]->streamKey);
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamId,
+        buffers[1]->id);
+    EXPECT_EQ (
+        splitter
+            ->displayBuffer,
+        buffers[1]);
+    EXPECT_EQ (
+        splitter
+            ->streamSelection
+            ->getSelectedId(),
+        buffers[1]->id);
+    EXPECT_EQ (
+        splitter
+            ->streamSelection
+            ->getText(),
+        buffers[1]->name);
+    EXPECT_EQ (
+        streamValue
+            ->getCurrentValueAsString(),
+        buffers[1]->name);
+    EXPECT_FALSE (
+        buffers[0]->displays
+            .contains (0));
+    EXPECT_TRUE (
+        buffers[1]->displays
+            .contains (0));
+}
+
+TEST_F (LfpDisplayNodeTests,
+        RemovedSelectedBufferClearsCanonicalStateBeforeSettingsRefresh)
+{
+    auto multiStreamTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* multiStreamProcessor =
+        multiStreamTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto* multiStreamSource =
+        dynamic_cast<
+            FakeSourceNode*> (
+            multiStreamTester
+                ->getSourceNode());
+    ASSERT_NE (
+        multiStreamSource,
+        nullptr);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            multiStreamProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (splitters.size(), 3);
+    auto* removedSplitter =
+        splitters[0];
+    auto* unaffectedSplitter =
+        splitters[1];
+    const auto buffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    removedSplitter
+        ->streamSelection
+        ->setSelectedId (
+            buffers[1]->id,
+            sendNotificationSync);
+    ASSERT_EQ (
+        removedSplitter
+            ->displayBuffer,
+        buffers[1]);
+    ASSERT_EQ (
+        unaffectedSplitter
+            ->displayBuffer,
+        buffers[0]);
+    ASSERT_TRUE (
+        buffers[1]->displays
+            .contains (0));
+    ASSERT_TRUE (
+        buffers[0]->displays
+            .contains (1));
+    const auto unaffectedKey =
+        unaffectedSplitter
+            ->selectedStreamKey;
+    const auto unaffectedId =
+        unaffectedSplitter
+            ->selectedStreamId;
+    auto unaffectedBuffer =
+        unaffectedSplitter
+            ->displayBuffer;
+    auto retainedHandler =
+        removedSplitter
+            ->streamSelection
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        retainedHandler,
+        nullptr);
+    auto* retainedValue =
+        retainedHandler
+            ->getValueInterface();
+    ASSERT_NE (
+        retainedValue,
+        nullptr);
+
+    canvas
+        ->removeBufferForDisplay (
+            1,
+            buffers[1]);
+    ASSERT_EQ (
+        unaffectedSplitter
+            ->displayBuffer,
+        unaffectedBuffer);
+    ASSERT_EQ (
+        unaffectedSplitter
+            ->selectedStreamKey,
+        unaffectedKey);
+    ASSERT_TRUE (
+        buffers[0]->displays
+            .contains (1));
+
+    canvas
+        ->removeBufferForDisplay (
+            0,
+            buffers[1]);
+
+    EXPECT_EQ (
+        removedSplitter
+            ->displayBuffer,
+        nullptr);
+    EXPECT_TRUE (
+        removedSplitter
+            ->selectedStreamKey
+            .isEmpty());
+    EXPECT_EQ (
+        removedSplitter
+            ->selectedStreamId,
+        0);
+    EXPECT_EQ (
+        removedSplitter
+            ->streamSelection
+            ->getSelectedId(),
+        0);
+    EXPECT_EQ (
+        removedSplitter
+            ->streamSelection
+            ->getText(),
+        "Updating data streams");
+    EXPECT_FALSE (
+        removedSplitter
+            ->streamSelection
+            ->isEnabled());
+    EXPECT_FALSE (
+        retainedHandler
+            ->isEnabled());
+    EXPECT_FALSE (
+        buffers[1]->displays
+            .contains (0));
+    EXPECT_EQ (
+        unaffectedSplitter
+            ->selectedStreamKey,
+        unaffectedKey);
+    EXPECT_EQ (
+        unaffectedSplitter
+            ->selectedStreamId,
+        unaffectedId);
+    EXPECT_EQ (
+        unaffectedSplitter
+            ->displayBuffer,
+        unaffectedBuffer);
+    EXPECT_TRUE (
+        buffers[0]->displays
+            .contains (1));
+    String workerValue;
+    std::thread worker (
+        [&]
+        {
+            workerValue =
+                retainedValue
+                    ->getCurrentValueAsString();
+        });
+    worker.join();
+    EXPECT_EQ (
+        workerValue,
+        "Updating data streams");
+
+    multiStreamSource
+        ->setStreamCountPreservingExisting (
+            1,
+            4);
+    multiStreamTester
+        ->updateSourceNodeSettings();
+    const auto remainingBuffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (
+        remainingBuffers.size(),
+        1);
+    canvas->updateSettings();
+    EXPECT_EQ (
+        removedSplitter
+            ->selectedStreamKey,
+        remainingBuffers[0]
+            ->streamKey);
+    EXPECT_EQ (
+        removedSplitter
+            ->selectedStreamId,
+        remainingBuffers[0]->id);
+    EXPECT_EQ (
+        removedSplitter
+            ->displayBuffer,
+        remainingBuffers[0]);
+    EXPECT_TRUE (
+        removedSplitter
+            ->streamSelection
+            ->isEnabled());
+    EXPECT_TRUE (
+        remainingBuffers[0]
+            ->displays
+            .contains (0));
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WorkerStreamSelectionQueuedBeforeDisableIsRejected)
+{
+    auto multiStreamTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* multiStreamProcessor =
+        multiStreamTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            multiStreamProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    auto* splitter =
+        getDisplaySplitters (
+            *canvas)[0];
+    const auto buffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    std::atomic<bool>
+        workerStarted { false };
+    std::atomic<bool>
+        workerReturned { false };
+    bool selectionResult = true;
+    std::thread worker (
+        [&]
+        {
+            workerStarted.store (
+                true);
+            selectionResult =
+                splitter
+                    ->selectStreamByKey (
+                        buffers[1]
+                            ->streamKey);
+            workerReturned.store (
+                true);
+        });
+    while (! workerStarted.load())
+        std::this_thread::yield();
+    splitter
+        ->streamSelection
+        ->setEnabled (
+            false);
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+
+    EXPECT_FALSE (
+        selectionResult);
+    EXPECT_FALSE (
+        splitter
+            ->streamSelection
+            ->isEnabled());
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        buffers[0]->streamKey);
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamId,
+        buffers[0]->id);
+    EXPECT_EQ (
+        splitter
+            ->displayBuffer,
+        buffers[0]);
+    EXPECT_TRUE (
+        buffers[0]->displays
+            .contains (0));
+    EXPECT_FALSE (
+        buffers[1]->displays
+            .contains (0));
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WorkerStreamSelectionReturnsSafelyWhenNotificationDestroysCanvas)
+{
+    auto multiStreamTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* multiStreamProcessor =
+        multiStreamTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            multiStreamProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    auto* splitter =
+        getDisplaySplitters (
+            *canvas)[0];
+    const auto buffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    const auto secondKey =
+        buffers[1]->streamKey;
+    LfpDestroyCanvasComboBoxListener
+        destroyListener (
+            canvas);
+    splitter
+        ->streamSelection
+        ->addListener (
+            &destroyListener);
+    std::atomic<bool>
+        workerReturned { false };
+    bool selectionResult = true;
+    std::thread worker (
+        [&]
+        {
+            selectionResult =
+                splitter
+                    ->selectStreamByKey (
+                        secondKey);
+            workerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+
+    EXPECT_EQ (
+        canvas,
+        nullptr);
+    EXPECT_FALSE (
+        selectionResult);
 }
 
 TEST_F (LfpDisplayNodeTests,
@@ -11295,7 +11917,15 @@ TEST_F (LfpDisplayNodeTests,
     canvas->removeBufferForDisplay (0);
     canvas->beginAnimation();
     canvas->endAnimation();
-    split->displayBuffer = displayBuffer;
+    split
+        ->streamSelection
+        ->setEnabled (
+            true);
+    ASSERT_TRUE (
+        split
+            ->selectStreamByKey (
+                displayBuffer
+                    ->streamKey));
 
     processConstantBlock (40.0f, 1024);
     processTriggeredBlock (40.0f);
@@ -11315,7 +11945,15 @@ TEST_F (LfpDisplayNodeTests,
     split->options->buttonClicked (reset);
     canvas->beginAnimation();
     canvas->endAnimation();
-    split->displayBuffer = displayBuffer;
+    split
+        ->streamSelection
+        ->setEnabled (
+            true);
+    ASSERT_TRUE (
+        split
+            ->selectStreamByKey (
+                displayBuffer
+                    ->streamKey));
 
     startTrial (*canvas, 80.0f);
     ASSERT_GT (split->screenBufferIndex[0], 100);

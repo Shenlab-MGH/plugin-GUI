@@ -143,7 +143,9 @@ void LfpDisplayNode::updateSettings()
             for (auto splitID : displayBuffer->displays)
             {
                 LfpDisplayEditor* ed = (LfpDisplayEditor*) getEditor();
-                ed->removeBufferForDisplay (splitID);
+                ed->removeBufferForDisplay (
+                    splitID,
+                    displayBuffer);
             }
         }
     }

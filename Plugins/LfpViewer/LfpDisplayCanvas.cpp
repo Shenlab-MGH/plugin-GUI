@@ -622,9 +622,103 @@ bool LfpDisplayCanvas::keyPressed (const KeyPress& key, Component* orig)
     return false;
 }
 
-void LfpDisplayCanvas::removeBufferForDisplay (int splitID)
+void LfpDisplayCanvas::removeBufferForDisplay (
+    int splitID)
 {
-    displaySplits[splitID]->displayBuffer = nullptr;
+    Component::SafePointer<
+        LfpDisplayCanvas>
+        safeCanvas (this);
+    const auto removeCurrentBuffer =
+        [safeCanvas,
+         splitID]
+        {
+            if (safeCanvas == nullptr
+                || ! isPositiveAndBelow (
+                    splitID,
+                    safeCanvas
+                        ->displaySplits
+                        .size()))
+            {
+                return;
+            }
+
+            safeCanvas
+                ->removeBufferForDisplay (
+                    splitID,
+                    safeCanvas
+                        ->displaySplits[
+                            splitID]
+                        ->displayBuffer);
+        };
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    if (messageManager == nullptr)
+        return;
+
+    if (messageManager
+            ->isThisTheMessageThread())
+    {
+        removeCurrentBuffer();
+        return;
+    }
+
+    MessageManager::callSync (
+        removeCurrentBuffer);
+}
+
+void LfpDisplayCanvas::removeBufferForDisplay (
+    int splitID,
+    DisplayBuffer* removedBuffer)
+{
+    Component::SafePointer<
+        LfpDisplayCanvas>
+        safeCanvas (this);
+    const auto removeBuffer =
+        [safeCanvas,
+         splitID,
+         removedBuffer]
+        {
+            if (safeCanvas == nullptr
+                || ! isPositiveAndBelow (
+                    splitID,
+                    safeCanvas
+                        ->displaySplits
+                        .size()))
+            {
+                return;
+            }
+
+            auto* splitter =
+                safeCanvas
+                    ->displaySplits[
+                        splitID];
+            if (splitter
+                    ->displayBuffer
+                == removedBuffer)
+            {
+                splitter
+                    ->clearStreamSelection (
+                        "Updating data streams");
+            }
+        };
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    if (messageManager == nullptr)
+        return;
+
+    if (messageManager
+            ->isThisTheMessageThread())
+    {
+        removeBuffer();
+        return;
+    }
+
+    MessageManager::callSync (
+        removeBuffer);
 }
 
 #if BUILD_TESTS
@@ -1016,9 +1110,10 @@ void LfpDisplaySplitter::updateSettings()
     for (auto buffer : availableBuffers)
         streamSelection->addItem (buffer->name, buffer->id);
 
-    selectStreamByKey (
+    selectStreamByKeyOnMessageThread (
         selectedStreamKey,
-        true);
+        true,
+        dontSendNotification);
 
     if (displayBuffer == nullptr) // no inputs to this processor
     {
@@ -1725,8 +1820,10 @@ void LfpDisplaySplitter::setDrawableStream (uint16 sp)
         return;
     }
 
-    if (selectStreamByKey (
-            stream->getKey()))
+    if (selectStreamByKeyOnMessageThread (
+            stream->getKey(),
+            false,
+            dontSendNotification))
     {
         updateSettings();
     }
@@ -1735,6 +1832,50 @@ void LfpDisplaySplitter::setDrawableStream (uint16 sp)
 bool LfpDisplaySplitter::selectStreamByKey (
     const String& streamKey,
     bool fallBackToFirst)
+{
+    Component::SafePointer<
+        LfpDisplaySplitter>
+        safeSplitter (this);
+    const auto performSelection =
+        [safeSplitter,
+         streamKey,
+         fallBackToFirst]
+        {
+            if (safeSplitter == nullptr
+                || ! safeSplitter
+                        ->streamSelection
+                        ->isEnabled())
+                return false;
+
+            return safeSplitter
+                ->selectStreamByKeyOnMessageThread (
+                    streamKey,
+                    fallBackToFirst,
+                    sendNotificationSync);
+        };
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    if (messageManager == nullptr)
+        return false;
+
+    if (messageManager
+            ->isThisTheMessageThread())
+    {
+        return performSelection();
+    }
+
+    return MessageManager::callSync (
+               performSelection)
+        .value_or (false);
+}
+
+bool LfpDisplaySplitter::
+    selectStreamByKeyOnMessageThread (
+        const String& streamKey,
+        bool fallBackToFirst,
+        NotificationType notification)
 {
     jassert (
         MessageManager::getInstance()
@@ -1799,9 +1940,16 @@ bool LfpDisplaySplitter::selectStreamByKey (
             displayBuffer->id);
     streamSelection->setEnabled (
         true);
+    Component::SafePointer<
+        LfpDisplaySplitter>
+        safeSplitter (this);
     streamSelection->setSelectedId (
         displayBuffer->id,
-        dontSendNotification);
+        notification);
+    if (safeSplitter == nullptr)
+    {
+        return false;
+    }
     streamSelection
         ->synchroniseAccessibilityState();
     return true;
@@ -1922,7 +2070,12 @@ void LfpDisplaySplitter::comboBoxChanged (juce::ComboBox* comboBox)
 {
     if (comboBox == streamSelection.get())
     {
-        setDrawableStream (comboBox->getSelectedId());
+        if (comboBox->getSelectedId()
+            != selectedStreamId)
+        {
+            setDrawableStream (
+                comboBox->getSelectedId());
+        }
 
         select();
     }

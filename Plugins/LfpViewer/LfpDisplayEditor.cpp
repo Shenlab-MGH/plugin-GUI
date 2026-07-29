@@ -614,13 +614,17 @@ void LfpDisplayEditor::resized()
     syncButton->setBounds (40, 84, 110, 30);
 }
 
-void LfpDisplayEditor::removeBufferForDisplay (int splitID)
+void LfpDisplayEditor::removeBufferForDisplay (
+    int splitID,
+    DisplayBuffer* removedBuffer)
 {
     if (canvas != nullptr)
     {
         LfpDisplayCanvas* cv = (LfpDisplayCanvas*) canvas.get();
 
-        cv->removeBufferForDisplay (splitID);
+        cv->removeBufferForDisplay (
+            splitID,
+            removedBuffer);
     }
 }
 

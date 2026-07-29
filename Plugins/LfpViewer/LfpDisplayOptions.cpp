@@ -3763,9 +3763,10 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             int64 start = Time::getHighResolutionTicks();
 
             canvasSplit
-                ->selectStreamByKey (
+                ->selectStreamByKeyOnMessageThread (
                     streamKey,
-                    true);
+                    true,
+                    dontSendNotification);
 
             //LOGD("    Added displays in ", MS_FROM_START, " milliseconds");
             start = Time::getHighResolutionTicks();

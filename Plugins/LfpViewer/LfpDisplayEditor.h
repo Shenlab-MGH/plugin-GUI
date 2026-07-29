@@ -129,7 +129,9 @@ public:
     void resized() override;
 
     /** Removes buffers for unused streams (called during updateSettings) */
-    void removeBufferForDisplay (int);
+    void removeBufferForDisplay (
+        int splitID,
+        DisplayBuffer* removedBuffer);
 
 private:
     LfpDisplayNode* lfpProcessor;

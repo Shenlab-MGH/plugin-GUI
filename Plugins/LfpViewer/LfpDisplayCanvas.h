@@ -130,7 +130,10 @@ public:
     void mouseUp (const MouseEvent&) override;
 
     /** Sets a buffer to nullptr when it's no longer needed */
-    void removeBufferForDisplay (int);
+    void removeBufferForDisplay (int splitID);
+    void removeBufferForDisplay (
+        int splitID,
+        DisplayBuffer* removedBuffer);
 
 #if BUILD_TESTS
     bool getChannelBitmapBounds (int splitIndex, int& x, int& y, int& width, int& height);
@@ -271,8 +274,9 @@ public:
     void setDrawableStream (uint16 streamId);
 
     /** Selects a stream by its stable key, optionally falling back to the first available stream. */
-    bool selectStreamByKey (const String& streamKey,
-                            bool fallBackToFirst = false);
+    TESTABLE bool selectStreamByKey (
+        const String& streamKey,
+        bool fallBackToFirst = false);
 
     /** Gets the X coordinate (in s) for a particular channel / sample combo */
     const float getXCoord (int chan, int samp);
@@ -399,6 +403,13 @@ public:
     String getStreamKey() const;
 
 private:
+    friend class LfpDisplayCanvas;
+    friend class LfpDisplayOptions;
+
+    bool selectStreamByKeyOnMessageThread (
+        const String& streamKey,
+        bool fallBackToFirst,
+        NotificationType notification);
     void clearStreamSelection (const String& placeholder);
     bool hasAmbiguousStreamKeys (
         const Array<DisplayBuffer*>& buffers) const;
