@@ -208,10 +208,6 @@ void LfpDisplay::setNumChannels (int newChannelCount)
             clearStoredVisibilityForStream (
                 streamKey);
         }
-        else
-        {
-            hiddenStableChannels.clear();
-        }
     }
     beginStableChannelIdentityBulkMutation();
     invalidateStableChannelIdentities();
@@ -1135,6 +1131,12 @@ bool LfpDisplay::
             && slot->get()
                    == retainedIdentity)
         {
+#if BUILD_TESTS
+            notifyStableIdentityLifecycleTestHook (
+                StableIdentityLifecycleTestPhase::
+                    beforeVisibilityRequestMutation,
+                index);
+#endif
             setEnabledState (
                 visibility
                     == LfpWaveformVisibility::

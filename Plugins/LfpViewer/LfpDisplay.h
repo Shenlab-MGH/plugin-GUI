@@ -82,6 +82,7 @@ public:
         beforeDrawableHierarchyMutation,
         beforePaneVisibilityMutation,
         beforeChannelStateMutation,
+        beforeVisibilityRequestMutation,
         canvasVisibilityChangedEntry,
         canvasEnablementChangedEntry,
         splitterVisibilityChangedEntry,

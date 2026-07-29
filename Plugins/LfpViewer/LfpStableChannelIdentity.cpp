@@ -96,6 +96,37 @@ public:
         return result;
     }
 
+    bool waitForMutationResult (
+        std::chrono::milliseconds timeout) noexcept
+    {
+        std::unique_lock<std::mutex>
+            lock (mutex);
+        if (completionChanged.wait_for (
+                lock,
+                timeout,
+                [this]
+                {
+                    return completed;
+                }))
+        {
+            return result;
+        }
+
+        if (! callbackClaimed)
+        {
+            cancelled = true;
+            return false;
+        }
+
+        completionChanged.wait (
+            lock,
+            [this]
+            {
+                return completed;
+            });
+        return result;
+    }
+
 private:
     std::mutex mutex;
     std::condition_variable completionChanged;
@@ -483,8 +514,17 @@ bool LfpStableChannelActionRequest::
                     return;
                 }
 
+                bool result = false;
+                try
+                {
+                    result =
+                        performOnOwnerThread();
+                }
+                catch (...)
+                {
+                }
                 completion->complete (
-                    performOnOwnerThread());
+                    result);
             });
     if (! posted)
     {
@@ -492,7 +532,8 @@ bool LfpStableChannelActionRequest::
         return false;
     }
 
-    return completion->waitForResult (
+    return completion
+        ->waitForMutationResult (
         stableChannelDiagnosticTimeout);
 }
 

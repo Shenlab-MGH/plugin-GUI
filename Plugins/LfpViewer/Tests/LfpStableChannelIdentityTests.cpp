@@ -27,6 +27,7 @@
 #include <TestFixtures.h>
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <exception>
 #include <memory>
 #include <mutex>
@@ -1326,6 +1327,161 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     ASSERT_TRUE (
         splitter->selectStreamByKey (
             removedStreamKey));
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+
+    editor->canvas.reset();
+    dynamicProcessor
+        ->setHeadlessMode (
+            true);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        AmbiguousZeroChannelTransitionPreservesAStillAvailableUniqueStream)
+{
+    auto dynamicTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    30000.0f,
+                    0.195f,
+                    3 }),
+            TestGuiRuntimeLifetime::process);
+    auto* dynamicProcessor =
+        dynamicTester
+            ->createProcessor<LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    dynamicProcessor->setHeadlessMode (
+        false);
+    dynamicProcessor->setProcessorType (
+        Plugin::Processor::SPLITTER);
+    auto* editor =
+        static_cast<LfpDisplayEditor*> (
+            dynamicProcessor
+                ->createEditor());
+    dynamicProcessor->setProcessorType (
+        Plugin::Processor::SINK);
+    ASSERT_NE (editor, nullptr);
+    dynamicProcessor->setHeadlessMode (
+        true);
+    editor->canvas.reset (
+        editor->createNewCanvas());
+    auto* canvas =
+        dynamic_cast<LfpDisplayCanvas*> (
+            editor->canvas.get());
+    ASSERT_NE (canvas, nullptr);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    const auto initialBuffers =
+        dynamicProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (
+        initialBuffers.size(),
+        3);
+    const auto firstStreamKey =
+        initialBuffers[0]
+            ->streamKey;
+    const auto secondStreamKey =
+        initialBuffers[1]
+            ->streamKey;
+    const auto uniqueStreamKey =
+        initialBuffers[2]
+            ->streamKey;
+    ASSERT_NE (
+        firstStreamKey,
+        secondStreamKey);
+    ASSERT_NE (
+        firstStreamKey,
+        uniqueStreamKey);
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            uniqueStreamKey));
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+
+    initialBuffers[1]
+        ->streamKey =
+        firstStreamKey;
+    canvas->updateSettings();
+    ASSERT_EQ (
+        splitter->displayBuffer,
+        nullptr);
+    ASSERT_TRUE (
+        splitter
+            ->selectedStreamKey
+            .isEmpty());
+    ASSERT_EQ (
+        display->getNumChannels(),
+        0);
+
+    initialBuffers[1]
+        ->streamKey =
+        secondStreamKey;
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            uniqueStreamKey));
+
+    EXPECT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_FALSE (
+        display->channels[0]
+            ->getEnabledState());
+
+    auto* source =
+        dynamic_cast<FakeSourceNode*> (
+            dynamicTester
+                ->getSourceNode());
+    ASSERT_NE (source, nullptr);
+    source
+        ->setStreamCountPreservingExisting (
+            2,
+            4);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    source
+        ->setStreamCountPreservingExisting (
+            3,
+            4);
+    dynamicTester
+        ->updateSourceNodeSettings();
+
+    const auto replacementBuffers =
+        dynamicProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (
+        replacementBuffers.size(),
+        3);
+    ASSERT_EQ (
+        replacementBuffers[2]
+            ->streamKey,
+        uniqueStreamKey);
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            uniqueStreamKey));
     EXPECT_TRUE (
         display
             ->getStoredChannelVisibility (
@@ -2693,6 +2849,181 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         display->channels[0]
             ->getEnabledState());
     EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        ClaimedWorkerVisibilityRequestWaitsForExplicitCompletion)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    const auto request =
+        display->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+
+    std::mutex callbackMutex;
+    std::condition_variable
+        callbackChanged;
+    std::function<void()>
+        acceptedCallback;
+    std::mutex mutationMutex;
+    std::condition_variable
+        mutationChanged;
+    bool mutationBarrierReached =
+        false;
+    bool releaseMutation = false;
+    std::atomic<bool> workerFinished {
+        false
+    };
+    bool workerResult = false;
+    bool workerWasPendingAfterTimeout =
+        false;
+    display
+        ->setStableIdentityLifecycleTestHook (
+            [&] (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase
+                        phase,
+                int channelIndex)
+            {
+                if (phase
+                        != LfpDisplay::
+                               StableIdentityLifecycleTestPhase::
+                                   beforeVisibilityRequestMutation
+                    || channelIndex != 0)
+                {
+                    return;
+                }
+
+                std::unique_lock<
+                    std::mutex>
+                    lock (
+                        mutationMutex);
+                if (! mutationBarrierReached)
+                {
+                    mutationBarrierReached =
+                        true;
+                    mutationChanged
+                        .notify_all();
+                    mutationChanged.wait (
+                        lock,
+                        [&]
+                        {
+                            return releaseMutation;
+                        });
+                }
+            });
+
+    {
+        ScopedStableChannelDiagnosticTestSeam seam (
+            [&] (
+                std::function<void()> callback)
+            {
+                {
+                    const std::lock_guard<
+                        std::mutex>
+                        lock (
+                            callbackMutex);
+                    acceptedCallback =
+                        std::move (
+                            callback);
+                }
+                callbackChanged
+                    .notify_one();
+                return true;
+            },
+            {});
+        std::thread worker (
+            [&]
+            {
+                workerResult =
+                    request
+                        ->requestWaveformVisibility (
+                            LfpWaveformVisibility::
+                                hidden);
+                workerFinished.store (
+                    true);
+            });
+        {
+            std::unique_lock<
+                std::mutex>
+                lock (
+                    callbackMutex);
+            ASSERT_TRUE (
+                callbackChanged.wait_for (
+                    lock,
+                    std::chrono::
+                        seconds (1),
+                    [&]
+                    {
+                        return static_cast<
+                            bool> (
+                            acceptedCallback);
+                    }));
+        }
+        std::thread timeoutObserver (
+            [&]
+            {
+                {
+                    std::unique_lock<
+                        std::mutex>
+                        lock (
+                            mutationMutex);
+                    mutationChanged.wait (
+                        lock,
+                        [&]
+                        {
+                            return mutationBarrierReached;
+                        });
+                }
+                Thread::sleep (150);
+                workerWasPendingAfterTimeout =
+                    ! workerFinished.load();
+                {
+                    const std::lock_guard<
+                        std::mutex>
+                        lock (
+                            mutationMutex);
+                    releaseMutation = true;
+                }
+                mutationChanged
+                    .notify_all();
+            });
+
+        acceptedCallback();
+        timeoutObserver.join();
+        worker.join();
+    }
+    display
+        ->setStableIdentityLifecycleTestHook (
+            {});
+
+    EXPECT_TRUE (
+        workerWasPendingAfterTimeout);
+    EXPECT_TRUE (workerResult);
+    EXPECT_TRUE (
+        workerFinished.load());
+    EXPECT_FALSE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_FALSE (
         display
             ->getStoredChannelVisibility (
                 0));
