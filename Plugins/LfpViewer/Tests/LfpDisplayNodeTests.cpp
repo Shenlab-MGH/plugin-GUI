@@ -260,6 +260,7 @@ enum class LfpWindowsUiaAction
     toggle,
     queryToggle,
     select,
+    removeFromSelection,
     querySelection,
     expand,
     collapse,
@@ -760,6 +761,49 @@ invokeLfpWindowsUiaControl (
                 selectionItemPattern
                     ->get_CurrentIsSelected (
                         &output.selected);
+        }
+        return finish (result);
+    }
+
+    if (action
+        == LfpWindowsUiaAction::
+               removeFromSelection)
+    {
+        if (selectionItemPattern
+            == nullptr)
+        {
+            return finish (
+                E_NOINTERFACE);
+        }
+
+        result =
+            selectionItemPattern
+                ->RemoveFromSelection();
+        if (SUCCEEDED (result))
+        {
+            result =
+                selectionItemPattern
+                    ->get_CurrentIsSelected (
+                        &output.selected);
+        }
+        if (SUCCEEDED (result)
+            && valuePattern != nullptr)
+        {
+            BSTR currentValue =
+                nullptr;
+            result =
+                valuePattern
+                    ->get_CurrentValue (
+                        &currentValue);
+            if (SUCCEEDED (result)
+                && currentValue
+                       != nullptr)
+            {
+                output.value =
+                    currentValue;
+            }
+            SysFreeString (
+                currentValue);
         }
         return finish (result);
     }
@@ -2931,6 +2975,55 @@ TEST_F (LfpDisplayNodeTests,
         TRUE);
     EXPECT_TRUE (
         canvas->isPaneActive (1));
+    EXPECT_TRUE (
+        splitters[1]
+            ->options
+            ->isVisible());
+
+    const auto removeSelectedResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            secondId,
+            LfpWindowsUiaAction::
+                removeFromSelection);
+    EXPECT_EQ (
+        removeSelectedResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        removeSelectedResult.selected,
+        TRUE);
+    EXPECT_EQ (
+        removeSelectedResult.value,
+        L"Selected");
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+    EXPECT_TRUE (
+        splitters[1]
+            ->options
+            ->isVisible());
+
+    const auto removeUnselectedResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            firstId,
+            LfpWindowsUiaAction::
+                removeFromSelection);
+    EXPECT_EQ (
+        removeUnselectedResult
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        removeUnselectedResult
+            .selected,
+        FALSE);
+    EXPECT_EQ (
+        removeUnselectedResult.value,
+        L"Not selected");
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+    EXPECT_FALSE (
+        canvas->isPaneActive (0));
     EXPECT_TRUE (
         splitters[1]
             ->options
