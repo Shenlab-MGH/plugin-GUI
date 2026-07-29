@@ -53,6 +53,29 @@ namespace
 constexpr auto channelActionDispatchTimeout =
     std::chrono::milliseconds (100);
 
+#if BUILD_TESTS
+std::mutex channelActionDispatchTestHookMutex;
+std::function<void (
+    LfpChannelActionDispatchTestPhase)>
+    channelActionDispatchTestHook;
+
+void notifyChannelActionDispatchTestHook (
+    LfpChannelActionDispatchTestPhase phase)
+{
+    std::function<void (
+        LfpChannelActionDispatchTestPhase)>
+        hook;
+    {
+        const std::lock_guard<std::mutex>
+            lock (
+                channelActionDispatchTestHookMutex);
+        hook = channelActionDispatchTestHook;
+    }
+    if (hook)
+        hook (phase);
+}
+#endif
+
 class LfpChannelActionCompletion final
 {
 public:
@@ -128,6 +151,19 @@ private:
     bool completed = false;
 };
 } // namespace
+
+#if BUILD_TESTS
+void setLfpChannelActionDispatchTestHook (
+    std::function<void (
+        LfpChannelActionDispatchTestPhase)> hook)
+{
+    const std::lock_guard<std::mutex>
+        lock (
+            channelActionDispatchTestHookMutex);
+    channelActionDispatchTestHook =
+        std::move (hook);
+}
+#endif
 
 String encodeWaveformVisibilityUtf8Hex (
     StringRef text)
@@ -816,6 +852,43 @@ public:
             && canInvert == canInvertToUse;
     }
 
+    bool matchesLiveIdentity (
+        int nodeId,
+        int paneToUse,
+        StringRef streamToUse,
+        const Uuid& runtimeUuidToUse,
+        StringRef identifierToUse,
+        int sourceNodeIdToUse,
+        int localIndexToUse,
+        StringRef nameToUse,
+        ContinuousChannel::Type typeToUse) const
+    {
+        if (! isActive()
+            || processorNodeId != nodeId
+            || paneIndex != paneToUse
+            || streamKey != String (streamToUse)
+            || runtimeUuid != runtimeUuidToUse
+            || persistedIdentifier
+                   != String (identifierToUse)
+            || persistedSourceNodeId
+                   != sourceNodeIdToUse
+            || persistedLocalIndex
+                   != localIndexToUse
+            || channelName != String (nameToUse)
+            || persistedChannelType != typeToUse)
+        {
+            return false;
+        }
+        return stableKeyKind
+                   == LfpStableChannelKey::Kind::identifier
+            ? stableIdentifier
+                  == String (identifierToUse)
+            : stableSourceNodeId
+                      == sourceNodeIdToUse
+                  && stableLocalIndex
+                         == localIndexToUse;
+    }
+
     void requestAction()
     {
         if (! isActive())
@@ -855,11 +928,21 @@ public:
                 [perform,
                  completion]
                 {
+#if BUILD_TESTS
+                    notifyChannelActionDispatchTestHook (
+                        LfpChannelActionDispatchTestPhase::
+                            beforeClaim);
+#endif
                     if (! completion
                               ->tryBeginCallback())
                     {
                         return;
                     }
+#if BUILD_TESTS
+                    notifyChannelActionDispatchTestHook (
+                        LfpChannelActionDispatchTestPhase::
+                            afterClaim);
+#endif
                     try
                     {
                         perform();
@@ -1480,22 +1563,46 @@ void LfpChannelDisplayInfo::
         && display->channels[chan]
                ->getCanBeInverted();
 
+    const auto isActionAvailable =
+        [this] (size_t index)
+        {
+            auto* component =
+                channelActionAccessibilityComponents[
+                    index]
+                    .get();
+            return component != nullptr
+                && component->isShowing()
+                && component
+                       ->Component::isEnabled();
+        };
     bool currentMatches = true;
-    for (const auto& state :
-         channelActionAccessibilityStates)
+    for (size_t index = 0;
+         index
+         < channelActionAccessibilityStates
+               .size();
+         ++index)
     {
+        const auto& state =
+            channelActionAccessibilityStates[
+                index];
+        const auto actionAvailable =
+            isActionAvailable (index);
         currentMatches =
             currentMatches
-            && state != nullptr
-            && state->isActive()
-            && state->matchesIdentity (
-                *identity,
-                nodeId)
-            && state->matchesObservableState (
-                selected,
-                focused,
-                inverted,
-                invertible);
+            && (actionAvailable
+                    ? state != nullptr
+                          && state->isActive()
+                          && state
+                                 ->matchesIdentity (
+                                     *identity,
+                                     nodeId)
+                          && state
+                                 ->matchesObservableState (
+                                     selected,
+                                     focused,
+                                     inverted,
+                                     invertible)
+                    : state == nullptr);
     }
     if (currentMatches)
         return;
@@ -1514,6 +1621,8 @@ void LfpChannelDisplayInfo::
          index < actions.size();
          ++index)
     {
+        if (! isActionAvailable (index))
+            continue;
         auto state = std::make_shared<
             LfpChannelActionAccessibilityState> (
             *this,
@@ -1557,8 +1666,24 @@ void LfpChannelDisplayInfo::
             ->invalidateAccessibilityHandler();
     }
 
-    const auto& state =
-        channelActionAccessibilityStates[0];
+    const auto stateIterator =
+        std::find_if (
+            channelActionAccessibilityStates
+                .begin(),
+            channelActionAccessibilityStates
+                .end(),
+            [] (const auto& state)
+            {
+                return state != nullptr;
+            });
+    if (stateIterator
+        == channelActionAccessibilityStates
+               .end())
+    {
+        revokeChannelActionAccessibility();
+        return;
+    }
+    const auto& state = *stateIterator;
     const auto oneBasedPane =
         state->getPaneIndex() + 1;
     setComponentID (
@@ -1595,11 +1720,23 @@ void LfpChannelDisplayInfo::
     setAccessible (true);
     invalidateAccessibilityHandler();
     layoutChannelActionAccessibilityComponents();
+    channelActionAccessibilityNotificationPending =
+        true;
 }
 
 void LfpChannelDisplayInfo::
     revokeChannelActionAccessibility()
 {
+    const auto hadPublication =
+        std::any_of (
+            channelActionAccessibilityStates
+                .begin(),
+            channelActionAccessibilityStates
+                .end(),
+            [] (const auto& state)
+            {
+                return state != nullptr;
+            });
     for (auto& state :
          channelActionAccessibilityStates)
     {
@@ -1634,6 +1771,40 @@ void LfpChannelDisplayInfo::
     setDescription ({});
     setHelpText ({});
     invalidateAccessibilityHandler();
+    channelActionAccessibilityNotificationPending =
+        channelActionAccessibilityNotificationPending
+        || hadPublication;
+}
+
+bool LfpChannelDisplayInfo::
+    takeChannelActionAccessibilityNotificationTargets (
+        std::vector<
+            Component::SafePointer<Component>>&
+            valueTargets,
+        std::vector<
+            Component::SafePointer<Component>>&
+            structureTargets)
+{
+    if (! channelActionAccessibilityNotificationPending)
+        return false;
+    channelActionAccessibilityNotificationPending =
+        false;
+    for (const auto& component :
+         channelActionAccessibilityComponents)
+    {
+        if (component != nullptr
+            && component->isAccessible())
+        {
+            valueTargets.emplace_back (
+                component.get());
+        }
+    }
+    if (isAccessible())
+    {
+        structureTargets.emplace_back (
+            this);
+    }
+    return true;
 }
 
 LfpChannelActionResult
@@ -1669,9 +1840,22 @@ LfpChannelDisplayInfo::
     {
         return LfpChannelActionResult::rejected;
     }
+    auto* requestedComponent =
+        channelActionAccessibilityComponents[
+            actionIndex]
+            .get();
+    if (requestedComponent == nullptr
+        || ! requestedComponent->isShowing()
+        || ! requestedComponent
+                ->Component::isEnabled()
+        || ! requestedComponent->isAccessible())
+    {
+        return LfpChannelActionResult::rejected;
+    }
     return display
         ->performChannelActionAccessibility (
             *this,
+            state,
             action);
 }
 
@@ -1692,6 +1876,33 @@ bool LfpChannelDisplayInfo::
         }
     }
     return true;
+}
+
+bool LfpChannelDisplayInfo::
+    matchesChannelActionAccessibilityLiveIdentity (
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state,
+        int nodeId,
+        int paneIndex,
+        StringRef streamKey,
+        const Uuid& runtimeUuid,
+        StringRef persistedIdentifier,
+        int persistedSourceNodeId,
+        int persistedLocalIndex,
+        StringRef channelName,
+        ContinuousChannel::Type channelType) const
+{
+    return state != nullptr
+        && state->matchesLiveIdentity (
+            nodeId,
+            paneIndex,
+            streamKey,
+            runtimeUuid,
+            persistedIdentifier,
+            persistedSourceNodeId,
+            persistedLocalIndex,
+            channelName,
+            channelType);
 }
 
 void LfpChannelDisplayInfo::

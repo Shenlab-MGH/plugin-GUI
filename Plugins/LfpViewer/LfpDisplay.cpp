@@ -1927,6 +1927,9 @@ void LfpDisplay::
          index < count;
          ++index)
     {
+#if BUILD_TESTS
+        ++channelActionAccessibilityWorkForTests;
+#endif
         auto* channel = channels[index];
         auto* info = channelInfo[index];
         const auto& identity =
@@ -2106,6 +2109,75 @@ void LfpDisplay::
         if (auto* info = channelInfo[index])
             info->revokeChannelActionAccessibility();
     }
+
+    std::vector<
+        Component::SafePointer<Component>>
+        valueTargets;
+    std::vector<
+        Component::SafePointer<Component>>
+        structureTargets;
+    bool notificationPending = false;
+    for (auto* info : channelInfo)
+    {
+        if (info != nullptr)
+        {
+            notificationPending =
+                info
+                    ->takeChannelActionAccessibilityNotificationTargets (
+                        valueTargets,
+                        structureTargets)
+                || notificationPending;
+        }
+    }
+    if (notificationPending)
+    {
+        structureTargets.emplace_back (
+            this);
+#if BUILD_TESTS
+        ++channelActionNotificationFlushesForTests;
+#endif
+        MessageManager::callAsync (
+            [valueTargets =
+                 std::move (valueTargets),
+             structureTargets =
+                 std::move (structureTargets)]
+            {
+                for (const auto& target :
+                     valueTargets)
+                {
+                    if (auto* component =
+                            target.getComponent())
+                    {
+                        if (auto* handler =
+                                component
+                                    ->getAccessibilityHandler())
+                        {
+                            handler
+                                ->notifyAccessibilityEvent (
+                                    AccessibilityEvent::
+                                        valueChanged);
+                        }
+                    }
+                }
+                for (const auto& target :
+                     structureTargets)
+                {
+                    if (auto* component =
+                            target.getComponent())
+                    {
+                        if (auto* handler =
+                                component
+                                    ->getAccessibilityHandler())
+                        {
+                            handler
+                                ->notifyAccessibilityEvent (
+                                    AccessibilityEvent::
+                                        structureChanged);
+                        }
+                    }
+                }
+            });
+    }
 }
 
 void LfpDisplay::
@@ -2191,7 +2263,9 @@ bool LfpDisplay::
 
 bool LfpDisplay::
     validateChannelActionAccessibility (
-        const LfpChannelDisplayInfo& info) const
+        const LfpChannelDisplayInfo& info,
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state) const
 {
     jassert (
         MessageManager::existsAndIsCurrentThread());
@@ -2207,6 +2281,11 @@ bool LfpDisplay::
         || index < 0
         || index >= channels.size()
         || index >= channelInfo.size()
+        || index
+               >= canvasSplit
+                      ->displayBuffer
+                      ->channelMetadata
+                      .size()
         || index >= static_cast<int> (
             stableChannelIdentityBlueprints.size())
         || channelInfo[index] != &info
@@ -2245,7 +2324,59 @@ bool LfpDisplay::
         return false;
     }
 
-    int matches = 0;
+    const auto& metadata =
+        canvasSplit
+            ->displayBuffer
+            ->channelMetadata
+            .getReference (index);
+    if (! info
+             .matchesChannelActionAccessibilityLiveIdentity (
+                 state,
+                 canvasSplit->processor
+                     ->getNodeId(),
+                 canvasSplit->splitID,
+                 canvasSplit->getStreamKey(),
+                 metadata.uuid,
+                 metadata.identifier,
+                 metadata.sourceNodeId,
+                 metadata.localIndex,
+                 metadata.name,
+                 metadata.type))
+    {
+        return false;
+    }
+
+    int pairMatches = 0;
+    int channelMatches = 0;
+    int infoMatches = 0;
+    const auto pairCount =
+        jmax (
+            channels.size(),
+            channelInfo.size());
+    for (int pairIndex = 0;
+         pairIndex < pairCount;
+         ++pairIndex)
+    {
+        const auto channelMatchesHere =
+            pairIndex < channels.size()
+            && channels[pairIndex]
+                   == channels[index];
+        const auto infoMatchesHere =
+            pairIndex < channelInfo.size()
+            && channelInfo[pairIndex]
+                   == &info;
+        channelMatches +=
+            channelMatchesHere ? 1 : 0;
+        infoMatches +=
+            infoMatchesHere ? 1 : 0;
+        pairMatches +=
+            channelMatchesHere
+                && infoMatchesHere
+            ? 1
+            : 0;
+    }
+
+    int drawableMatches = 0;
     for (const auto& drawable :
          drawableChannels)
     {
@@ -2254,20 +2385,27 @@ bool LfpDisplay::
             && drawable.channelInfo
                    == &info)
         {
-            ++matches;
+            ++drawableMatches;
         }
     }
-    return matches == 1;
+    return pairMatches == 1
+        && channelMatches == 1
+        && infoMatches == 1
+        && drawableMatches == 1;
 }
 
 LfpChannelActionResult
 LfpDisplay::
     performChannelActionAccessibility (
         LfpChannelDisplayInfo& info,
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state,
         LfpChannelAction action)
 {
     jassert (
         MessageManager::existsAndIsCurrentThread());
+    if (state == nullptr)
+        return LfpChannelActionResult::rejected;
     const auto actionIndex =
         action
                 == LfpChannelAction::select
@@ -2284,7 +2422,8 @@ LfpDisplay::
                       .channelActionAccessibilityStates
                       .size()
         || ! validateChannelActionAccessibility (
-            info))
+            info,
+            state))
     {
         return LfpChannelActionResult::rejected;
     }
@@ -2698,6 +2837,7 @@ void LfpDisplay::
     prepareStableChannelIdentityTargetUnavailable()
 {
     invalidateWaveformVisibilityAccessibility();
+    invalidateChannelActionAccessibility();
     for (const auto& slot :
          stableChannelIdentityBindingSlots)
     {
@@ -3005,6 +3145,27 @@ uint64 LfpDisplay::
     getWaveformVisibilityResolutionWorkForTests() const noexcept
 {
     return waveformVisibilityResolutionWorkForTests;
+}
+
+void LfpDisplay::
+    resetChannelActionAccessibilityWorkForTests()
+{
+    channelActionAccessibilityWorkForTests =
+        0;
+    channelActionNotificationFlushesForTests =
+        0;
+}
+
+uint64 LfpDisplay::
+    getChannelActionAccessibilityWorkForTests() const noexcept
+{
+    return channelActionAccessibilityWorkForTests;
+}
+
+uint64 LfpDisplay::
+    getChannelActionNotificationFlushesForTests() const noexcept
+{
+    return channelActionNotificationFlushesForTests;
 }
 
 void LfpDisplay::

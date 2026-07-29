@@ -58,6 +58,19 @@ enum class LfpChannelActionResult
     completedNoChange
 };
 
+#if BUILD_TESTS
+enum class LfpChannelActionDispatchTestPhase
+{
+    beforeClaim,
+    afterClaim
+};
+
+TESTABLE void
+setLfpChannelActionDispatchTestHook (
+    std::function<void (
+        LfpChannelActionDispatchTestPhase)> hook);
+#endif
+
 /**
     Displays meta data pertaining to an associated channel, such as channel number.
  
@@ -149,6 +162,8 @@ private:
         std::shared_ptr<LfpChannelActionAccessibilityState>,
         4>
         channelActionAccessibilityStates;
+    bool channelActionAccessibilityNotificationPending =
+        false;
 
     bool channelTypeStringIsVisible;
     bool channelNumberHidden;
@@ -196,8 +211,27 @@ private:
     bool matchesChannelActionAccessibilityIdentity (
         const LfpStableChannelIdentity& identity,
         int nodeId) const;
+    bool matchesChannelActionAccessibilityLiveIdentity (
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state,
+        int nodeId,
+        int paneIndex,
+        StringRef streamKey,
+        const Uuid& runtimeUuid,
+        StringRef persistedIdentifier,
+        int persistedSourceNodeId,
+        int persistedLocalIndex,
+        StringRef channelName,
+        ContinuousChannel::Type channelType) const;
     void handleChannelActionAccessibilityLifecycleChange ();
     void layoutChannelActionAccessibilityComponents ();
+    bool takeChannelActionAccessibilityNotificationTargets (
+        std::vector<
+            Component::SafePointer<Component>>&
+            valueTargets,
+        std::vector<
+            Component::SafePointer<Component>>&
+            structureTargets);
 
     String getTooltip() override;
 };

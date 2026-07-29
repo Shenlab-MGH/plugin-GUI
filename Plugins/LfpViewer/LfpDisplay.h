@@ -113,6 +113,12 @@ public:
     resetWaveformVisibilityResolutionWorkForTests();
     TESTABLE uint64
     getWaveformVisibilityResolutionWorkForTests() const noexcept;
+    TESTABLE void
+    resetChannelActionAccessibilityWorkForTests();
+    TESTABLE uint64
+    getChannelActionAccessibilityWorkForTests() const noexcept;
+    TESTABLE uint64
+    getChannelActionNotificationFlushesForTests() const noexcept;
 #endif
 
     /** Returns the number of display channels*/
@@ -385,9 +391,13 @@ private:
     LfpChannelActionResult
     performChannelActionAccessibility (
         LfpChannelDisplayInfo& info,
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state,
         LfpChannelAction action);
     bool validateChannelActionAccessibility (
-        const LfpChannelDisplayInfo& info) const;
+        const LfpChannelDisplayInfo& info,
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state) const;
     void prepareChannelActionStateMutation (
         int channelIndex);
     void finishChannelActionStateMutation (
@@ -564,6 +574,8 @@ private:
         stableIdentityLifecycleTestHook;
     mutable uint64 stableIdentityAvailabilityWorkForTests = 0;
     uint64 waveformVisibilityResolutionWorkForTests = 0;
+    uint64 channelActionAccessibilityWorkForTests = 0;
+    uint64 channelActionNotificationFlushesForTests = 0;
 #endif
 
     String colourGrouping;

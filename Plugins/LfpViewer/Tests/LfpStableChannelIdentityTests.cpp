@@ -1284,13 +1284,22 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             AccessibilityActionType::press));
     EXPECT_FALSE (
         target->getSelected());
-    MessageManager::getInstance()
-        ->runDispatchLoopUntil (1);
-
     auto* invert =
         findIdentityTestChildByIdSuffix (
             *info,
             ".invert_signal");
+    for (int attempt = 0;
+         attempt < 100
+             && invert == nullptr;
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (1);
+        invert =
+            findIdentityTestChildByIdSuffix (
+                *info,
+                ".invert_signal");
+    }
     ASSERT_NE (invert, nullptr);
     const auto invertedBefore =
         target->getInputInverted();
@@ -1543,6 +1552,619 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     ASSERT_TRUE (
         workerFinished.load());
     worker.join();
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7RequestedChildHideAndDisableStayUnpublishedAndCannotMutate)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (
+        display->drawableChannels.isEmpty());
+    auto* target =
+        display->drawableChannels[0].channel;
+    auto* info =
+        display->drawableChannels[0].channelInfo;
+    ASSERT_NE (target, nullptr);
+    ASSERT_NE (info, nullptr);
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+
+    for (const auto hide :
+         { true, false })
+    {
+        auto* monitor =
+            findIdentityTestChildByIdSuffix (
+                *info,
+                ".monitor");
+        ASSERT_NE (monitor, nullptr);
+        const auto retained =
+            monitor->getAccessibilityHandler()
+                ->getActions();
+        ASSERT_TRUE (
+            drainIdentityTestBroadcastMessages (
+                *messageCenter)
+                .isEmpty());
+
+        if (hide)
+            monitor->setVisible (false);
+        else
+            monitor->setEnabled (false);
+
+        EXPECT_FALSE (monitor->isAccessible());
+        auto fresh =
+            monitor->createAccessibilityHandler();
+        EXPECT_TRUE (
+            fresh == nullptr
+            || ! fresh->isEnabled());
+        if (fresh != nullptr)
+        {
+            EXPECT_TRUE (
+                fresh->getActions()
+                    .invoke (
+                        AccessibilityActionType::press));
+        }
+        EXPECT_TRUE (
+            retained.invoke (
+                AccessibilityActionType::press));
+        EXPECT_TRUE (
+            drainIdentityTestBroadcastMessages (
+                *messageCenter)
+                .isEmpty());
+
+        if (hide)
+            monitor->setVisible (true);
+        else
+            monitor->setEnabled (true);
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (1);
+        monitor =
+            findIdentityTestChildByIdSuffix (
+                *info,
+                ".monitor");
+        ASSERT_NE (monitor, nullptr);
+        ASSERT_TRUE (monitor->isAccessible());
+        ASSERT_TRUE (
+            monitor->getAccessibilityHandler()
+                ->isEnabled());
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7PanePreHideRetiresCopiedMonitorBeforeVisibilityMutation)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::TWO_VERT);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_GE (splitters.size(), 2u);
+    auto* display =
+        splitters[1]->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (
+        display->drawableChannels.isEmpty());
+    auto* info =
+        display->drawableChannels[0].channelInfo;
+    ASSERT_NE (info, nullptr);
+    auto* monitor =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".monitor");
+    ASSERT_NE (monitor, nullptr);
+    auto retainedHandler =
+        monitor->createAccessibilityHandler();
+    ASSERT_NE (retainedHandler, nullptr);
+    const auto retainedActions =
+        retainedHandler->getActions();
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    bool sawBoundary = false;
+    bool handlerEnabledAtBoundary = true;
+    display->setStableIdentityLifecycleTestHook (
+        [&] (
+            LfpDisplay::
+                StableIdentityLifecycleTestPhase phase,
+            int)
+        {
+            if (phase
+                != LfpDisplay::
+                       StableIdentityLifecycleTestPhase::
+                           beforePaneVisibilityMutation)
+            {
+                return;
+            }
+            sawBoundary = true;
+            handlerEnabledAtBoundary =
+                retainedHandler->isEnabled();
+            retainedActions.invoke (
+                AccessibilityActionType::press);
+        });
+
+    canvas->setLayout (
+        SplitLayouts::SINGLE);
+    canvas->resized();
+
+    EXPECT_TRUE (sawBoundary);
+    EXPECT_FALSE (
+        handlerEnabledAtBoundary);
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7EveryActionRejectsInPlaceLiveMetadataRebind)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (
+        display->drawableChannels.isEmpty());
+    auto* target =
+        display->drawableChannels[0].channel;
+    auto* info =
+        display->drawableChannels[0].channelInfo;
+    ASSERT_NE (target, nullptr);
+    ASSERT_NE (info, nullptr);
+    auto* select =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".select");
+    auto* monitor =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".monitor");
+    ASSERT_NE (select, nullptr);
+    ASSERT_NE (monitor, nullptr);
+    const auto selectActions =
+        select->getAccessibilityHandler()
+            ->getActions();
+    const auto monitorActions =
+        monitor->getAccessibilityHandler()
+            ->getActions();
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    auto* buffer =
+        splitters[0]->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    ASSERT_FALSE (
+        buffer->channelMetadata.isEmpty());
+    buffer->channelMetadata
+        .getReference (0)
+        .identifier =
+        "rebound-without-publication";
+
+    ASSERT_FALSE (target->getSelected());
+    EXPECT_TRUE (
+        selectActions.invoke (
+            AccessibilityActionType::press));
+    EXPECT_FALSE (target->getSelected());
+    EXPECT_TRUE (
+        monitorActions.invoke (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7UnclaimedTimeoutWinsDeterministicallyAndNeverMutatesLate)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* info =
+        splitters[0]
+            ->lfpDisplay
+            ->drawableChannels[0]
+            .channelInfo;
+    ASSERT_NE (info, nullptr);
+    auto* monitor =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".monitor");
+    ASSERT_NE (monitor, nullptr);
+    const auto actions =
+        monitor->getAccessibilityHandler()
+            ->getActions();
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    std::atomic<bool> workerFinished {
+        false
+    };
+    std::atomic<bool> reachedBeforeClaim {
+        false
+    };
+    setLfpChannelActionDispatchTestHook (
+        [&] (
+            LfpChannelActionDispatchTestPhase phase)
+        {
+            if (phase
+                != LfpChannelActionDispatchTestPhase::
+                       beforeClaim)
+            {
+                return;
+            }
+            reachedBeforeClaim.store (true);
+            while (! workerFinished.load())
+                Thread::yield();
+        });
+    std::thread worker (
+        [&]
+        {
+            actions.invoke (
+                AccessibilityActionType::press);
+            workerFinished.store (true);
+        });
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (500);
+    worker.join();
+    setLfpChannelActionDispatchTestHook ({});
+
+    EXPECT_TRUE (
+        reachedBeforeClaim.load());
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7ClaimWinsDeterministicallyAndWorkerWaitsForExactlyOneMutation)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* info =
+        splitters[0]
+            ->lfpDisplay
+            ->drawableChannels[0]
+            .channelInfo;
+    ASSERT_NE (info, nullptr);
+    auto* monitor =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".monitor");
+    ASSERT_NE (monitor, nullptr);
+    const auto actions =
+        monitor->getAccessibilityHandler()
+            ->getActions();
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    std::atomic<bool> workerFinished {
+        false
+    };
+    std::atomic<bool> reachedAfterClaim {
+        false
+    };
+    std::atomic<bool>
+        workerReturnedWhileClaimed {
+            true
+        };
+    setLfpChannelActionDispatchTestHook (
+        [&] (
+            LfpChannelActionDispatchTestPhase phase)
+        {
+            if (phase
+                != LfpChannelActionDispatchTestPhase::
+                       afterClaim)
+            {
+                return;
+            }
+            reachedAfterClaim.store (true);
+            Thread::sleep (150);
+            workerReturnedWhileClaimed.store (
+                workerFinished.load());
+        });
+    std::thread worker (
+        [&]
+        {
+            actions.invoke (
+                AccessibilityActionType::press);
+            workerFinished.store (true);
+        });
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (500);
+    worker.join();
+    setLfpChannelActionDispatchTestHook ({});
+
+    EXPECT_TRUE (
+        reachedAfterClaim.load());
+    EXPECT_FALSE (
+        workerReturnedWhileClaimed.load());
+    const auto messages =
+        drainIdentityTestBroadcastMessages (
+            *messageCenter);
+    EXPECT_EQ (messages.size(), 1);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7UnclaimedTimeoutRejectsRebindRemoveHideDisableAndDestroyRaces)
+{
+    enum class Race
+    {
+        rebind,
+        remove,
+        hide,
+        disable,
+        destroy
+    };
+    for (const auto race :
+         { Race::rebind,
+           Race::remove,
+           Race::hide,
+           Race::disable,
+           Race::destroy })
+    {
+        auto canvas =
+            createIdentityCanvas (
+                SplitLayouts::SINGLE);
+        canvas->addToDesktop (0);
+        canvas->setVisible (true);
+        canvas->updateSettings();
+        const auto splitters =
+            getIdentityTestSplitters (
+                *canvas);
+        ASSERT_FALSE (splitters.empty());
+        auto* splitter = splitters[0];
+        auto* info =
+            splitter
+                ->lfpDisplay
+                ->drawableChannels[0]
+                .channelInfo;
+        ASSERT_NE (info, nullptr);
+        auto* monitor =
+            findIdentityTestChildByIdSuffix (
+                *info,
+                ".monitor");
+        ASSERT_NE (monitor, nullptr);
+        const auto actions =
+            monitor
+                ->getAccessibilityHandler()
+                ->getActions();
+        auto* messageCenter =
+            tester->processorGraph
+                ->getMessageCenter();
+        ASSERT_NE (messageCenter, nullptr);
+        ASSERT_TRUE (
+            drainIdentityTestBroadcastMessages (
+                *messageCenter)
+                .isEmpty());
+
+        std::atomic<bool> workerFinished {
+            false
+        };
+        setLfpChannelActionDispatchTestHook (
+            [&] (
+                LfpChannelActionDispatchTestPhase
+                    phase)
+            {
+                if (phase
+                    != LfpChannelActionDispatchTestPhase::
+                           beforeClaim)
+                {
+                    return;
+                }
+                while (! workerFinished.load())
+                    Thread::yield();
+                switch (race)
+                {
+                    case Race::rebind:
+                        splitter
+                            ->displayBuffer
+                            ->channelMetadata
+                            .getReference (0)
+                            .identifier =
+                            "timeout-rebind";
+                        canvas->updateSettings();
+                        break;
+                    case Race::remove:
+                        canvas
+                            ->removeBufferForDisplay (
+                                0);
+                        break;
+                    case Race::hide:
+                        canvas->setVisible (
+                            false);
+                        break;
+                    case Race::disable:
+                        canvas->setEnabled (
+                            false);
+                        break;
+                    case Race::destroy:
+                        canvas.reset();
+                        break;
+                }
+            });
+        std::thread worker (
+            [&]
+            {
+                actions.invoke (
+                    AccessibilityActionType::
+                        press);
+                workerFinished.store (true);
+            });
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (500);
+        worker.join();
+        setLfpChannelActionDispatchTestHook (
+            {});
+        EXPECT_TRUE (
+            drainIdentityTestBroadcastMessages (
+                *messageCenter)
+                .isEmpty());
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7RejectsAliasedChannelInfoPairsAndMonitorMetadataBounds)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    auto* target =
+        display->drawableChannels[0].channel;
+    auto* info =
+        display->drawableChannels[0].channelInfo;
+    ASSERT_NE (target, nullptr);
+    ASSERT_NE (info, nullptr);
+    auto* select =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".select");
+    auto* monitor =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".monitor");
+    ASSERT_NE (select, nullptr);
+    ASSERT_NE (monitor, nullptr);
+    const auto selectActions =
+        select->getAccessibilityHandler()
+            ->getActions();
+    const auto monitorActions =
+        monitor->getAccessibilityHandler()
+            ->getActions();
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+
+    display->channels.add (target);
+    display->channelInfo.add (info);
+    ASSERT_FALSE (target->getSelected());
+    EXPECT_TRUE (
+        selectActions.invoke (
+            AccessibilityActionType::press));
+    EXPECT_FALSE (target->getSelected());
+    display->channels.remove (
+        display->channels.size() - 1,
+        false);
+    display->channelInfo.remove (
+        display->channelInfo.size() - 1,
+        false);
+
+    auto& metadata =
+        splitter
+            ->displayBuffer
+            ->channelMetadata
+            .getReference (0);
+    const auto originalUuid =
+        metadata.uuid;
+    metadata.uuid = Uuid();
+    EXPECT_TRUE (
+        monitorActions.invoke (
+            AccessibilityActionType::press));
+    metadata.uuid = originalUuid;
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    const auto originalLocalIndex =
+        metadata.localIndex;
+    metadata.localIndex =
+        metadata.localIndex + 1;
+    EXPECT_TRUE (
+        monitorActions.invoke (
+            AccessibilityActionType::press));
+    metadata.localIndex =
+        originalLocalIndex;
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    const auto selectedStream =
+        splitter->selectedStreamId;
+    splitter->selectedStreamId =
+        static_cast<uint16> (
+            selectedStream + 100);
+    EXPECT_TRUE (
+        monitorActions.invoke (
+            AccessibilityActionType::press));
+    splitter->selectedStreamId =
+        selectedStream;
     EXPECT_TRUE (
         drainIdentityTestBroadcastMessages (
             *messageCenter)
@@ -8535,6 +9157,8 @@ TEST_F (LfpStableChannelIdentityBindingTests,
 
     splitter->lfpDisplay
         ->resetWaveformVisibilityResolutionWorkForTests();
+    splitter->lfpDisplay
+        ->resetChannelActionAccessibilityWorkForTests();
     canvas
         ->loadCustomParametersFromXml (
             &restoreRoot);
@@ -8552,5 +9176,14 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             ->getWaveformVisibilityResolutionWorkForTests(),
         static_cast<uint64> (
             channelCount * 4));
+    EXPECT_LE (
+        splitter->lfpDisplay
+            ->getChannelActionAccessibilityWorkForTests(),
+        static_cast<uint64> (
+            channelCount * 4));
+    EXPECT_LE (
+        splitter->lfpDisplay
+            ->getChannelActionNotificationFlushesForTests(),
+        4u);
 }
 } // namespace
