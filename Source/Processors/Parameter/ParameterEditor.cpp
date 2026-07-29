@@ -440,7 +440,17 @@ private:
 
                         if (shouldBeExpanded)
                         {
-                            comboBox->showPopup();
+                            Component::SafePointer<
+                                MessageThreadComboBox>
+                                safeComboBox (
+                                    comboBox);
+                            comboBox->grabKeyboardFocus();
+                            if (safeComboBox != nullptr
+                                && safeComboBox
+                                       ->isEnabled())
+                            {
+                                safeComboBox->showPopup();
+                            }
                         }
                         else
                         {

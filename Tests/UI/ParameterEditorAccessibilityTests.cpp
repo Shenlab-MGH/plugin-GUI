@@ -60,6 +60,21 @@ private:
         externalCount;
 };
 
+class DestroyOnFocusMessageThreadComboBox final
+    : public MessageThreadComboBox
+{
+public:
+    std::function<void()> onFocus;
+
+private:
+    void focusGained (
+        FocusChangeType) override
+    {
+        if (onFocus != nullptr)
+            onFocus();
+    }
+};
+
 class TrackingComboBoxValueListener final
     : public ComboBox::Listener
 {
@@ -615,6 +630,78 @@ TEST_F (ParameterEditorAccessibilityTests,
     EXPECT_TRUE (
         handler->getCurrentState()
             .isCollapsed());
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        EditableExpandActionFocusesAndKeepsPopupAvailable)
+{
+    Component host;
+    host.setSize (320, 120);
+    host.addToDesktop (0);
+    host.setVisible (true);
+    ASSERT_TRUE (host.isShowing());
+
+    MessageThreadComboBox comboBox;
+    comboBox.setEditableText (true);
+    comboBox.addItem ("OFF", 1);
+    comboBox.addItem ("-100", 2);
+    for (PopupMenu::MenuItemIterator
+             iterator (*comboBox.getRootMenu(), false);
+         iterator.next();)
+    {
+        if (iterator.getItem().itemID == 2)
+            iterator.getItem().accessibilityId =
+                "oe.test.editable_combo.choice.minus_100";
+    }
+    comboBox.setBounds (20, 20, 120, 25);
+    host.addAndMakeVisible (comboBox);
+    auto* handler = comboBox.getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    Component::unfocusAllComponents();
+    EXPECT_TRUE (
+        handler->getActions().invoke (
+            AccessibilityActionType::expand));
+    MessageManager::getInstance()->runDispatchLoopUntil (150);
+    EXPECT_TRUE (comboBox.hasKeyboardFocus (true));
+    EXPECT_TRUE (comboBox.isPopupActive());
+    auto* menu = Component::getCurrentlyModalComponent();
+    ASSERT_NE (menu, nullptr);
+    EXPECT_NE (
+        menu->findChildWithID (
+            "oe.test.editable_combo.choice.minus_100"),
+        nullptr);
+    PopupMenu::dismissAllActiveMenus();
+}
+
+TEST_F (ParameterEditorAccessibilityTests,
+        ExpandActionIsSafeWhenFocusDestroysComboBox)
+{
+    Component host;
+    host.setSize (320, 120);
+    host.addToDesktop (0);
+    host.setVisible (true);
+
+    auto comboBox =
+        std::make_unique<
+            DestroyOnFocusMessageThreadComboBox>();
+    comboBox->setEditableText (false);
+    comboBox->addItem ("OFF", 1);
+    comboBox->setBounds (20, 20, 120, 25);
+    host.addAndMakeVisible (comboBox.get());
+    auto* handler = comboBox->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto actions = handler->getActions();
+    comboBox->onFocus =
+        [&]
+        {
+            comboBox.reset();
+        };
+
+    EXPECT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::expand));
+    EXPECT_EQ (comboBox, nullptr);
 }
 
 TEST_F (ParameterEditorAccessibilityTests,
