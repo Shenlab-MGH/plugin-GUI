@@ -1736,7 +1736,12 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
         ->setAccessibilityValueSelectionEnabled (
             true);
     extendedOptions->addAndMakeVisible (saturationWarningSelection.get());
-    setSaturationWarningSelection (1);
+    saturationWarningSelection->setSelectedId (
+        1,
+        dontSendNotification);
+    selectedSaturationValueFloat = 0.0f;
+    saturationWarningSelection
+        ->synchroniseAccessibilityState();
 
     saturationWarningLabel = std::make_unique<Label> ("SaturationWarningLabel", "Sat. warning:");
     saturationWarningLabel->setFont (labelFont);
