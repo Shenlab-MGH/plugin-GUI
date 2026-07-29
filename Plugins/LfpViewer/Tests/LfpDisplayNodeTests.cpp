@@ -5492,6 +5492,28 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_NE (
         expectedIds[0],
         expectedIds[1]);
+    ASSERT_EQ (
+        splitter->nChans,
+        4);
+    ASSERT_FLOAT_EQ (
+        splitter
+            ->getDrawableSampleRate(),
+        sampleRate);
+    ASSERT_EQ (
+        splitter
+            ->lfpDisplay
+            ->getNumChannels(),
+        4);
+    splitter
+        ->screenBufferIndex
+        .set (
+            0,
+            73);
+    splitter
+        ->lastScreenBufferIndex
+        .set (
+            0,
+            91);
 
     source->setStreamSourceNodeId (
         1,
@@ -5529,6 +5551,95 @@ TEST_F (LfpDisplayNodeTests,
             false);
     EXPECT_FALSE (
         ambiguousChoice.next());
+    EXPECT_EQ (
+        splitter->nChans,
+        0);
+    EXPECT_FLOAT_EQ (
+        splitter
+            ->getDrawableSampleRate(),
+        44100.0f);
+    EXPECT_EQ (
+        splitter
+            ->lfpDisplay
+            ->getNumChannels(),
+        0);
+    ASSERT_FALSE (
+        splitter
+            ->screenBufferIndex
+            .isEmpty());
+    EXPECT_EQ (
+        splitter
+            ->screenBufferIndex[0],
+        0);
+    ASSERT_FALSE (
+        splitter
+            ->lastScreenBufferIndex
+            .isEmpty());
+    EXPECT_EQ (
+        splitter
+            ->lastScreenBufferIndex[0],
+        0);
+
+    source->setStreamSourceNodeId (
+        1,
+        29);
+    source->setStreamCountPreservingExisting (
+        2,
+        2);
+    multiStreamTester
+        ->updateSourceNodeSettings();
+    const auto restoredBuffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (
+        restoredBuffers.size(),
+        2);
+    restoredBuffers[0]
+        ->sampleRate =
+        12345.0f;
+    restoredBuffers[0]
+        ->channelMetadata
+        .getReference (0)
+        .name =
+        "RESTORED_A";
+    restoredBuffers[0]
+        ->channelMetadata
+        .getReference (1)
+        .name =
+        "RESTORED_B";
+    canvas->updateSettings();
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        "17|Shared");
+    EXPECT_EQ (
+        splitter
+            ->displayBuffer,
+        restoredBuffers[0]);
+    EXPECT_EQ (
+        splitter->nChans,
+        2);
+    EXPECT_FLOAT_EQ (
+        splitter
+            ->getDrawableSampleRate(),
+        12345.0f);
+    EXPECT_EQ (
+        splitter
+            ->lfpDisplay
+            ->getNumChannels(),
+        2);
+    ASSERT_EQ (
+        splitter
+            ->lfpDisplay
+            ->channels
+            .size(),
+        2);
+    EXPECT_EQ (
+        splitter
+            ->lfpDisplay
+            ->channels[0]
+            ->getName(),
+        "RESTORED_A");
 }
 
 TEST_F (LfpDisplayNodeTests,

@@ -1271,58 +1271,61 @@ void LfpDisplaySplitter::updateSettings()
     }
 
     Array<DisplayBuffer*> availableBuffers = processor->getDisplayBuffers();
+    const bool streamKeysAreAmbiguous =
+        hasAmbiguousStreamKeys (
+            availableBuffers);
 
-    if (hasAmbiguousStreamKeys (
-            availableBuffers))
+    streamSelection->clear (
+        dontSendNotification);
+
+    if (streamKeysAreAmbiguous)
     {
         LOGE (
             "LFP Viewer cannot select a data stream because multiple streams have the same stable key.");
-        streamSelection->clear (
-            dontSendNotification);
         clearStreamSelection (
             "Ambiguous data streams");
-        isUpdating = false;
-        return;
     }
-
-    streamSelection->clear (dontSendNotification);
-
-    for (auto buffer : availableBuffers)
+    else
     {
-        streamSelection->addItem (
-            getStreamChoiceLabel (
-                *buffer,
-                availableBuffers),
-            buffer->id);
-        for (PopupMenu::MenuItemIterator
-                 iterator (
-                     *streamSelection
-                          ->getRootMenu(),
-                     false);
-             iterator.next();)
+        for (auto buffer :
+             availableBuffers)
         {
-            if (iterator
-                    .getItem()
-                    .itemID
-                == buffer->id)
+            streamSelection->addItem (
+                getStreamChoiceLabel (
+                    *buffer,
+                    availableBuffers),
+                buffer->id);
+            for (PopupMenu::
+                     MenuItemIterator
+                     iterator (
+                         *streamSelection
+                              ->getRootMenu(),
+                         false);
+                 iterator.next();)
             {
-                iterator
-                    .getItem()
-                    .accessibilityId =
-                    createStreamChoiceSemanticId (
-                        streamSelection
-                            ->getComponentID(),
-                        buffer
-                            ->streamKey);
-                break;
+                if (iterator
+                        .getItem()
+                        .itemID
+                    == buffer->id)
+                {
+                    iterator
+                        .getItem()
+                        .accessibilityId =
+                        createStreamChoiceSemanticId (
+                            streamSelection
+                                ->getComponentID(),
+                            buffer
+                                ->streamKey);
+                    break;
+                }
             }
         }
-    }
 
-    selectStreamByKeyOnMessageThread (
-        selectedStreamKey,
-        true,
-        dontSendNotification);
+        selectStreamByKeyOnMessageThread (
+            selectedStreamKey,
+            true,
+            dontSendNotification);
+    }
 
     if (displayBuffer == nullptr) // no inputs to this processor
     {
@@ -1360,6 +1363,12 @@ void LfpDisplaySplitter::updateSettings()
     }
 
     lfpDisplay->setNumChannels (nChans);
+
+    if (displayBuffer == nullptr)
+    {
+        screenBufferIndex.fill (0);
+        lastScreenBufferIndex.fill (0);
+    }
 
     for (int i = 0; i < nChans; i++) // update channel metadata
     {
