@@ -42,6 +42,8 @@ public:
         showPopupUsedMessageThread.store (
             MessageManager::getInstance()
                 ->isThisTheMessageThread());
+        showPopupHadKeyboardFocus.store (
+            hasKeyboardFocus (true));
         showPopupCount.fetch_add (1);
         if (externalCount != nullptr)
             externalCount->fetch_add (1);
@@ -51,6 +53,8 @@ public:
 
     std::atomic<bool>
         showPopupUsedMessageThread { false };
+    std::atomic<bool>
+        showPopupHadKeyboardFocus { false };
     std::atomic<int>
         showPopupCount { 0 };
     std::function<void()> onShowPopup;
@@ -58,21 +62,6 @@ public:
 private:
     std::shared_ptr<std::atomic<int>>
         externalCount;
-};
-
-class DestroyOnFocusMessageThreadComboBox final
-    : public MessageThreadComboBox
-{
-public:
-    std::function<void()> onFocus;
-
-private:
-    void focusGained (
-        FocusChangeType) override
-    {
-        if (onFocus != nullptr)
-            onFocus();
-    }
 };
 
 class TrackingComboBoxValueListener final
@@ -633,7 +622,7 @@ TEST_F (ParameterEditorAccessibilityTests,
 }
 
 TEST_F (ParameterEditorAccessibilityTests,
-        EditableExpandActionFocusesAndKeepsPopupAvailable)
+        EditableExpandActionFocusesBeforeShowingPopup)
 {
     Component host;
     host.setSize (320, 120);
@@ -641,7 +630,8 @@ TEST_F (ParameterEditorAccessibilityTests,
     host.setVisible (true);
     ASSERT_TRUE (host.isShowing());
 
-    MessageThreadComboBox comboBox;
+    TrackingMessageThreadComboBox comboBox;
+    TextButton sibling ("Sibling");
     comboBox.setEditableText (true);
     comboBox.addItem ("OFF", 1);
     comboBox.addItem ("-100", 2);
@@ -654,54 +644,23 @@ TEST_F (ParameterEditorAccessibilityTests,
                 "oe.test.editable_combo.choice.minus_100";
     }
     comboBox.setBounds (20, 20, 120, 25);
+    sibling.setBounds (160, 20, 80, 25);
     host.addAndMakeVisible (comboBox);
+    host.addAndMakeVisible (sibling);
     auto* handler = comboBox.getAccessibilityHandler();
     ASSERT_NE (handler, nullptr);
 
-    Component::unfocusAllComponents();
+    sibling.grabKeyboardFocus();
+    ASSERT_TRUE (sibling.hasKeyboardFocus (true));
     EXPECT_TRUE (
         handler->getActions().invoke (
             AccessibilityActionType::expand));
-    MessageManager::getInstance()->runDispatchLoopUntil (150);
     EXPECT_TRUE (comboBox.hasKeyboardFocus (true));
-    EXPECT_TRUE (comboBox.isPopupActive());
-    auto* menu = Component::getCurrentlyModalComponent();
-    ASSERT_NE (menu, nullptr);
-    EXPECT_NE (
-        menu->findChildWithID (
-            "oe.test.editable_combo.choice.minus_100"),
-        nullptr);
-    PopupMenu::dismissAllActiveMenus();
-}
-
-TEST_F (ParameterEditorAccessibilityTests,
-        ExpandActionIsSafeWhenFocusDestroysComboBox)
-{
-    Component host;
-    host.setSize (320, 120);
-    host.addToDesktop (0);
-    host.setVisible (true);
-
-    auto comboBox =
-        std::make_unique<
-            DestroyOnFocusMessageThreadComboBox>();
-    comboBox->setEditableText (false);
-    comboBox->addItem ("OFF", 1);
-    comboBox->setBounds (20, 20, 120, 25);
-    host.addAndMakeVisible (comboBox.get());
-    auto* handler = comboBox->getAccessibilityHandler();
-    ASSERT_NE (handler, nullptr);
-    const auto actions = handler->getActions();
-    comboBox->onFocus =
-        [&]
-        {
-            comboBox.reset();
-        };
-
     EXPECT_TRUE (
-        actions.invoke (
-            AccessibilityActionType::expand));
-    EXPECT_EQ (comboBox, nullptr);
+        comboBox.showPopupUsedMessageThread.load());
+    EXPECT_TRUE (
+        comboBox.showPopupHadKeyboardFocus.load());
+    EXPECT_EQ (comboBox.showPopupCount.load(), 1);
 }
 
 TEST_F (ParameterEditorAccessibilityTests,

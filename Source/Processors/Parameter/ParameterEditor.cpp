@@ -444,11 +444,12 @@ private:
                                 MessageThreadComboBox>
                                 safeComboBox (
                                     comboBox);
-                            comboBox->grabKeyboardFocus();
                             if (safeComboBox != nullptr
                                 && safeComboBox
                                        ->isEnabled())
                             {
+                                safeComboBox
+                                    ->grabKeyboardFocus();
                                 safeComboBox->showPopup();
                             }
                         }
