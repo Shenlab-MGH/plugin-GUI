@@ -1,5 +1,21 @@
 #include "FakeSourceNode.h"
 
+namespace
+{
+class FakeDataStream final : public DataStream
+{
+public:
+    using DataStream::DataStream;
+
+    void setFakeSourceNodeId (
+        int sourceNodeId)
+    {
+        setSourceNodeId (
+            sourceNodeId);
+    }
+};
+}
+
 FakeSourceNode::FakeSourceNode (const FakeSourceNodeParams& params)
     : GenericProcessor ("FakeSourceNode", true),
       params (params)
@@ -23,7 +39,9 @@ void FakeSourceNode::updateSettings()
                 params.sampleRate
             };
 
-            cachedDataStreams.add (new DataStream (settings));
+            cachedDataStreams.add (
+                new FakeDataStream (
+                    settings));
         }
     }
 
@@ -104,7 +122,7 @@ void FakeSourceNode::
             params.sampleRate
         };
         cachedDataStreams.add (
-            new DataStream (
+            new FakeDataStream (
                 settings));
     }
 
@@ -133,6 +151,23 @@ void FakeSourceNode::setStreamName (
 {
     cachedDataStreams[streamIndex]
         ->setName (name);
+}
+
+void FakeSourceNode::setStreamSourceNodeId (
+    int streamIndex,
+    int sourceNodeId)
+{
+    auto* stream =
+        dynamic_cast<
+            FakeDataStream*> (
+            cachedDataStreams[
+                streamIndex]);
+    jassert (stream != nullptr);
+    if (stream != nullptr)
+    {
+        stream->setFakeSourceNodeId (
+            sourceNodeId);
+    }
 }
 
 void FakeSourceNode::process (AudioBuffer<float>& continuousBuffer) {}

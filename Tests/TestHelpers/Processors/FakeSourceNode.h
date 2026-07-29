@@ -32,6 +32,9 @@ public:
     void setStreamName (
         int streamIndex,
         const String& name);
+    void setStreamSourceNodeId (
+        int streamIndex,
+        int sourceNodeId);
 
 private:
     FakeSourceNodeParams params;

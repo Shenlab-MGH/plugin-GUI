@@ -37,6 +37,106 @@
 
 using namespace LfpViewer;
 
+namespace
+{
+String sanitiseStreamChoiceSegment (
+    StringRef segment)
+{
+    const String value (segment);
+    String result;
+
+    for (int index = 0;
+         index < value.length();
+         ++index)
+    {
+        auto character = value[index];
+
+        if (character >= 'A'
+            && character <= 'Z')
+        {
+            character =
+                character - 'A' + 'a';
+        }
+
+        const bool isLowercaseLetter =
+            character >= 'a'
+            && character <= 'z';
+        const bool isDigit =
+            character >= '0'
+            && character <= '9';
+
+        if (isLowercaseLetter
+            || isDigit)
+        {
+            result += character;
+        }
+        else if (
+            result.isNotEmpty()
+            && ! result.endsWithChar ('_'))
+        {
+            result += '_';
+        }
+    }
+
+    result =
+        result.trimCharactersAtEnd (
+            "_");
+    return result.isNotEmpty()
+               ? result
+               : "unnamed";
+}
+
+String createStreamChoiceSemanticId (
+    StringRef parentId,
+    StringRef streamKey)
+{
+    const String key (
+        streamKey);
+    const auto utf8 =
+        key.toUTF8();
+
+    return String (parentId)
+           + ".choice."
+           + sanitiseStreamChoiceSegment (
+               key)
+           + "_"
+           + String::toHexString (
+               utf8.getAddress(),
+               static_cast<int> (
+                   key.getNumBytesAsUTF8()),
+               0);
+}
+
+String getStreamChoiceLabel (
+    const DisplayBuffer& buffer,
+    const Array<DisplayBuffer*>&
+        availableBuffers)
+{
+    int matchingNames = 0;
+    for (const auto* candidate :
+         availableBuffers)
+    {
+        if (candidate->name
+            == buffer.name)
+        {
+            ++matchingNames;
+        }
+    }
+
+    if (matchingNames < 2)
+        return buffer.name;
+
+    return buffer.name
+           + " (source "
+           + buffer.streamKey
+                 .upToFirstOccurrenceOf (
+                     "|",
+                     false,
+                     false)
+           + ")";
+}
+}
+
 LfpDisplayCanvas::LfpDisplayCanvas (LfpDisplayNode* processor_, SplitLayouts sl, bool isLoading_) : Visualizer (processor_),
                                                                                                     processor (processor_),
                                                                                                     selectedLayout (sl),
@@ -904,9 +1004,16 @@ LfpDisplaySplitter::LfpDisplaySplitter (LfpDisplayNode* node,
     streamSelection->setDescription (
         description);
     streamSelection->setHelpText (
-        description);
+        description
+        + " This changes display routing only; acquisition and recording are unaffected.");
     streamSelection->setAccessible (
         true);
+    streamSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
+    streamSelection
+        ->setAccessibilityValueSelectionRequiresShowing (
+            true);
     streamSelection
         ->invalidateAccessibilityHandler();
     streamSelection
@@ -1103,12 +1210,101 @@ void LfpDisplaySplitter::updateSettings()
 {
     isUpdating = true;
 
+    if (streamChoiceRebuildPending)
+    {
+        streamSelection
+            ->setSelectedId (
+                0,
+                dontSendNotification);
+        streamSelection
+            ->setText (
+                "Updating data streams",
+                dontSendNotification);
+        streamSelection
+            ->setEnabled (
+                false);
+        streamSelection
+            ->synchroniseAccessibilityState();
+        isUpdating = false;
+        return;
+    }
+
+    if (streamSelection
+            ->isPopupActive())
+    {
+        streamChoiceRebuildPending =
+            true;
+        streamSelection
+            ->hidePopup();
+        streamSelection
+            ->setSelectedId (
+                0,
+                dontSendNotification);
+        streamSelection
+            ->setText (
+                "Updating data streams",
+                dontSendNotification);
+        streamSelection
+            ->setEnabled (
+                false);
+        streamSelection
+            ->synchroniseAccessibilityState();
+        isUpdating = false;
+        Component::SafePointer<
+            LfpDisplaySplitter>
+            safeSplitter (this);
+        Timer::callAfterDelay (
+            10,
+            [safeSplitter]
+            {
+                if (safeSplitter
+                    != nullptr)
+                {
+                    safeSplitter
+                        ->streamChoiceRebuildPending =
+                        false;
+                    safeSplitter
+                        ->updateSettings();
+                }
+            });
+        return;
+    }
+
     Array<DisplayBuffer*> availableBuffers = processor->getDisplayBuffers();
 
     streamSelection->clear (dontSendNotification);
 
     for (auto buffer : availableBuffers)
-        streamSelection->addItem (buffer->name, buffer->id);
+    {
+        streamSelection->addItem (
+            getStreamChoiceLabel (
+                *buffer,
+                availableBuffers),
+            buffer->id);
+        for (PopupMenu::MenuItemIterator
+                 iterator (
+                     *streamSelection
+                          ->getRootMenu(),
+                     false);
+             iterator.next();)
+        {
+            if (iterator
+                    .getItem()
+                    .itemID
+                == buffer->id)
+            {
+                iterator
+                    .getItem()
+                    .accessibilityId =
+                    createStreamChoiceSemanticId (
+                        streamSelection
+                            ->getComponentID(),
+                        buffer
+                            ->streamKey);
+                break;
+            }
+        }
+    }
 
     selectStreamByKeyOnMessageThread (
         selectedStreamKey,

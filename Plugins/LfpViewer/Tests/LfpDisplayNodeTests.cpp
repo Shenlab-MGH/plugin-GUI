@@ -3826,7 +3826,7 @@ TEST_F (LfpDisplayNodeTests,
         retainedStreamHandler
             ->getValueInterface();
     ASSERT_NE (emptyValue, nullptr);
-    EXPECT_TRUE (
+    EXPECT_FALSE (
         emptyValue->isReadOnly());
     EXPECT_EQ (
         emptyValue
@@ -4407,6 +4407,212 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        StreamAccessibilityValueUsesCanonicalGuiSelectionAndLifecycle)
+{
+    auto multiStreamTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* multiStreamProcessor =
+        multiStreamTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            multiStreamProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (
+        600,
+        800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    auto* splitter =
+        getDisplaySplitters (
+            *canvas)[0];
+    const auto buffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    buffers[1]->sampleRate =
+        12345.0f;
+    buffers[1]->numChannels = 2;
+    while (buffers[1]
+               ->channelMetadata
+               .size()
+           > 2)
+    {
+        buffers[1]
+            ->channelMetadata
+            .removeLast();
+    }
+    buffers[1]
+        ->channelMetadata
+        .getReference (0)
+        .name =
+        "VALUE_SECOND";
+    auto retainedHandler =
+        splitter
+            ->streamSelection
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        retainedHandler,
+        nullptr);
+    auto* retainedValue =
+        retainedHandler
+            ->getValueInterface();
+    ASSERT_NE (
+        retainedValue,
+        nullptr);
+    auto* writer =
+        dynamic_cast<
+            AccessibilityValueStringWriter*> (
+            retainedValue);
+    ASSERT_NE (writer, nullptr);
+    EXPECT_FALSE (
+        retainedValue
+            ->isReadOnly());
+    LfpThreadTrackingComboBoxListener
+        listener;
+    splitter
+        ->streamSelection
+        ->addListener (
+            &listener);
+    const auto writeFromWorker =
+        [&] (const String& value)
+    {
+        bool accepted = false;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                accepted =
+                    writer
+                        ->setValueAsStringIfSupported (
+                            value);
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return accepted;
+    };
+
+    EXPECT_TRUE (
+        writeFromWorker (
+            "FakeSourceNode1"));
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        buffers[1]->streamKey);
+    EXPECT_EQ (
+        splitter->nChans,
+        2);
+    EXPECT_FLOAT_EQ (
+        splitter
+            ->getDrawableSampleRate(),
+        12345.0f);
+    EXPECT_EQ (
+        splitter
+            ->lfpDisplay
+            ->getNumChannels(),
+        2);
+    EXPECT_EQ (
+        splitter
+            ->lfpDisplay
+            ->channels[0]
+            ->getName(),
+        "VALUE_SECOND");
+    EXPECT_FALSE (
+        writeFromWorker (
+            "not a stream"));
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        buffers[1]->streamKey);
+
+    splitter
+        ->streamSelection
+        ->setEnabled (
+            false);
+    EXPECT_FALSE (
+        writeFromWorker (
+            "FakeSourceNode0"));
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        1);
+    splitter
+        ->streamSelection
+        ->setEnabled (
+            true);
+    EXPECT_TRUE (
+        writeFromWorker (
+            "FakeSourceNode0"));
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        2);
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        buffers[0]->streamKey);
+
+    splitter
+        ->streamSelection
+        ->removeListener (
+            &listener);
+    canvas.reset();
+    EXPECT_FALSE (
+        writeFromWorker (
+            "FakeSourceNode1"));
+    EXPECT_EQ (
+        retainedValue
+            ->getCurrentValueAsString(),
+        "FakeSourceNode0");
+}
+
+TEST_F (LfpDisplayNodeTests,
         RemovedSelectedBufferCallbackImmediatelyClearsCanonicalState)
 {
     auto multiStreamTester =
@@ -4620,6 +4826,11 @@ TEST_F (LfpDisplayNodeTests,
             editor->canvas.get());
     ASSERT_NE (canvas, nullptr);
     canvas->updateSettings();
+    canvas->setSize (
+        600,
+        800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
     const auto splitters =
         getDisplaySplitters (
             *canvas);
@@ -4700,6 +4911,19 @@ TEST_F (LfpDisplayNodeTests,
             ->displays
             .size(),
         3);
+    LfpThreadTrackingComboBoxListener
+        selectionListener;
+    splitters[0]
+        ->streamSelection
+        ->addListener (
+            &selectionListener);
+    splitters[0]
+        ->streamSelection
+        ->showPopup();
+    ASSERT_TRUE (
+        splitters[0]
+            ->streamSelection
+            ->isPopupActive());
 
     source
         ->setStreamCountPreservingExisting (
@@ -4715,6 +4939,17 @@ TEST_F (LfpDisplayNodeTests,
         snapshotState
             .lastMembershipCount,
         0);
+    for (int attempt = 0;
+         attempt < 100
+             && ! splitters[0]
+                       ->streamSelection
+                       ->isEnabled();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
     const auto remainingBuffers =
         dynamicProcessor
             ->getDisplayBuffers();
@@ -4789,6 +5024,15 @@ TEST_F (LfpDisplayNodeTests,
                 .contains (
                     paneIndex));
     }
+    splitters[0]
+        ->streamSelection
+        ->removeListener (
+            &selectionListener);
+    EXPECT_EQ (
+        selectionListener
+            .callbackCount
+            .load(),
+        0);
 
     editor->canvas.reset();
     dynamicProcessor
@@ -5043,16 +5287,52 @@ TEST_F (LfpDisplayNodeTests,
             description);
         EXPECT_EQ (
             handler->getHelp(),
-            description);
-        ASSERT_NE (
+            "Choose the data stream shown in LFP display "
+                + String (
+                    displayNumber)
+                + ". This changes display routing only; acquisition and recording are unaffected.");
+        auto* value =
             handler
-                ->getValueInterface(),
-            nullptr);
+                ->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_FALSE (
+            value->isReadOnly());
         EXPECT_EQ (
-            handler
-                ->getValueInterface()
+            value
                 ->getCurrentValueAsString(),
             expectedValue);
+        auto* comboBox =
+            dynamic_cast<
+                MessageThreadComboBox*> (
+                selectors[
+                    displayIndex]);
+        ASSERT_NE (comboBox, nullptr);
+        ASSERT_EQ (
+            comboBox->getNumItems(),
+            1);
+        PopupMenu::MenuItemIterator
+            choice (
+                *comboBox
+                     ->getRootMenu(),
+                false);
+        ASSERT_TRUE (
+            choice.next());
+        EXPECT_EQ (
+            choice
+                .getItem()
+                .text,
+            "FakeSourceNode0");
+        EXPECT_EQ (
+            choice
+                .getItem()
+                .accessibilityId,
+            id
+                + ".choice.2_fakesourcenode0_327c46616b65536f757263654e6f646530");
+        EXPECT_TRUE (
+            isValidSemanticId (
+                choice
+                    .getItem()
+                    .accessibilityId));
         EXPECT_TRUE (
             handler->getActions()
                 .contains (
@@ -5090,6 +5370,478 @@ TEST_F (LfpDisplayNodeTests,
                     displayIndex + 1)
                 + ".stream");
     }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        StreamChoicesDisambiguateEqualNamesByRealSourceAndStableKey)
+{
+    auto multiStreamTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* multiStreamProcessor =
+        multiStreamTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto* source =
+        dynamic_cast<
+            FakeSourceNode*> (
+            multiStreamTester
+                ->getSourceNode());
+    ASSERT_NE (source, nullptr);
+    source->setStreamName (
+        0,
+        "Shared");
+    source->setStreamName (
+        1,
+        "Shared");
+    source->setStreamSourceNodeId (
+        0,
+        17);
+    source->setStreamSourceNodeId (
+        1,
+        29);
+    multiStreamTester
+        ->updateSourceNodeSettings();
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            multiStreamProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    auto* splitter =
+        getDisplaySplitters (
+            *canvas)[0];
+    const auto buffers =
+        multiStreamProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    EXPECT_EQ (
+        buffers[0]->streamKey,
+        "17|Shared");
+    EXPECT_EQ (
+        buffers[1]->streamKey,
+        "29|Shared");
+    ASSERT_EQ (
+        splitter
+            ->streamSelection
+            ->getNumItems(),
+        2);
+    const std::array<String, 2>
+        expectedLabels {
+            "Shared (source 17)",
+            "Shared (source 29)"
+        };
+    const std::array<String, 2>
+        expectedIds {
+            splitter
+                    ->streamSelection
+                    ->getComponentID()
+                + ".choice.17_shared_31377c536861726564",
+            splitter
+                    ->streamSelection
+                    ->getComponentID()
+                + ".choice.29_shared_32397c536861726564"
+        };
+    int choiceIndex = 0;
+    for (PopupMenu::MenuItemIterator
+             iterator (
+                 *splitter
+                      ->streamSelection
+                      ->getRootMenu(),
+                 false);
+         iterator.next();)
+    {
+        ASSERT_LT (
+            choiceIndex,
+            2);
+        EXPECT_EQ (
+            iterator
+                .getItem()
+                .text,
+            expectedLabels[
+                choiceIndex]);
+        EXPECT_EQ (
+            iterator
+                .getItem()
+                .accessibilityId,
+            expectedIds[
+                choiceIndex]);
+        EXPECT_TRUE (
+            isValidSemanticId (
+                iterator
+                    .getItem()
+                    .accessibilityId));
+        ++choiceIndex;
+    }
+    EXPECT_EQ (
+        choiceIndex,
+        2);
+    EXPECT_NE (
+        expectedIds[0],
+        expectedIds[1]);
+
+    source->setStreamSourceNodeId (
+        1,
+        17);
+    multiStreamTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    EXPECT_FALSE (
+        splitter
+            ->streamSelection
+            ->isEnabled());
+    EXPECT_TRUE (
+        splitter
+            ->selectedStreamKey
+            .isEmpty());
+    EXPECT_EQ (
+        splitter
+            ->displayBuffer,
+        nullptr);
+    EXPECT_EQ (
+        splitter
+            ->streamSelection
+            ->getText(),
+        "Ambiguous data streams");
+}
+
+TEST_F (LfpDisplayNodeTests,
+        StreamChoiceIdsSurviveReorderRemovalZeroAndReaddition)
+{
+    auto dynamicTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    3 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* dynamicProcessor =
+        dynamicTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto* source =
+        dynamic_cast<
+            FakeSourceNode*> (
+            dynamicTester
+                ->getSourceNode());
+    ASSERT_NE (source, nullptr);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            dynamicProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (
+        600,
+        800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    auto* splitter =
+        getDisplaySplitters (
+            *canvas)[0];
+    auto* selector =
+        splitter
+            ->streamSelection
+            .get();
+    auto retainedHandler =
+        selector
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        retainedHandler,
+        nullptr);
+    auto* retainedValue =
+        retainedHandler
+            ->getValueInterface();
+    ASSERT_NE (
+        retainedValue,
+        nullptr);
+    LfpThreadTrackingComboBoxListener
+        listener;
+    selector->addListener (
+        &listener);
+    const auto retainedKey =
+        splitter
+            ->selectedStreamKey;
+    auto* const retainedBuffer =
+        splitter
+            ->displayBuffer;
+    const auto id0 =
+        selector
+            ->getComponentID()
+        + ".choice.2_fakesourcenode0_327c46616b65536f757263654e6f646530";
+    const auto id1 =
+        selector
+            ->getComponentID()
+        + ".choice.2_fakesourcenode1_327c46616b65536f757263654e6f646531";
+    const auto id2 =
+        selector
+            ->getComponentID()
+        + ".choice.2_fakesourcenode2_327c46616b65536f757263654e6f646532";
+    const auto choiceIdForText =
+        [&] (StringRef text)
+    {
+        for (PopupMenu::MenuItemIterator
+                 iterator (
+                     *selector
+                          ->getRootMenu(),
+                     false);
+             iterator.next();)
+        {
+            if (iterator
+                    .getItem()
+                    .text
+                == text)
+            {
+                return iterator
+                    .getItem()
+                    .accessibilityId;
+            }
+        }
+        return String();
+    };
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode0"),
+        id0);
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode1"),
+        id1);
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode2"),
+        id2);
+
+    selector->showPopup();
+    ASSERT_TRUE (
+        selector
+            ->isPopupActive());
+    source->moveStream (
+        2,
+        0);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    EXPECT_FALSE (
+        selector->isEnabled());
+    EXPECT_EQ (
+        selector->getText(),
+        "Updating data streams");
+    EXPECT_EQ (
+        retainedValue
+            ->getCurrentValueAsString(),
+        "Updating data streams");
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        retainedKey);
+    EXPECT_EQ (
+        splitter
+            ->displayBuffer,
+        retainedBuffer);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        0);
+    source->moveStream (
+        0,
+        2);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    canvas->updateSettings();
+    for (int attempt = 0;
+         attempt < 100
+             && (selector
+                     ->isPopupActive()
+                 || ! selector
+                           ->isEnabled()
+                 || choiceIdForText (
+                        "FakeSourceNode0")
+                        .isEmpty());
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    EXPECT_FALSE (
+        selector
+            ->isPopupActive());
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode0"),
+        id0);
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode1"),
+        id1);
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode2"),
+        id2);
+    EXPECT_EQ (
+        listener
+            .callbackCount
+            .load(),
+        0);
+    source
+        ->setStreamCountPreservingExisting (
+            2,
+            4);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode0"),
+        id0);
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode1"),
+        id1);
+    EXPECT_TRUE (
+        choiceIdForText (
+            "FakeSourceNode2")
+            .isEmpty());
+
+    source
+        ->setStreamCountPreservingExisting (
+            3,
+            4);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode2"),
+        id2);
+    for (auto* pane :
+         getDisplaySplitters (
+             *canvas))
+    {
+        canvas
+            ->removeBufferForDisplay (
+                pane->splitID,
+                pane->displayBuffer);
+    }
+
+    source
+        ->setStreamCountPreservingExisting (
+            3,
+            0);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    EXPECT_EQ (
+        selector
+            ->getNumItems(),
+        0);
+    EXPECT_FALSE (
+        selector->isEnabled());
+    source
+        ->setStreamCountPreservingExisting (
+            3,
+            4);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    EXPECT_TRUE (
+        selector->isEnabled());
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode0"),
+        id0);
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode1"),
+        id1);
+    EXPECT_EQ (
+        choiceIdForText (
+            "FakeSourceNode2"),
+        id2);
+    selector->removeListener (
+        &listener);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        DeferredStreamChoiceRebuildDoesNotOutliveCanvas)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (
+        600,
+        800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    auto* selector =
+        getDisplaySplitters (
+            *canvas)[0]
+            ->streamSelection
+            .get();
+    auto retainedHandler =
+        selector
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        retainedHandler,
+        nullptr);
+    auto* retainedValue =
+        retainedHandler
+            ->getValueInterface();
+    ASSERT_NE (
+        retainedValue,
+        nullptr);
+    selector->showPopup();
+    ASSERT_TRUE (
+        selector
+            ->isPopupActive());
+
+    canvas->updateSettings();
+
+    EXPECT_FALSE (
+        selector->isEnabled());
+    EXPECT_EQ (
+        retainedValue
+            ->getCurrentValueAsString(),
+        "Updating data streams");
+    canvas.reset();
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (
+            50);
+    EXPECT_EQ (
+        retainedValue
+            ->getCurrentValueAsString(),
+        "Updating data streams");
 }
 
 TEST_F (LfpDisplayNodeTests,
@@ -17182,7 +17934,7 @@ TEST_F (LfpDisplayNodeTests,
         L"LFP display 1 stream");
     EXPECT_EQ (
         expandResult.help,
-        L"Choose the data stream shown in LFP display 1.");
+        L"Choose the data stream shown in LFP display 1. This changes display routing only; acquisition and recording are unaffected.");
     EXPECT_EQ (
         expandResult
             .expandCollapsePatternResult,
@@ -17275,6 +18027,260 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_TRUE (
         handler->getCurrentState()
             .isCollapsed());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWritesAndSelectsStableStreamChoicesAcrossReorder)
+{
+    auto dynamicTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* dynamicProcessor =
+        dynamicTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto* source =
+        dynamic_cast<
+            FakeSourceNode*> (
+            dynamicTester
+                ->getSourceNode());
+    ASSERT_NE (source, nullptr);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            dynamicProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (
+        600,
+        800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    ASSERT_TRUE (
+        canvas->isShowing());
+    auto* splitter =
+        getDisplaySplitters (
+            *canvas)[0];
+    auto* selector =
+        splitter
+            ->streamSelection
+            .get();
+    const auto parentId =
+        selector
+            ->getComponentID();
+    const auto secondChoiceId =
+        parentId
+        + ".choice.2_fakesourcenode1_327c46616b65536f757263654e6f646531";
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+    const auto invokeFromWorker =
+        [&] (
+            const String& id,
+            LfpWindowsUiaAction action,
+            StringRef value = {})
+    {
+        LfpWindowsUiaInvokeResult
+            result;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            id
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (value)
+                                .toWideCharPointer()));
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 200
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return result;
+    };
+
+    const auto queryValue =
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        queryValue.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        queryValue.valueReadOnly,
+        FALSE);
+    const auto setSecond =
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                setValue,
+            "FakeSourceNode1");
+    EXPECT_EQ (
+        setSecond.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        "2|FakeSourceNode1");
+    EXPECT_EQ (
+        setSecond.value,
+        L"FakeSourceNode1");
+    EXPECT_EQ (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                setValue,
+            "FakeSourceNode0")
+            .invokeResult,
+        S_OK);
+    const auto expandResult =
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                expand);
+    EXPECT_EQ (
+        expandResult.focusResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.invokeResult,
+        S_OK);
+    const auto selectSecond =
+        invokeFromWorker (
+            secondChoiceId,
+            LfpWindowsUiaAction::
+                select);
+    EXPECT_EQ (
+        selectSecond.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        selectSecond
+            .selectionItemPatternAvailable,
+        true);
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        "2|FakeSourceNode1");
+    EXPECT_EQ (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                collapse)
+            .invokeResult,
+        S_OK);
+
+    source->moveStream (
+        1,
+        0);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    canvas->updateSettings();
+    EXPECT_EQ (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                setValue,
+            "FakeSourceNode0")
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                expand)
+            .invokeResult,
+        S_OK);
+    const auto selectSameIdAfterReorder =
+        invokeFromWorker (
+            secondChoiceId,
+            LfpWindowsUiaAction::
+                select);
+    EXPECT_EQ (
+        selectSameIdAfterReorder
+            .invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        splitter
+            ->selectedStreamKey,
+        "2|FakeSourceNode1");
+    invokeFromWorker (
+        parentId,
+        LfpWindowsUiaAction::
+            collapse);
+
+    selector->setEnabled (
+        false);
+    EXPECT_EQ (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                setValue,
+            "FakeSourceNode0")
+            .invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    selector->setEnabled (
+        true);
+    canvas->setVisible (
+        false);
+    EXPECT_NE (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                setValue,
+            "FakeSourceNode0")
+            .invokeResult,
+        S_OK);
+    canvas->setVisible (
+        true);
+    EXPECT_EQ (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                setValue,
+            "FakeSourceNode0")
+            .invokeResult,
+        S_OK);
+    canvas.reset();
+    EXPECT_NE (
+        invokeFromWorker (
+            parentId,
+            LfpWindowsUiaAction::
+                setValue,
+            "FakeSourceNode0")
+            .invokeResult,
+        S_OK);
 }
 
 TEST_F (LfpDisplayNodeTests,

@@ -427,6 +427,8 @@ private:
 
     bool isSelected;
     bool isUpdating;
+    bool streamChoiceRebuildPending =
+        false;
 
     LfpDisplayNode* processor;
     LfpDisplayCanvas* canvas;

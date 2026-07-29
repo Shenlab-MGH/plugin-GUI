@@ -253,6 +253,10 @@ public:
     void setAccessibilityValueSelectionEnabled (
         bool shouldEnable);
 
+    /** Requires this opt-in value selection to be currently showing. */
+    void setAccessibilityValueSelectionRequiresShowing (
+        bool shouldRequireShowing);
+
     /** Opens the choices and publishes expanded/collapsed state. */
     void showPopup() override;
 
@@ -273,6 +277,8 @@ private:
         MessageThreadComboBoxAccessibilityState>
         accessibilityState;
     bool accessibilityValueSelectionEnabled =
+        false;
+    bool accessibilityValueSelectionRequiresShowing =
         false;
 };
 

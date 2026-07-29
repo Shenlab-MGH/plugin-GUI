@@ -66,6 +66,7 @@ struct MessageThreadComboBoxAccessibilityState
         bool isEnabled,
         bool isEditable,
         bool isValueSelectionEnabled,
+        bool valueSelectionRequiresShowing,
         bool hasFocus)
     {
         {
@@ -83,6 +84,8 @@ struct MessageThreadComboBoxAccessibilityState
         editable.store (isEditable);
         valueSelectionEnabled.store (
             isValueSelectionEnabled);
+        selectionRequiresShowing.store (
+            valueSelectionRequiresShowing);
         focused.store (hasFocus);
     }
 
@@ -134,6 +137,13 @@ struct MessageThreadComboBoxAccessibilityState
         return valueSelectionEnabled.load();
     }
 
+    bool doesSelectionRequireShowing()
+        const
+    {
+        return selectionRequiresShowing
+            .load();
+    }
+
     bool hasFocus() const
     {
         return focused.load();
@@ -150,6 +160,8 @@ private:
     std::atomic<bool> editable { false };
     std::atomic<bool>
         valueSelectionEnabled { false };
+    std::atomic<bool>
+        selectionRequiresShowing { false };
     std::atomic<bool> focused { false };
     MessageThreadComboBox* comboBox = nullptr;
 };
@@ -249,6 +261,15 @@ public:
                 }
                 if (! comboBox
                          ->isEnabled())
+                {
+                    comboBox
+                        ->synchroniseAccessibilityState();
+                    return queuedSelection;
+                }
+                if (state
+                        ->doesSelectionRequireShowing()
+                    && ! comboBox
+                             ->isShowing())
                 {
                     comboBox
                         ->synchroniseAccessibilityState();
@@ -835,6 +856,15 @@ void MessageThreadComboBox::
 }
 
 void MessageThreadComboBox::
+    setAccessibilityValueSelectionRequiresShowing (
+        bool shouldRequireShowing)
+{
+    accessibilityValueSelectionRequiresShowing =
+        shouldRequireShowing;
+    synchroniseAccessibilityState();
+}
+
+void MessageThreadComboBox::
     synchroniseAccessibilityState()
 {
     jassert (
@@ -851,6 +881,7 @@ void MessageThreadComboBox::
         ComboBox::isEnabled(),
         isTextEditable(),
         accessibilityValueSelectionEnabled,
+        accessibilityValueSelectionRequiresShowing,
         hasKeyboardFocus (false));
 }
 
