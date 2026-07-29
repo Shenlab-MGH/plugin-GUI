@@ -631,6 +631,73 @@ bool LfpDisplayCanvas::
             retainedIdentity);
 }
 
+bool LfpDisplayCanvas::
+    requestStableChannelVisibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity,
+        LfpWaveformVisibility visibility)
+{
+    jassert (
+        MessageManager::
+            existsAndIsCurrentThread());
+    if (retainedIdentity == nullptr
+        || ! retainedIdentity
+                ->isAgentActionable()
+        || ! isShowing()
+        || ! isEnabled())
+    {
+        return false;
+    }
+
+    const auto paneIndex =
+        retainedIdentity
+            ->getPaneIndex();
+    if (paneIndex < 0
+        || paneIndex
+               >= displaySplits.size())
+    {
+        return false;
+    }
+
+    auto* splitter =
+        displaySplits[
+            paneIndex];
+    if (splitter == nullptr
+        || splitter->canvas != this
+        || splitter->splitID
+               != paneIndex
+        || splitter->lfpDisplay
+               == nullptr
+        || splitter->displayBuffer
+               == nullptr
+        || splitter
+                   ->getStreamKey()
+               != retainedIdentity
+                      ->getStreamKey()
+        || splitter->displayBuffer
+                   ->streamKey
+               != retainedIdentity
+                      ->getStreamKey()
+        || ! splitter->isShowing()
+        || ! splitter->isEnabled()
+        || ! splitter
+                ->lfpDisplay
+                ->isShowing()
+        || ! splitter
+                ->lfpDisplay
+                ->isEnabled())
+    {
+        return false;
+    }
+
+    return splitter
+        ->lfpDisplay
+        ->requestStableChannelVisibility (
+            retainedIdentity,
+            visibility);
+}
+
 void LfpDisplayCanvas::mouseMove (const MouseEvent& e)
 {
     MouseEvent event = e.getEventRelativeTo (this);
@@ -1497,6 +1564,9 @@ void LfpDisplaySplitter::updateSettings()
     Array<DisplayBuffer*> availableBuffers = processor->getDisplayBuffers();
     const bool streamKeysAreAmbiguous =
         hasAmbiguousStreamKeys (
+            availableBuffers);
+    lfpDisplay
+        ->pruneStoredVisibilityForAvailableStreams (
             availableBuffers);
 
     streamSelection->clear (

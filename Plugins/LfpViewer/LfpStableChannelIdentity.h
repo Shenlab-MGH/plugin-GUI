@@ -31,6 +31,13 @@ class LfpStableChannelActionRequest;
 class LfpStableChannelActionOwnerState;
 class LfpStableChannelIdentityBindingSlot;
 
+/** The only value payload accepted by stable waveform visibility requests. */
+enum class LfpWaveformVisibility
+{
+    visible,
+    hidden
+};
+
 #if BUILD_TESTS
 using LfpStableChannelDiagnosticDispatcherForTests =
     std::function<bool (
@@ -195,6 +202,15 @@ public:
         authorization.
      */
     TESTABLE bool validateCurrentAndAvailable() const;
+
+    /**
+        Requests one owner-controlled waveform visibility mutation.
+
+        The owner revalidates and applies this value in one message-thread
+        turn; this object never exposes mutation authorization.
+     */
+    TESTABLE bool requestWaveformVisibility (
+        LfpWaveformVisibility visibility) const;
 
 private:
     friend class LfpDisplayCanvas;

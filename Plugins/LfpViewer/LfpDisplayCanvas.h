@@ -170,6 +170,11 @@ private:
         const std::shared_ptr<
             const LfpStableChannelIdentity>&
             retainedIdentity) const;
+    bool requestStableChannelVisibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity,
+        LfpWaveformVisibility visibility);
 
     std::shared_ptr<
         LfpStableChannelActionOwnerState>

@@ -27,6 +27,7 @@
 #include <VisualizerWindowHeaders.h>
 
 #include <array>
+#include <unordered_set>
 #include <vector>
 
 #include "LfpDisplayClasses.h"
@@ -202,6 +203,10 @@ public:
     /** Returns whether a particular channel is enabled */
     bool getEnabledState (int chan);
 
+    /** Returns stored logical visibility, defaulting safely to visible. */
+    TESTABLE bool getStoredChannelVisibility (
+        int chan) const;
+
     /** Sets the scroll offset for this display*/
     void setScrollPosition (int x, int y);
 
@@ -224,10 +229,10 @@ public:
     void setSpikeRasterThreshold (float thresh);
 
     /** Returns true if a single channel is focused in viewport */
-    bool getSingleChannelState();
+    TESTABLE bool getSingleChannelState();
 
     /** Returns the index of the channel that is focused in viewport */
-    int getSingleChannelShown();
+    TESTABLE int getSingleChannelShown();
 
     /** Sets the view to a single channel */
     void setSingleChannelView (int channel);
@@ -320,9 +325,6 @@ public:
     /** Instance of trackZoomInfo struct */
     TrackZoomInfo_Struct trackZoomInfo;
 
-    /** Stores whether or not channels are enabled */
-    Array<bool> savedChannelState;
-
     /** x-index of display bitmap updated on previous refresh */
     int lastBitmapIndex;
 
@@ -367,6 +369,45 @@ private:
         const std::shared_ptr<
             const LfpStableChannelIdentity>&
             retainedIdentity) const;
+    bool requestStableChannelVisibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity,
+        LfpWaveformVisibility visibility);
+    struct StableChannelVisibilityKey
+    {
+        StableChannelVisibilityKey (
+            int paneIndex,
+            String streamKey,
+            const LfpStableChannelKey&
+                stableChannelKey);
+
+        bool operator== (
+            const StableChannelVisibilityKey&
+                other) const noexcept;
+
+        int paneIndex;
+        String streamKey;
+        LfpStableChannelKey stableChannelKey;
+    };
+    struct StableChannelVisibilityKeyHash
+    {
+        size_t operator() (
+            const StableChannelVisibilityKey&
+                key) const noexcept;
+    };
+    std::optional<
+        StableChannelVisibilityKey>
+    getStableChannelVisibilityKey (
+        int channelIndex) const;
+    void reconcileFocusedChannelAfterBind();
+    void pruneStoredVisibilityAfterBind();
+    void pruneStoredVisibilityForAvailableStreams (
+        const Array<DisplayBuffer*>&
+            availableStreams);
+    void clearStoredVisibilityForStream (
+        const String& streamKey);
+    void applyStoredChannelVisibilityAfterBind();
 
     int singleChan;
 
@@ -400,6 +441,13 @@ private:
         std::shared_ptr<
             LfpStableChannelIdentityBindingSlot>>
         stableChannelIdentityBindingSlots;
+    std::unordered_set<
+        StableChannelVisibilityKey,
+        StableChannelVisibilityKeyHash>
+        hiddenStableChannels;
+    std::optional<
+        StableChannelVisibilityKey>
+        focusedStableChannel;
     int stableChannelIdentityBulkMutationDepth = 0;
     bool stableChannelIdentityRefreshPending = false;
 

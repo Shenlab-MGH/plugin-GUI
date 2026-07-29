@@ -50,6 +50,7 @@
 #include <cmath>
 #include <math.h>
 #include <numeric>
+#include <unordered_map>
 #include <vector>
 
 using namespace LfpViewer;
@@ -119,8 +120,6 @@ LfpDisplay::LfpDisplay (LfpDisplaySplitter* c, Viewport* v)
     {
         eventDisplayEnabled[ttlLine] = true;
     }
-
-    savedChannelState.insertMultiple (0, true, 10000); // max 10k channels
 
     numChans = 0;
 }
@@ -195,6 +194,25 @@ void LfpDisplay::updateRange (int i)
 
 void LfpDisplay::setNumChannels (int newChannelCount)
 {
+    newChannelCount =
+        jmax (0, newChannelCount);
+    if (newChannelCount == 0)
+    {
+        const auto streamKey =
+            canvasSplit != nullptr
+                ? canvasSplit
+                      ->getStreamKey()
+                : String();
+        if (streamKey.isNotEmpty())
+        {
+            clearStoredVisibilityForStream (
+                streamKey);
+        }
+        else
+        {
+            hiddenStableChannels.clear();
+        }
+    }
     beginStableChannelIdentityBulkMutation();
     invalidateStableChannelIdentities();
 
@@ -212,15 +230,6 @@ void LfpDisplay::setNumChannels (int newChannelCount)
     stableChannelIdentityBindingSlots.resize (
         static_cast<size_t> (
             newChannelCount));
-    if (savedChannelState.size()
-        < newChannelCount)
-    {
-        savedChannelState.insertMultiple (
-            savedChannelState.size(),
-            true,
-            newChannelCount
-                - savedChannelState.size());
-    }
 
     totalHeight = 0;
 
@@ -269,11 +278,8 @@ void LfpDisplay::setNumChannels (int newChannelCount)
             lfpChan->setChannelHeight (canvasSplit->getChannelHeight());
             lfpInfo->setChannelHeight (canvasSplit->getChannelHeight());
 
-            if (! getSingleChannelState())
-            {
-                lfpChan->setEnabledState (savedChannelState[i]);
-                lfpInfo->setEnabledState (savedChannelState[i]);
-            }
+            lfpChan->setEnabledState (true);
+            lfpInfo->setEnabledState (true);
 
             totalHeight += lfpChan->getChannelHeight();
         }
@@ -402,6 +408,7 @@ void LfpDisplay::
                 const LfpStableChannelIdentity>>&
             identities)
 {
+    beginStableChannelIdentityBulkMutation();
     invalidateStableChannelIdentities();
     stableChannelIdentityBlueprints =
         identities;
@@ -414,6 +421,9 @@ void LfpDisplay::
                 ->revokeAgentActionability();
         }
     }
+    pruneStoredVisibilityAfterBind();
+    reconcileFocusedChannelAfterBind();
+    applyStoredChannelVisibilityAfterBind();
     const auto count =
         jmin (
             channels.size(),
@@ -491,6 +501,364 @@ void LfpDisplay::
                 afterPairPublication,
             index);
 #endif
+    }
+    endStableChannelIdentityBulkMutation();
+}
+
+LfpDisplay::StableChannelVisibilityKey::
+    StableChannelVisibilityKey (
+        int paneIndex_,
+        String streamKey_,
+        const LfpStableChannelKey&
+            stableChannelKey_)
+    : paneIndex (paneIndex_),
+      streamKey (
+          std::move (
+              streamKey_)),
+      stableChannelKey (
+          stableChannelKey_)
+{
+}
+
+bool LfpDisplay::StableChannelVisibilityKey::
+    operator== (
+        const StableChannelVisibilityKey&
+            other) const noexcept
+{
+    return paneIndex
+               == other.paneIndex
+        && streamKey
+               == other.streamKey
+        && stableChannelKey
+               == other.stableChannelKey;
+}
+
+size_t LfpDisplay::
+    StableChannelVisibilityKeyHash::
+    operator() (
+        const StableChannelVisibilityKey&
+            key) const noexcept
+{
+    size_t result =
+        std::hash<int> {} (
+            key.paneIndex);
+    const auto combine =
+        [&result] (size_t value)
+        {
+            result ^= value
+                + static_cast<size_t> (
+                    0x9e3779b9)
+                + (result << 6)
+                + (result >> 2);
+        };
+    combine (
+        std::hash<std::string> {} (
+            key.streamKey
+                .toStdString()));
+    combine (
+        std::hash<int> {} (
+            static_cast<int> (
+                key.stableChannelKey
+                    .getKind())));
+    if (key.stableChannelKey
+            .getKind()
+        == LfpStableChannelKey::Kind::
+               identifier)
+    {
+        combine (
+            std::hash<std::string> {} (
+                key.stableChannelKey
+                    .getIdentifier()
+                    .toStdString()));
+    }
+    else
+    {
+        combine (
+            std::hash<int> {} (
+                key.stableChannelKey
+                    .getSourceNodeId()));
+        combine (
+            std::hash<int> {} (
+                key.stableChannelKey
+                    .getLocalIndex()));
+    }
+    return result;
+}
+
+std::optional<
+    LfpDisplay::StableChannelVisibilityKey>
+LfpDisplay::
+    getStableChannelVisibilityKey (
+        int channelIndex) const
+{
+    if (channelIndex < 0
+        || channelIndex
+               >= static_cast<int> (
+                   stableChannelIdentityBlueprints
+                       .size()))
+    {
+        return std::nullopt;
+    }
+
+    const auto& identity =
+        stableChannelIdentityBlueprints[
+            static_cast<size_t> (
+                channelIndex)];
+    const auto* stableChannelKey =
+        identity != nullptr
+            ? identity
+                  ->getStableChannelKey()
+            : nullptr;
+    if (identity == nullptr
+        || stableChannelKey == nullptr
+        || identity->getPaneIndex() < 0
+        || identity
+               ->getStreamKey()
+               .isEmpty()
+        || identity
+               ->getRuntimeUuid()
+               == Uuid::null()
+        || canvasSplit == nullptr
+        || canvasSplit->splitID
+               != identity
+                      ->getPaneIndex()
+        || canvasSplit
+                   ->getStreamKey()
+               != identity
+                      ->getStreamKey())
+    {
+        return std::nullopt;
+    }
+
+    return StableChannelVisibilityKey (
+        identity->getPaneIndex(),
+        identity->getStreamKey(),
+        *stableChannelKey);
+}
+
+bool LfpDisplay::
+    getStoredChannelVisibility (
+        int channelIndex) const
+{
+    const auto key =
+        getStableChannelVisibilityKey (
+            channelIndex);
+    return ! key.has_value()
+        || hiddenStableChannels.find (
+               *key)
+               == hiddenStableChannels.end();
+}
+
+void LfpDisplay::
+    reconcileFocusedChannelAfterBind()
+{
+    if (! getSingleChannelState())
+    {
+        focusedStableChannel.reset();
+        return;
+    }
+
+    int matchingChannel = -1;
+    if (focusedStableChannel.has_value())
+    {
+        for (int index = 0;
+             index
+                 < static_cast<int> (
+                     stableChannelIdentityBlueprints
+                         .size());
+             ++index)
+        {
+            const auto key =
+                getStableChannelVisibilityKey (
+                    index);
+            if (key.has_value()
+                && *key
+                       == *focusedStableChannel)
+            {
+                matchingChannel = index;
+                break;
+            }
+        }
+    }
+
+    if (matchingChannel >= 0)
+    {
+        singleChan = matchingChannel;
+        return;
+    }
+
+    if (drawableChannels.size() == 1
+        && drawableChannels[0].channelInfo
+               != nullptr)
+    {
+        drawableChannels[0]
+            .channelInfo
+            ->setSingleChannelState (
+                false);
+    }
+    singleChan = -1;
+    focusedStableChannel.reset();
+}
+
+void LfpDisplay::
+    pruneStoredVisibilityAfterBind()
+{
+    if (canvasSplit == nullptr)
+        return;
+
+    const auto paneIndex =
+        canvasSplit->splitID;
+    const auto streamKey =
+        canvasSplit
+            ->getStreamKey();
+    if (paneIndex < 0
+        || streamKey.isEmpty())
+    {
+        return;
+    }
+
+    std::unordered_set<
+        StableChannelVisibilityKey,
+        StableChannelVisibilityKeyHash>
+        currentKeys;
+    currentKeys.reserve (
+        stableChannelIdentityBlueprints
+            .size());
+    for (int index = 0;
+         index
+             < static_cast<int> (
+                 stableChannelIdentityBlueprints
+                     .size());
+         ++index)
+    {
+        const auto key =
+            getStableChannelVisibilityKey (
+                index);
+        if (key.has_value())
+        {
+            currentKeys.insert (
+                *key);
+        }
+    }
+
+    for (auto iterator =
+             hiddenStableChannels.begin();
+         iterator
+             != hiddenStableChannels.end();)
+    {
+        if (iterator->paneIndex
+                    == paneIndex
+            && iterator->streamKey
+                   == streamKey
+            && currentKeys.find (
+                   *iterator)
+                   == currentKeys.end())
+        {
+            iterator =
+                hiddenStableChannels.erase (
+                    iterator);
+        }
+        else
+        {
+            ++iterator;
+        }
+    }
+}
+
+void LfpDisplay::
+    clearStoredVisibilityForStream (
+        const String& streamKey)
+{
+    if (streamKey.isEmpty())
+        return;
+
+    for (auto iterator =
+             hiddenStableChannels.begin();
+         iterator
+             != hiddenStableChannels.end();)
+    {
+        if (iterator->streamKey
+            == streamKey)
+        {
+            iterator =
+                hiddenStableChannels.erase (
+                    iterator);
+        }
+        else
+        {
+            ++iterator;
+        }
+    }
+}
+
+void LfpDisplay::
+    pruneStoredVisibilityForAvailableStreams (
+        const Array<DisplayBuffer*>&
+            availableStreams)
+{
+    std::unordered_map<
+        std::string,
+        int>
+        streamKeyCounts;
+    for (const auto* stream :
+         availableStreams)
+    {
+        if (stream != nullptr)
+        {
+            ++streamKeyCounts[
+                stream->streamKey
+                    .toStdString()];
+        }
+    }
+
+    for (auto iterator =
+             hiddenStableChannels.begin();
+         iterator
+             != hiddenStableChannels.end();)
+    {
+        const auto found =
+            streamKeyCounts.find (
+                iterator->streamKey
+                    .toStdString());
+        if (iterator->streamKey.isEmpty()
+            || found
+                   == streamKeyCounts.end()
+            || found->second != 1)
+        {
+            iterator =
+                hiddenStableChannels.erase (
+                    iterator);
+        }
+        else
+        {
+            ++iterator;
+        }
+    }
+}
+
+void LfpDisplay::
+    applyStoredChannelVisibilityAfterBind()
+{
+    const auto count =
+        jmin (
+            channels.size(),
+            channelInfo.size(),
+            static_cast<int> (
+                stableChannelIdentityBlueprints
+                    .size()));
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        const auto visible =
+            getStoredChannelVisibility (
+                index);
+        channels[index]
+            ->setEnabledState (
+                visible);
+        channelInfo[index]
+            ->setEnabledState (
+                visible);
     }
 }
 
@@ -727,6 +1095,54 @@ bool LfpDisplay::
             }
         }
         return false;
+    }
+
+    return false;
+}
+
+bool LfpDisplay::
+    requestStableChannelVisibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity,
+        LfpWaveformVisibility visibility)
+{
+    jassert (
+        MessageManager::
+            existsAndIsCurrentThread());
+    if (! validateStableChannelAction (
+            retainedIdentity))
+    {
+        return false;
+    }
+
+    const auto count =
+        jmin (
+            channels.size(),
+            channelInfo.size(),
+            static_cast<int> (
+                stableChannelIdentityBindingSlots
+                    .size()));
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        const auto& slot =
+            stableChannelIdentityBindingSlots[
+                static_cast<size_t> (
+                    index)];
+        if (slot != nullptr
+            && slot->get()
+                   == retainedIdentity)
+        {
+            setEnabledState (
+                visibility
+                    == LfpWaveformVisibility::
+                           visible,
+                index,
+                true);
+            return true;
+        }
     }
 
     return false;
@@ -1677,6 +2093,9 @@ void LfpDisplay::toggleSingleChannel (LfpChannelTrack drawableChannel)
     if (! getSingleChannelState())
     {
         singleChan = drawableChannel.channel->getChannelNumber();
+        focusedStableChannel =
+            getStableChannelVisibilityKey (
+                singleChan);
 
         rebuildDrawableChannelsList();
     }
@@ -1685,6 +2104,7 @@ void LfpDisplay::toggleSingleChannel (LfpChannelTrack drawableChannel)
         drawableChannels[0].channelInfo->setSingleChannelState (false);
 
         singleChan = -1;
+        focusedStableChannel.reset();
 
         setChannelHeight (cachedDisplayChannelHeight);
 
@@ -1697,7 +2117,10 @@ void LfpDisplay::toggleSingleChannel (LfpChannelTrack drawableChannel)
 void LfpDisplay::reactivateChannels()
 {
     for (int n = 0; n < channels.size(); n++)
-        setEnabledState (savedChannelState[n], n, true);
+        setEnabledState (
+            getStoredChannelVisibility (n),
+            n,
+            false);
 }
 
 void LfpDisplay::rebuildDrawableChannelsList()
@@ -1972,6 +2395,9 @@ int LfpDisplay::getSingleChannelShown()
 void LfpDisplay::setSingleChannelView (int chan)
 {
     singleChan = chan;
+    focusedStableChannel =
+        getStableChannelVisibilityKey (
+            chan);
 }
 
 void LfpDisplay::pause (bool shouldPause)
@@ -2101,19 +2527,39 @@ bool LfpDisplay::getEventDisplayState (int ttlLine)
 
 void LfpDisplay::setEnabledState (bool state, int chan, bool updateSaved)
 {
-    if (chan < numChans)
+    if (chan >= 0
+        && chan < numChans)
     {
+        if (updateSaved)
+        {
+            const auto key =
+                getStableChannelVisibilityKey (
+                    chan);
+            if (! key.has_value())
+            {
+                state = true;
+            }
+            else if (state)
+            {
+                hiddenStableChannels.erase (
+                    *key);
+            }
+            else
+            {
+                hiddenStableChannels.insert (
+                    *key);
+            }
+        }
+
         channels[chan]->setEnabledState (state);
         channelInfo[chan]->setEnabledState (state);
-
-        if (updateSaved)
-            savedChannelState.set (chan, state);
     }
 }
 
 bool LfpDisplay::getEnabledState (int chan)
 {
-    if (chan < numChans)
+    if (chan >= 0
+        && chan < numChans)
     {
         return channels[chan]->getEnabledState();
     }

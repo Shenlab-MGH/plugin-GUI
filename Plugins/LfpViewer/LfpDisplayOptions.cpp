@@ -3711,7 +3711,9 @@ void LfpDisplayOptions::saveParameters (XmlElement* xml)
 
     for (int i = 0; i < canvasSplit->nChans; i++)
     {
-        if (lfpDisplay->savedChannelState[i])
+        if (lfpDisplay
+                ->getStoredChannelVisibility (
+                    i))
         {
             channelDisplayState += "1";
         }

@@ -415,6 +415,87 @@ bool LfpStableChannelActionRequest::
         stableChannelDiagnosticTimeout);
 }
 
+bool LfpStableChannelActionRequest::
+    requestWaveformVisibility (
+        LfpWaveformVisibility visibility) const
+{
+    const auto retainedOwnerState =
+        ownerState;
+    const auto retainedOwnerPublication =
+        ownerPublication;
+    const auto retained =
+        retainedIdentity;
+    const auto performOnOwnerThread =
+        [retainedOwnerState,
+         retainedOwnerPublication,
+         retained,
+         visibility]
+        {
+            jassert (
+                MessageManager::
+                    existsAndIsCurrentThread());
+            const auto liveOwnerState =
+                retainedOwnerState.lock();
+            const auto liveOwnerPublication =
+                retainedOwnerPublication.lock();
+            if (liveOwnerState == nullptr
+                || liveOwnerPublication
+                       == nullptr
+                || liveOwnerState->owner
+                       == nullptr
+                || ! liveOwnerPublication
+                        ->isCurrentAndAvailable (
+                            retained))
+            {
+                return false;
+            }
+
+            return liveOwnerState
+                ->owner
+                ->requestStableChannelVisibility (
+                    retained,
+                    visibility);
+        };
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    if (messageManager == nullptr)
+        return false;
+
+    if (messageManager
+            ->isThisTheMessageThread())
+    {
+        return performOnOwnerThread();
+    }
+
+    auto completion =
+        std::make_shared<
+            StableChannelDiagnosticCompletion>();
+    const auto posted =
+        dispatchStableChannelDiagnostic (
+            [performOnOwnerThread,
+             completion]
+            {
+                if (! completion
+                          ->tryBeginCallback())
+                {
+                    return;
+                }
+
+                completion->complete (
+                    performOnOwnerThread());
+            });
+    if (! posted)
+    {
+        completion->cancel();
+        return false;
+    }
+
+    return completion->waitForResult (
+        stableChannelDiagnosticTimeout);
+}
+
 struct LfpStableChannelIdentityBindingSlot::
     Publication final
 {

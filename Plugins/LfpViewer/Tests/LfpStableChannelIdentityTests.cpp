@@ -21,6 +21,7 @@
 #include "../LfpChannelDisplayInfo.h"
 #include "../LfpDisplay.h"
 #include "../LfpDisplayCanvas.h"
+#include "../LfpDisplayEditor.h"
 #include "../LfpStableChannelIdentity.h"
 #include <ModelProcessors.h>
 #include <TestFixtures.h>
@@ -336,6 +337,37 @@ std::vector<LfpDisplaySplitter*> getIdentityTestSplitters (
             return lhs->splitID < rhs->splitID;
         });
     return result;
+}
+
+Array<String> drainIdentityTestBroadcastMessages (
+    MessageCenter& messageCenter)
+{
+    AudioBuffer<float> audioBuffer (
+        1,
+        1);
+    audioBuffer.clear();
+    MidiBuffer eventBuffer;
+    static_cast<AudioProcessor&> (
+        messageCenter)
+        .processBlock (
+            audioBuffer,
+            eventBuffer);
+
+    Array<String> messages;
+    for (const auto metadata :
+         eventBuffer)
+    {
+        if (auto event =
+                TextEvent::deserialize (
+                    metadata.data,
+                    messageCenter
+                        .getMessageChannel()))
+        {
+            messages.add (
+                event->getText());
+        }
+    }
+    return messages;
 }
 
 TEST (LfpStableChannelIdentityTests,
@@ -701,6 +733,611 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             channelIdentity->getStreamKey(),
             buffers[pane]->streamKey);
     }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        HiddenStateDoesNotRetargetSameLocalIndexAcrossStreams)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[0]->streamKey));
+    ASSERT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    ASSERT_FALSE (
+        display->channels[0]
+            ->getEnabledState());
+
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[1]->streamKey));
+
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        FocusedStreamSwitchDoesNotRetargetOldChannelIndex)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[0]->streamKey));
+    ASSERT_GE (
+        display->drawableChannels.size(),
+        2);
+    display->toggleSingleChannel (
+        display->drawableChannels[1]);
+    ASSERT_TRUE (
+        display->getSingleChannelState());
+    ASSERT_EQ (
+        display->getSingleChannelShown(),
+        1);
+
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[1]->streamKey));
+
+    EXPECT_FALSE (
+        display->getSingleChannelState());
+    EXPECT_GT (
+        display->drawableChannels.size(),
+        1);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        HiddenStateIsIsolatedByPaneAndChannel)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::TWO_VERT,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_GE (splitters.size(), 2u);
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_FALSE (buffers.isEmpty());
+    for (int pane = 0; pane < 2; ++pane)
+    {
+        ASSERT_TRUE (
+            splitters[
+                static_cast<size_t> (
+                    pane)]
+                ->selectStreamByKey (
+                    buffers[0]
+                        ->streamKey));
+    }
+    auto* first =
+        splitters[0]
+            ->lfpDisplay.get();
+    auto* second =
+        splitters[1]
+            ->lfpDisplay.get();
+    ASSERT_GE (first->channels.size(), 2);
+    ASSERT_GE (second->channels.size(), 2);
+
+    first->setEnabledState (
+        false,
+        0,
+        true);
+
+    EXPECT_FALSE (
+        first->channels[0]
+            ->getEnabledState());
+    EXPECT_TRUE (
+        first->channels[1]
+            ->getEnabledState());
+    EXPECT_TRUE (
+        second->channels[0]
+            ->getEnabledState());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        HiddenStateFollowsStableIdentityThroughAllDrawableReordering)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer =
+        splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    ASSERT_GE (
+        buffer->channelMetadata.size(),
+        2);
+    const auto hiddenIdentifier =
+        buffer->channelMetadata[0]
+            .identifier;
+    display->setEnabledState (
+        false,
+        0,
+        true);
+
+    std::swap (
+        buffer->channelMetadata
+            .getReference (0),
+        buffer->channelMetadata
+            .getReference (1));
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+    ASSERT_EQ (
+        buffer->channelMetadata[1]
+            .identifier,
+        hiddenIdentifier);
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_FALSE (
+        display->channels[1]
+            ->getEnabledState());
+
+    display->setChannelsReversed (
+        true);
+    display->orderChannelsByDepth (
+        true);
+    display->setChannelDisplaySkipAmount (
+        2);
+    display->setChannelDisplaySkipAmount (
+        0);
+
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                1));
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_FALSE (
+        display->channels[1]
+            ->getEnabledState());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        FocusTemporarilyShowsHiddenTargetWithoutChangingStoredVisibility)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    ASSERT_GE (
+        display->drawableChannels.size(),
+        2);
+    const auto target =
+        display->drawableChannels[1];
+    const auto targetIndex =
+        display->channels
+            .indexOf (
+                target.channel);
+    ASSERT_GE (targetIndex, 0);
+    display->setEnabledState (
+        false,
+        targetIndex,
+        true);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                targetIndex));
+
+    display->toggleSingleChannel (
+        target);
+
+    EXPECT_TRUE (
+        target.channel
+            ->getEnabledState());
+    EXPECT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                targetIndex));
+
+    display->toggleSingleChannel (
+        display->drawableChannels[0]);
+
+    EXPECT_FALSE (
+        target.channel
+            ->getEnabledState());
+    EXPECT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                targetIndex));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        InvalidIdentityHideDefaultsVisibleAndBadBoundsAreNoOps)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer =
+        splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    ASSERT_GE (
+        buffer->channelMetadata.size(),
+        2);
+    buffer->channelMetadata
+        .getReference (1)
+        .uuid =
+        buffer->channelMetadata[0]
+            .uuid;
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+    ASSERT_FALSE (
+        display->channels[0]
+            ->getStableChannelIdentity()
+            ->isAgentActionable());
+
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    display->setEnabledState (
+        false,
+        -1,
+        true);
+    display->setEnabledState (
+        false,
+        display->channels.size(),
+        true);
+
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                -1));
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                display->channels
+                    .size()));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        RemovedAndReaddedChannelDoesNotInheritHiddenState)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer =
+        splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    ASSERT_GE (
+        buffer->channelMetadata.size(),
+        2);
+    const int removedIndex =
+        buffer->channelMetadata.size()
+        - 1;
+    auto removedMetadata =
+        buffer->channelMetadata[
+            removedIndex];
+    display->setEnabledState (
+        false,
+        removedIndex,
+        true);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                removedIndex));
+
+    buffer->channelMetadata
+        .remove (
+            removedIndex);
+    buffer->numChannels =
+        buffer->channelMetadata.size();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+    removedMetadata.uuid = Uuid();
+    buffer->channelMetadata.add (
+        removedMetadata);
+    buffer->numChannels =
+        buffer->channelMetadata.size();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                removedIndex));
+    EXPECT_TRUE (
+        display->channels[
+            removedIndex]
+            ->getEnabledState());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        ZeroChannelsClearsOnlyTheCurrentStreamsHiddenState)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[0]->streamKey));
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[1]->streamKey));
+    display->setEnabledState (
+        false,
+        1,
+        true);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                1));
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[0]->streamKey));
+    display->setNumChannels (
+        0);
+    ASSERT_EQ (
+        display->channels.size(),
+        0);
+    buffers[0]
+        ->channelMetadata
+        .getReference (0)
+        .uuid = Uuid();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[0]->streamKey));
+
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffers[1]->streamKey));
+    EXPECT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                1));
+    EXPECT_FALSE (
+        display->channels[1]
+            ->getEnabledState());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        RemovedAndReaddedStreamDoesNotInheritHiddenState)
+{
+    auto dynamicTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    4,
+                    30000.0f,
+                    0.195f,
+                    2 }),
+            TestGuiRuntimeLifetime::process);
+    auto* dynamicProcessor =
+        dynamicTester
+            ->createProcessor<LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    dynamicProcessor->setHeadlessMode (
+        false);
+    dynamicProcessor->setProcessorType (
+        Plugin::Processor::SPLITTER);
+    auto* editor =
+        static_cast<LfpDisplayEditor*> (
+            dynamicProcessor
+                ->createEditor());
+    dynamicProcessor->setProcessorType (
+        Plugin::Processor::SINK);
+    ASSERT_NE (editor, nullptr);
+    dynamicProcessor->setHeadlessMode (
+        true);
+    editor->canvas.reset (
+        editor->createNewCanvas());
+    auto* canvas =
+        dynamic_cast<LfpDisplayCanvas*> (
+            editor->canvas.get());
+    ASSERT_NE (canvas, nullptr);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    const auto initialBuffers =
+        dynamicProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (
+        initialBuffers.size(),
+        2);
+    auto* removedBuffer =
+        initialBuffers[1];
+    const auto removedStreamKey =
+        removedBuffer->streamKey;
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            removedStreamKey));
+    auto* display =
+        splitter->lfpDisplay.get();
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    auto* source =
+        dynamic_cast<FakeSourceNode*> (
+            dynamicTester
+                ->getSourceNode());
+    ASSERT_NE (source, nullptr);
+
+    source
+        ->setStreamCountPreservingExisting (
+            1,
+            4);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    source
+        ->setStreamCountPreservingExisting (
+            2,
+            4);
+    dynamicTester
+        ->updateSourceNodeSettings();
+
+    const auto replacementBuffers =
+        dynamicProcessor
+            ->getDisplayBuffers();
+    ASSERT_EQ (
+        replacementBuffers.size(),
+        2);
+    ASSERT_EQ (
+        replacementBuffers[1]
+            ->streamKey,
+        removedStreamKey);
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            removedStreamKey));
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+
+    editor->canvas.reset();
+    dynamicProcessor
+        ->setHeadlessMode (
+            true);
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
@@ -1747,6 +2384,318 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     EXPECT_FALSE (
         request
             ->validateCurrentAndAvailable());
+    EXPECT_FALSE (
+        request
+            ->requestWaveformVisibility (
+                LfpWaveformVisibility::
+                    hidden));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        OwnerRequestHidesCurrentChannelAndRejectsTheStaleGeneration)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    const auto request =
+        display->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+    ASSERT_TRUE (
+        request
+            ->validateCurrentAndAvailable());
+
+    EXPECT_TRUE (
+        request
+            ->requestWaveformVisibility (
+                LfpWaveformVisibility::
+                    hidden));
+    EXPECT_FALSE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_FALSE (
+        request
+            ->validateCurrentAndAvailable());
+
+    EXPECT_FALSE (
+        request
+            ->requestWaveformVisibility (
+                LfpWaveformVisibility::
+                    visible));
+    EXPECT_FALSE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        VisibilityRequestChangesDrawingWithoutChangingDataOrControlState)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer =
+        splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    auto* stream =
+        processor->getDataStream (
+            splitter->selectedStreamId);
+    ASSERT_NE (stream, nullptr);
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+    const auto request =
+        display->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+    const auto selectedStreamId =
+        splitter->selectedStreamId;
+    const auto selectedStreamKey =
+        splitter->selectedStreamKey;
+    const auto bufferDisplays =
+        buffer->displays;
+    const auto bufferChannelCount =
+        buffer->numChannels;
+    const auto processorWasEnabled =
+        processor->isEnabled;
+    std::vector<bool> recordedSelection;
+    for (const auto* channel :
+         stream->getContinuousChannels())
+    {
+        ASSERT_NE (channel, nullptr);
+        recordedSelection.push_back (
+            channel->isRecorded);
+    }
+
+    ASSERT_TRUE (
+        request
+            ->requestWaveformVisibility (
+                LfpWaveformVisibility::
+                    hidden));
+
+    EXPECT_FALSE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_EQ (
+        splitter->displayBuffer,
+        buffer);
+    EXPECT_EQ (
+        splitter->selectedStreamId,
+        selectedStreamId);
+    EXPECT_EQ (
+        splitter->selectedStreamKey,
+        selectedStreamKey);
+    EXPECT_EQ (
+        buffer->numChannels,
+        bufferChannelCount);
+    EXPECT_EQ (
+        buffer->displays,
+        bufferDisplays);
+    EXPECT_EQ (
+        processor->isEnabled,
+        processorWasEnabled);
+    const auto channelsAfter =
+        stream->getContinuousChannels();
+    ASSERT_EQ (
+        channelsAfter.size(),
+        static_cast<int> (
+            recordedSelection.size()));
+    for (int index = 0;
+         index < channelsAfter.size();
+         ++index)
+    {
+        EXPECT_EQ (
+            channelsAfter[index]
+                ->isRecorded,
+            recordedSelection[
+                static_cast<size_t> (
+                    index)]);
+    }
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        SameComponentRebindRejectsOldVisibilityRequest)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer =
+        splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    auto* componentBefore =
+        display->channels[0];
+    const auto oldRequest =
+        componentBefore
+            ->getStableChannelActionRequest();
+    ASSERT_NE (oldRequest, nullptr);
+
+    buffer->channelMetadata
+        .getReference (0)
+        .uuid = Uuid();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+    ASSERT_EQ (
+        display->channels[0],
+        componentBefore);
+    const auto currentRequest =
+        componentBefore
+            ->getStableChannelActionRequest();
+    ASSERT_NE (currentRequest, nullptr);
+    ASSERT_NE (
+        currentRequest,
+        oldRequest);
+
+    EXPECT_FALSE (
+        oldRequest
+            ->requestWaveformVisibility (
+                LfpWaveformVisibility::
+                    hidden));
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_TRUE (
+        currentRequest
+            ->requestWaveformVisibility (
+                LfpWaveformVisibility::
+                    hidden));
+    EXPECT_FALSE (
+        display->channels[0]
+            ->getEnabledState());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        TimedOutWorkerVisibilityRequestCannotMutateWhenCallbackRunsLate)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    const auto request =
+        display->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+
+    std::mutex callbackMutex;
+    std::function<void()> acceptedCallback;
+    bool workerResult = true;
+    {
+        ScopedStableChannelDiagnosticTestSeam seam (
+            [&] (
+                std::function<void()> callback)
+            {
+                const std::lock_guard<
+                    std::mutex>
+                    lock (
+                        callbackMutex);
+                acceptedCallback =
+                    std::move (
+                        callback);
+                return true;
+            },
+            {});
+        std::thread worker (
+            [&]
+            {
+                workerResult =
+                    request
+                        ->requestWaveformVisibility (
+                            LfpWaveformVisibility::
+                                hidden);
+            });
+        worker.join();
+
+        std::function<void()> lateCallback;
+        {
+            const std::lock_guard<
+                std::mutex>
+                lock (
+                    callbackMutex);
+            lateCallback =
+                std::move (
+                    acceptedCallback);
+        }
+        ASSERT_TRUE (
+            static_cast<bool> (
+                lateCallback));
+        lateCallback();
+    }
+
+    EXPECT_FALSE (workerResult);
+    EXPECT_TRUE (
+        display->channels[0]
+            ->getEnabledState());
+    EXPECT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                0));
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
@@ -2512,10 +3461,22 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     ASSERT_EQ (
         display->channels.size(),
         channelCount);
-    ASSERT_GE (
-        display->savedChannelState
-            .size(),
-        channelCount);
+    ASSERT_TRUE (
+        display
+            ->getStoredChannelVisibility (
+                channelCount - 1));
+    display->setEnabledState (
+        false,
+        channelCount - 1,
+        true);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                channelCount - 1));
+    ASSERT_FALSE (
+        display->channels[
+            channelCount - 1]
+            ->getEnabledState());
 
     display
         ->resetStableIdentityAvailabilityWorkForTests();
