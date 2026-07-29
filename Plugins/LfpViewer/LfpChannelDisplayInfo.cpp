@@ -81,6 +81,7 @@ public:
         int nodeId,
         bool visible)
         : owner (&ownerToUse),
+          processorNodeId (nodeId),
           paneIndex (identity.getPaneIndex()),
           streamKey (identity.getStreamKey()),
           runtimeUuid (identity.getRuntimeUuid()),
@@ -210,11 +211,13 @@ public:
     }
 
     bool matchesIdentity (
-        const LfpStableChannelIdentity& identity) const
+        const LfpStableChannelIdentity& identity,
+        int currentNodeId) const
     {
         const auto* key = identity.getStableChannelKey();
         if (! isActive()
             || key == nullptr
+            || processorNodeId != currentNodeId
             || paneIndex != identity.getPaneIndex()
             || streamKey != identity.getStreamKey()
             || runtimeUuid != identity.getRuntimeUuid()
@@ -303,6 +306,7 @@ public:
 
 private:
     Component::SafePointer<LfpChannelDisplayInfo> owner;
+    const int processorNodeId;
     const int paneIndex;
     const String streamKey;
     const Uuid runtimeUuid;
@@ -441,6 +445,12 @@ public:
         accessibilityState = std::move (stateToUse);
     }
 
+    void setWaveformVisibilityAccessibilityOwner (
+        LfpChannelDisplayInfo& ownerToUse)
+    {
+        owner = &ownerToUse;
+    }
+
 protected:
     std::unique_ptr<AccessibilityHandler>
     createAccessibilityHandler() override
@@ -455,7 +465,35 @@ protected:
             : nullptr;
     }
 
+    void visibilityChanged() override
+    {
+        UtilityButton::visibilityChanged();
+        notifyOwnerOfLifecycleChange();
+    }
+
+    void enablementChanged() override
+    {
+        UtilityButton::enablementChanged();
+        notifyOwnerOfLifecycleChange();
+    }
+
+    void parentHierarchyChanged() override
+    {
+        UtilityButton::parentHierarchyChanged();
+        notifyOwnerOfLifecycleChange();
+    }
+
 private:
+    void notifyOwnerOfLifecycleChange()
+    {
+        if (auto* currentOwner = owner.getComponent())
+        {
+            currentOwner
+                ->handleWaveformVisibilityAccessibilityLifecycleChange();
+        }
+    }
+
+    Component::SafePointer<LfpChannelDisplayInfo> owner;
     std::weak_ptr<LfpWaveformVisibilityAccessibilityState>
         accessibilityState;
 };
@@ -473,6 +511,9 @@ LfpChannelDisplayInfo::LfpChannelDisplayInfo (LfpDisplaySplitter* canvas_, LfpDi
       isSingleChannel (false)
 {
     enableButton = std::make_unique<LfpWaveformVisibilityButton> ("");
+    static_cast<LfpWaveformVisibilityButton*> (
+        enableButton.get())
+        ->setWaveformVisibilityAccessibilityOwner (*this);
     enableButton->setRadius (5.0f);
 
     enableButton->setEnabledState (true);
@@ -489,6 +530,29 @@ LfpChannelDisplayInfo::LfpChannelDisplayInfo (LfpDisplaySplitter* canvas_, LfpDi
                        1.899 19.921-6.096 30.277 5.443l284.412 292.542c11.472 11.179 3.007 31.141-12.5 31.141z";
 
     pointerPath = Drawable::parseSVGPath (svgString);
+}
+
+LfpChannelDisplayInfo::~LfpChannelDisplayInfo()
+{
+    revokeWaveformVisibilityAccessibility();
+}
+
+void LfpChannelDisplayInfo::visibilityChanged()
+{
+    LfpChannelDisplay::visibilityChanged();
+    handleWaveformVisibilityAccessibilityLifecycleChange();
+}
+
+void LfpChannelDisplayInfo::enablementChanged()
+{
+    LfpChannelDisplay::enablementChanged();
+    handleWaveformVisibilityAccessibilityLifecycleChange();
+}
+
+void LfpChannelDisplayInfo::parentHierarchyChanged()
+{
+    Component::parentHierarchyChanged();
+    handleWaveformVisibilityAccessibilityLifecycleChange();
 }
 
 void LfpChannelDisplayInfo::updateType (ContinuousChannel::Type type_)
@@ -540,7 +604,8 @@ void LfpChannelDisplayInfo::
         && current->isVisible()
                == waveformVisible
         && current->matchesIdentity (
-               *identity))
+               *identity,
+               nodeId))
     {
         return;
     }
@@ -670,12 +735,13 @@ bool LfpChannelDisplayInfo::
 
 bool LfpChannelDisplayInfo::
     matchesWaveformVisibilityAccessibilityIdentity (
-        const LfpStableChannelIdentity& identity) const
+        const LfpStableChannelIdentity& identity,
+        int nodeId) const
 {
     return waveformVisibilityAccessibilityState
                != nullptr
         && waveformVisibilityAccessibilityState
-               ->matchesIdentity (identity);
+               ->matchesIdentity (identity, nodeId);
 }
 
 bool LfpChannelDisplayInfo::
@@ -686,6 +752,21 @@ bool LfpChannelDisplayInfo::
         && enableButton->Component::isEnabled()
         && isShowing()
         && Component::isEnabled();
+}
+
+void LfpChannelDisplayInfo::
+    handleWaveformVisibilityAccessibilityLifecycleChange()
+{
+    jassert (MessageManager::existsAndIsCurrentThread());
+    if (display != nullptr)
+    {
+        display
+            ->refreshWaveformVisibilityAccessibilityAvailability();
+    }
+    else
+    {
+        revokeWaveformVisibilityAccessibility();
+    }
 }
 
 void LfpChannelDisplayInfo::setSingleChannelState (bool state)

@@ -1605,6 +1605,386 @@ TEST_F (LfpStableChannelIdentityBindingTests,
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityRetiresGenerationWhenProcessorNodeIdChanges)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    auto* button =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (button, nullptr);
+    const auto oldNodeId =
+        processor->getNodeId();
+    const auto oldId =
+        button->getComponentID();
+    ASSERT_FALSE (oldId.isEmpty());
+    auto oldHandler =
+        createIdentityTestEnableButtonHandler (
+            *button);
+    ASSERT_NE (oldHandler, nullptr);
+    const auto oldActions =
+        oldHandler->getActions();
+
+    processor->setNodeId (
+        oldNodeId + 10000);
+    display->setEnabledState (
+        true,
+        0,
+        true);
+
+    const auto newId =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + oldId.fromFirstOccurrenceOf (
+              ".lfp.",
+              true,
+              false);
+    EXPECT_EQ (
+        button->getComponentID(),
+        newId);
+    EXPECT_FALSE (
+        oldHandler->isEnabled());
+    ASSERT_TRUE (
+        oldActions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        display->getStoredChannelVisibility (
+            0));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityRetiresRetainedHandlersForDirectComponentLifecycle)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    auto* info = display->channelInfo[0];
+    ASSERT_NE (info, nullptr);
+    auto* button =
+        getIdentityTestEnableButton (*info);
+    ASSERT_NE (button, nullptr);
+
+    const auto requireFreshEnabledHandler =
+        [&] ()
+        {
+            auto handler =
+                createIdentityTestEnableButtonHandler (
+                    *button);
+            EXPECT_NE (handler, nullptr);
+            if (handler != nullptr)
+                EXPECT_TRUE (handler->isEnabled());
+            return handler;
+        };
+
+    auto buttonVisibleHandler =
+        requireFreshEnabledHandler();
+    button->setVisible (false);
+    EXPECT_FALSE (
+        buttonVisibleHandler->isEnabled());
+    button->setVisible (true);
+
+    auto buttonEnabledHandler =
+        requireFreshEnabledHandler();
+    button->setEnabled (false);
+    EXPECT_FALSE (
+        buttonEnabledHandler->isEnabled());
+    button->setEnabled (true);
+
+    auto ownerVisibleHandler =
+        requireFreshEnabledHandler();
+    info->setVisible (false);
+    EXPECT_FALSE (
+        ownerVisibleHandler->isEnabled());
+    info->setVisible (true);
+
+    auto ownerEnabledHandler =
+        requireFreshEnabledHandler();
+    info->setEnabled (false);
+    EXPECT_FALSE (
+        ownerEnabledHandler->isEnabled());
+    info->setEnabled (true);
+
+    auto removedHandler =
+        requireFreshEnabledHandler();
+    info->removeChildComponent (button);
+    EXPECT_FALSE (
+        removedHandler->isEnabled());
+    info->addAndMakeVisible (button);
+    EXPECT_TRUE (
+        requireFreshEnabledHandler()
+            ->isEnabled());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityControlsRetireAcrossReorderSkipAndFocus)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display = splitters[0]->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_GE (display->channelInfo.size(), 2);
+    auto* firstButton =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (firstButton, nullptr);
+    auto reverseHandler =
+        createIdentityTestEnableButtonHandler (*firstButton);
+    ASSERT_NE (reverseHandler, nullptr);
+
+    display->setChannelsReversed (true);
+    EXPECT_FALSE (reverseHandler->isEnabled());
+    auto sortHandler =
+        createIdentityTestEnableButtonHandler (*firstButton);
+    ASSERT_NE (sortHandler, nullptr);
+    EXPECT_TRUE (sortHandler->isEnabled());
+
+    display->orderChannelsByDepth (true);
+    EXPECT_FALSE (sortHandler->isEnabled());
+    auto* secondButton =
+        getIdentityTestEnableButton (
+            *display->channelInfo[1]);
+    ASSERT_NE (secondButton, nullptr);
+    auto skipHandler =
+        createIdentityTestEnableButtonHandler (*secondButton);
+    ASSERT_NE (skipHandler, nullptr);
+
+    display->setChannelDisplaySkipAmount (2);
+    EXPECT_FALSE (skipHandler->isEnabled());
+    EXPECT_TRUE (secondButton->getComponentID().isEmpty());
+    display->setChannelDisplaySkipAmount (0);
+
+    auto focusHandler =
+        createIdentityTestEnableButtonHandler (*secondButton);
+    ASSERT_NE (focusHandler, nullptr);
+    ASSERT_GT (display->drawableChannels.size(), 0);
+    display->toggleSingleChannel (display->drawableChannels[0]);
+    EXPECT_FALSE (focusHandler->isEnabled());
+    display->toggleSingleChannel (display->drawableChannels[0]);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityControlsRetireAcrossRebindStreamRemovalAndZeroChannels)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display = splitter->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    const auto buffers = processor->getDisplayBuffers();
+    ASSERT_GE (buffers.size(), 2);
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (buffers[0]->streamKey));
+    auto* firstButton =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (firstButton, nullptr);
+    auto rebindHandler =
+        createIdentityTestEnableButtonHandler (*firstButton);
+    ASSERT_NE (rebindHandler, nullptr);
+
+    buffers[0]->channelMetadata
+        .getReference (0)
+        .uuid = Uuid();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (buffers[0]->streamKey));
+    EXPECT_FALSE (rebindHandler->isEnabled());
+    auto streamHandler =
+        createIdentityTestEnableButtonHandler (*firstButton);
+    ASSERT_NE (streamHandler, nullptr);
+
+    const auto staleActions = streamHandler->getActions();
+    std::atomic<bool> workerStarted { false };
+    std::atomic<bool> workerFinished { false };
+    std::thread worker (
+        [&]
+        {
+            workerStarted.store (true);
+            staleActions.invoke (AccessibilityActionType::toggle);
+            workerFinished.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100 && ! workerStarted.load();
+         ++attempt)
+    {
+        Thread::sleep (1);
+    }
+    ASSERT_TRUE (workerStarted.load());
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (buffers[1]->streamKey));
+    for (int attempt = 0;
+         attempt < 100 && ! workerFinished.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    }
+    worker.join();
+    EXPECT_TRUE (workerFinished.load());
+    EXPECT_TRUE (display->getStoredChannelVisibility (0));
+    EXPECT_FALSE (streamHandler->isEnabled());
+
+    auto* secondButton =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (secondButton, nullptr);
+    auto removalHandler =
+        createIdentityTestEnableButtonHandler (*secondButton);
+    ASSERT_NE (removalHandler, nullptr);
+    canvas->removeBufferForDisplay (
+        splitter->splitID,
+        buffers[1]);
+    EXPECT_FALSE (removalHandler->isEnabled());
+
+    display->setNumChannels (0);
+    EXPECT_EQ (display->getNumChannels(), 0);
+    EXPECT_FALSE (removalHandler->isEnabled());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityRetainedHandlerIsDisabledAfterCanvasDestruction)
+{
+    std::unique_ptr<AccessibilityHandler> retainedHandler;
+    AccessibilityActions retainedActions;
+    {
+        auto canvas =
+            createIdentityCanvas (
+                SplitLayouts::SINGLE);
+        canvas->addToDesktop (0);
+        canvas->setVisible (true);
+        canvas->updateSettings();
+        const auto splitters =
+            getIdentityTestSplitters (*canvas);
+        ASSERT_FALSE (splitters.empty());
+        auto* button =
+            getIdentityTestEnableButton (
+                *splitters[0]
+                     ->lfpDisplay
+                     ->channelInfo[0]);
+        ASSERT_NE (button, nullptr);
+        retainedHandler =
+            createIdentityTestEnableButtonHandler (*button);
+        ASSERT_NE (retainedHandler, nullptr);
+        retainedActions = retainedHandler->getActions();
+    }
+
+    EXPECT_FALSE (retainedHandler->isEnabled());
+    EXPECT_TRUE (
+        retainedActions.invoke (
+            AccessibilityActionType::toggle));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityControlChangesDrawingWithoutDataRecordingFocusOrAudioEffects)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display = splitter->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    auto* button =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (button, nullptr);
+    auto handler =
+        createIdentityTestEnableButtonHandler (*button);
+    ASSERT_NE (handler, nullptr);
+    const auto actions = handler->getActions();
+    auto* buffer = splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    auto* stream =
+        processor->getDataStream (
+            splitter->selectedStreamId);
+    ASSERT_NE (stream, nullptr);
+    auto* messageCenter =
+        tester->processorGraph->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (*messageCenter).isEmpty());
+
+    const auto selectedStreamId = splitter->selectedStreamId;
+    const auto selectedStreamKey = splitter->selectedStreamKey;
+    const auto bufferDisplays = buffer->displays;
+    const auto bufferChannelCount = buffer->numChannels;
+    const auto processorEnabled = processor->isEnabled;
+    const auto focused = display->getSingleChannelState();
+    const auto paused = display->isPaused();
+    std::vector<bool> recorded;
+    for (const auto* channel : stream->getContinuousChannels())
+    {
+        ASSERT_NE (channel, nullptr);
+        recorded.push_back (channel->isRecorded);
+    }
+
+    ASSERT_TRUE (
+        actions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (display->getStoredChannelVisibility (0));
+    EXPECT_EQ (splitter->displayBuffer, buffer);
+    EXPECT_EQ (splitter->selectedStreamId, selectedStreamId);
+    EXPECT_EQ (splitter->selectedStreamKey, selectedStreamKey);
+    EXPECT_EQ (buffer->displays, bufferDisplays);
+    EXPECT_EQ (buffer->numChannels, bufferChannelCount);
+    EXPECT_EQ (processor->isEnabled, processorEnabled);
+    EXPECT_EQ (display->getSingleChannelState(), focused);
+    EXPECT_EQ (display->isPaused(), paused);
+    const auto channelsAfter = stream->getContinuousChannels();
+    ASSERT_EQ (
+        channelsAfter.size(),
+        static_cast<int> (recorded.size()));
+    for (int index = 0; index < channelsAfter.size(); ++index)
+    {
+        EXPECT_EQ (
+            channelsAfter[index]->isRecorded,
+            recorded[static_cast<size_t> (index)]);
+    }
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (*messageCenter).isEmpty());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
         PaneAndSelectedStreamAreBoundToDisplayAndInfo)
 {
     auto canvas = std::make_unique<LfpDisplayCanvas> (

@@ -37,6 +37,7 @@
 namespace LfpViewer
 {
 class LfpWaveformVisibilityAccessibilityState;
+class LfpWaveformVisibilityButton;
 
 TESTABLE String encodeWaveformVisibilityUtf8Hex (StringRef text);
 
@@ -52,10 +53,12 @@ class LfpChannelDisplayInfo : public LfpChannelDisplay,
 {
     friend class LfpDisplay;
     friend class LfpWaveformVisibilityAccessibilityState;
+    friend class LfpWaveformVisibilityButton;
 
 public:
     /** Constructor */
     LfpChannelDisplayInfo (LfpDisplaySplitter*, LfpDisplay*, LfpDisplayOptions*, int channelNumber);
+    ~LfpChannelDisplayInfo() override;
 
     /** Draws this info for one channel */
     void paint (Graphics& g) override;
@@ -99,6 +102,11 @@ public:
     /** Disengages the mouse drag to resize track height */
     virtual void mouseUp (const MouseEvent& event) override;
 
+protected:
+    void visibilityChanged() override;
+    void enablementChanged() override;
+    void parentHierarchyChanged() override;
+
 private:
     bool isSingleChannel;
     float x, y;
@@ -141,8 +149,10 @@ private:
         const std::shared_ptr<
             LfpWaveformVisibilityAccessibilityState>& state);
     bool matchesWaveformVisibilityAccessibilityIdentity (
-        const LfpStableChannelIdentity& identity) const;
+        const LfpStableChannelIdentity& identity,
+        int nodeId) const;
     bool isWaveformVisibilityAccessibilityControlAvailable () const;
+    void handleWaveformVisibilityAccessibilityLifecycleChange ();
 
     String getTooltip() override;
 };

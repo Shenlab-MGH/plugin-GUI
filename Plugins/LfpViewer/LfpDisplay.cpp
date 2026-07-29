@@ -2007,6 +2007,7 @@ bool LfpDisplay::
                 index)];
     if (identity == nullptr
         || identity->getStableChannelKey() == nullptr
+        || canvasSplit->processor == nullptr
         || canvasSplit->splitID
                != identity->getPaneIndex()
         || canvasSplit->getStreamKey()
@@ -2014,7 +2015,8 @@ bool LfpDisplay::
         || canvasSplit->displayBuffer->streamKey
                != identity->getStreamKey()
         || ! info.matchesWaveformVisibilityAccessibilityIdentity (
-            *identity))
+            *identity,
+            canvasSplit->processor->getNodeId()))
     {
         return false;
     }

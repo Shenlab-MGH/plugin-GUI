@@ -522,6 +522,7 @@ struct LfpWindowsUiaInvokeResult
     std::wstring help;
     std::wstring value;
     std::vector<int> runtimeId;
+    int matchingElementCount = -1;
 };
 
 struct LfpWindowsUiaDesiredToggleResult
@@ -530,6 +531,7 @@ struct LfpWindowsUiaDesiredToggleResult
     LfpWindowsUiaInvokeResult after;
     HRESULT transportResult = E_PENDING;
     bool toggleAttempted = false;
+    int toggleCallCount = 0;
     bool verified = false;
 };
 
@@ -704,14 +706,44 @@ invokeLfpWindowsUiaControl (
     Microsoft::WRL::ComPtr<
         IUIAutomationElement>
         element;
-    result =
-        rootElement
-            ->FindFirst (
-                TreeScope_Subtree,
-                idCondition.Get(),
+    const auto findExactlyOne =
+        [&] (IUIAutomationElement& searchRoot)
+        {
+            Microsoft::WRL::ComPtr<
+                IUIAutomationElementArray>
+                matches;
+            auto findResult =
+                searchRoot.FindAll (
+                    TreeScope_Subtree,
+                    idCondition.Get(),
+                    &matches);
+            if (FAILED (findResult)
+                || matches == nullptr)
+            {
+                return FAILED (findResult)
+                    ? findResult
+                    : E_FAIL;
+            }
+
+            int matchCount = 0;
+            findResult =
+                matches->get_Length (
+                    &matchCount);
+            if (FAILED (findResult))
+                return findResult;
+
+            output.matchingElementCount =
+                matchCount;
+            if (matchCount != 1)
+                return S_FALSE;
+
+            return matches->GetElement (
+                0,
                 &element);
-    if (SUCCEEDED (result)
-        && element == nullptr
+        };
+    result = findExactlyOne (*rootElement.Get());
+    if (result == S_FALSE
+        && output.matchingElementCount == 0
         && automationId.find (
                L".choice.")
                != std::wstring::npos)
@@ -726,15 +758,10 @@ invokeLfpWindowsUiaControl (
         if (SUCCEEDED (result)
             && desktopElement != nullptr)
         {
-            result =
-                desktopElement
-                    ->FindFirst (
-                        TreeScope_Subtree,
-                        idCondition.Get(),
-                        &element);
+            result = findExactlyOne (*desktopElement.Get());
         }
     }
-    if (FAILED (result)
+    if (result != S_OK
         || element == nullptr)
     {
         return finish (
@@ -2034,6 +2061,7 @@ protected:
         }
 
         result.toggleAttempted = true;
+        ++result.toggleCallCount;
         result.transportResult =
             invokeWindowsUiaFromWorker (
                 window,
@@ -21962,6 +21990,22 @@ TEST_F (LfpDisplayNodeTests,
         query.expandCollapsePatternAvailable);
     EXPECT_FALSE (query.runtimeId.empty());
 
+    UtilityButton duplicateVisibilityControl (
+        "duplicate waveform visibility");
+    duplicateVisibilityControl.setComponentID (id);
+    duplicateVisibilityControl.setAccessible (true);
+    duplicateVisibilityControl.setBounds (0, 0, 20, 20);
+    canvas->addAndMakeVisible (
+        duplicateVisibilityControl);
+    const auto ambiguousQuery =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (ambiguousQuery.invokeResult, E_FAIL);
+    canvas->removeChildComponent (
+        &duplicateVisibilityControl);
+
     const auto rejectedWrite =
         invokeWindowsUiaFromWorker (
             window,
@@ -21972,6 +22016,16 @@ TEST_F (LfpDisplayNodeTests,
         rejectedWrite.invokeResult,
         static_cast<HRESULT> (
             UIA_E_INVALIDOPERATION));
+    const auto afterRejectedWrite =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (afterRejectedWrite.invokeResult, S_OK);
+    EXPECT_EQ (
+        afterRejectedWrite.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (afterRejectedWrite.value, L"Visible");
     EXPECT_TRUE (
         display->getStoredChannelVisibility (
             0));
@@ -22040,6 +22094,7 @@ TEST_F (LfpDisplayNodeTests,
             expectedHelp,
             false);
     EXPECT_TRUE (hiddenMutation.toggleAttempted);
+    EXPECT_EQ (hiddenMutation.toggleCallCount, 1);
     EXPECT_TRUE (
         isIndeterminateTransport (
             hiddenMutation.transportResult));
@@ -22084,6 +22139,7 @@ TEST_F (LfpDisplayNodeTests,
             expectedHelp,
             true);
     EXPECT_TRUE (visibleMutation.toggleAttempted);
+    EXPECT_EQ (visibleMutation.toggleCallCount, 1);
     EXPECT_TRUE (
         isIndeterminateTransport (
             visibleMutation.transportResult));
@@ -22105,8 +22161,53 @@ TEST_F (LfpDisplayNodeTests,
             expectedHelp,
             true);
     EXPECT_FALSE (alreadyVisible.toggleAttempted);
+    EXPECT_EQ (alreadyVisible.toggleCallCount, 0);
     EXPECT_EQ (alreadyVisible.transportResult, E_PENDING);
     EXPECT_TRUE (alreadyVisible.verified);
+
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    const auto programmaticallyHidden =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (programmaticallyHidden.invokeResult, S_OK);
+    EXPECT_EQ (
+        programmaticallyHidden.toggleState,
+        ToggleState_Off);
+    EXPECT_EQ (programmaticallyHidden.value, L"Hidden");
+
+    XmlElement savedRoot ("ROOT");
+    canvas->saveCustomParametersToXml (&savedRoot);
+    display->setEnabledState (
+        true,
+        0,
+        true);
+    const auto programmaticallyVisible =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (programmaticallyVisible.invokeResult, S_OK);
+    EXPECT_EQ (
+        programmaticallyVisible.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (programmaticallyVisible.value, L"Visible");
+
+    canvas->loadCustomParametersFromXml (&savedRoot);
+    const auto xmlRestoredHidden =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (xmlRestoredHidden.invokeResult, S_OK);
+    EXPECT_EQ (
+        xmlRestoredHidden.toggleState,
+        ToggleState_Off);
+    EXPECT_EQ (xmlRestoredHidden.value, L"Hidden");
 }
 #endif
 
