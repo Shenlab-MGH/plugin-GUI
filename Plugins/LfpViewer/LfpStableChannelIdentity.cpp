@@ -250,7 +250,13 @@ LfpStableChannelIdentity::
         std::optional<
             LfpStableChannelKey>
             stableChannelKey_,
-        Uuid runtimeUuid_)
+        Uuid runtimeUuid_,
+        String persistedIdentifier_,
+        int persistedSourceNodeId_,
+        int persistedLocalIndex_,
+        String persistedChannelName_,
+        ContinuousChannel::Type
+            persistedChannelType_)
     : paneIndex (
           paneIndex_),
       streamKey (
@@ -262,6 +268,18 @@ LfpStableChannelIdentity::
       runtimeUuid (
           std::move (
               runtimeUuid_)),
+      persistedIdentifier (
+          std::move (
+              persistedIdentifier_)),
+      persistedSourceNodeId (
+          persistedSourceNodeId_),
+      persistedLocalIndex (
+          persistedLocalIndex_),
+      persistedChannelName (
+          std::move (
+              persistedChannelName_)),
+      persistedChannelType (
+          persistedChannelType_),
       generationState (
           std::make_shared<
               GenerationState> (
@@ -291,7 +309,12 @@ LfpStableChannelIdentity::
             paneIndex,
             streamKey,
             stableChannelKey,
-            runtimeUuid));
+            runtimeUuid,
+            persistedIdentifier,
+            persistedSourceNodeId,
+            persistedLocalIndex,
+            persistedChannelName,
+            persistedChannelType));
 }
 
 class LfpStableChannelActionOwnerState final
@@ -868,7 +891,12 @@ resolveStableChannelIdentities (
                         .streamKey,
                     std::move (
                         stableKey),
-                    runtimeUuid)));
+                    runtimeUuid,
+                    metadata.identifier,
+                    metadata.sourceNodeId,
+                    metadata.localIndex,
+                    metadata.name,
+                    metadata.type)));
     }
 
     return identities;

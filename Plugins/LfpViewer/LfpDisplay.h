@@ -336,6 +336,7 @@ public:
 private:
     friend class LfpChannelDisplay;
     friend class LfpDisplayCanvas;
+    friend class LfpDisplayOptions;
     friend class LfpDisplaySplitter;
 
     /** Used to throttle refresh speed when scrolling backwards */
@@ -348,7 +349,9 @@ private:
         const std::vector<
             std::shared_ptr<
                 const LfpStableChannelIdentity>>&
-            identities);
+            identities,
+        const Array<DisplayBuffer*>&
+            availableStreams);
     /** Revokes hidden/disabled targets and rebinds newly available targets. */
     void refreshStableChannelIdentityAvailability();
     /** Pre-revokes every current generation before a pane becomes unavailable. */
@@ -409,6 +412,41 @@ private:
     void clearStoredVisibilityForStream (
         const String& streamKey);
     void applyStoredChannelVisibilityAfterBind();
+    void saveWaveformVisibilityState (
+        XmlElement& paneNode,
+        const Array<DisplayBuffer*>&
+            availableStreams) const;
+    void stageWaveformVisibilityState (
+        const XmlElement& paneNode);
+    void commitStagedWaveformVisibilityState (
+        const Array<DisplayBuffer*>&
+            availableStreams);
+
+    struct StagedWaveformVisibilityRecord
+    {
+        bool stableKeyWellFormed =
+            false;
+        bool wellFormed = false;
+        String streamKey;
+        LfpStableChannelKey::Kind
+            stableKeyKind =
+                LfpStableChannelKey::Kind::
+                    identifier;
+        String identifier;
+        int sourceNodeId = -1;
+        int localIndex = -1;
+        String channelName;
+        ContinuousChannel::Type
+            channelType =
+                ContinuousChannel::Type::
+                    INVALID;
+    };
+    enum class StagedWaveformVisibilityKind
+    {
+        none,
+        version2,
+        legacy
+    };
 
     int singleChan;
 
@@ -446,6 +484,16 @@ private:
         StableChannelVisibilityKey,
         StableChannelVisibilityKeyHash>
         hiddenStableChannels;
+    std::vector<
+        StagedWaveformVisibilityRecord>
+        stagedWaveformVisibilityRecords;
+    String stagedLegacyChannelDisplayState;
+    StagedWaveformVisibilityKind
+        stagedWaveformVisibilityKind =
+            StagedWaveformVisibilityKind::
+                none;
+    bool stagedWaveformVisibilityPending =
+        false;
     std::optional<
         StableChannelVisibilityKey>
         focusedStableChannel;

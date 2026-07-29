@@ -48,6 +48,7 @@
 #define MS_FROM_START Time::highResolutionTicksToSeconds (Time::getHighResolutionTicks() - start) * 1000
 
 #include <cmath>
+#include <charconv>
 #include <math.h>
 #include <numeric>
 #include <unordered_map>
@@ -402,7 +403,9 @@ void LfpDisplay::
         const std::vector<
             std::shared_ptr<
                 const LfpStableChannelIdentity>>&
-            identities)
+            identities,
+        const Array<DisplayBuffer*>&
+            availableStreams)
 {
     beginStableChannelIdentityBulkMutation();
     invalidateStableChannelIdentities();
@@ -417,6 +420,8 @@ void LfpDisplay::
                 ->revokeAgentActionability();
         }
     }
+    commitStagedWaveformVisibilityState (
+        availableStreams);
     pruneStoredVisibilityAfterBind();
     reconcileFocusedChannelAfterBind();
     applyStoredChannelVisibilityAfterBind();
@@ -856,6 +861,618 @@ void LfpDisplay::
             ->setEnabledState (
                 visible);
     }
+}
+
+void LfpDisplay::
+    saveWaveformVisibilityState (
+        XmlElement& paneNode,
+        const Array<DisplayBuffer*>&
+            availableStreams) const
+{
+    struct HiddenRecord
+    {
+        String streamKey;
+        LfpStableChannelKey::Kind
+            stableKeyKind;
+        String stableIdentifier;
+        int stableSourceNodeId;
+        int stableLocalIndex;
+        String persistedIdentifier;
+        int persistedSourceNodeId;
+        int persistedLocalIndex;
+        String channelName;
+        ContinuousChannel::Type channelType;
+    };
+
+    std::vector<HiddenRecord>
+        hiddenRecords;
+    for (const auto* stream :
+         availableStreams)
+    {
+        if (stream == nullptr)
+            continue;
+
+        const auto identities =
+            resolveStableChannelIdentities (
+                canvasSplit != nullptr
+                    ? canvasSplit->splitID
+                    : -1,
+                *stream,
+                availableStreams);
+        for (const auto& identity :
+             identities)
+        {
+            const auto* stableKey =
+                identity != nullptr
+                    ? identity
+                          ->getStableChannelKey()
+                    : nullptr;
+            if (identity == nullptr
+                || stableKey == nullptr)
+            {
+                continue;
+            }
+
+            const StableChannelVisibilityKey
+                visibilityKey (
+                    identity->getPaneIndex(),
+                    identity->getStreamKey(),
+                    *stableKey);
+            if (hiddenStableChannels.find (
+                    visibilityKey)
+                == hiddenStableChannels.end())
+            {
+                continue;
+            }
+
+            hiddenRecords.push_back (
+                { identity->getStreamKey(),
+                  stableKey->getKind(),
+                  stableKey->getIdentifier(),
+                  stableKey->getSourceNodeId(),
+                  stableKey->getLocalIndex(),
+                  identity
+                      ->getPersistedIdentifier(),
+                  identity
+                      ->getPersistedSourceNodeId(),
+                  identity
+                      ->getPersistedLocalIndex(),
+                  identity
+                      ->getPersistedChannelName(),
+                  identity
+                      ->getPersistedChannelType() });
+        }
+    }
+
+    std::sort (
+        hiddenRecords.begin(),
+        hiddenRecords.end(),
+        [] (const HiddenRecord& left,
+            const HiddenRecord& right)
+        {
+            const auto streamOrder =
+                left.streamKey.compare (
+                    right.streamKey);
+            if (streamOrder != 0)
+                return streamOrder < 0;
+            if (left.stableKeyKind
+                != right.stableKeyKind)
+            {
+                return static_cast<int> (
+                           left.stableKeyKind)
+                    < static_cast<int> (
+                          right.stableKeyKind);
+            }
+            if (left.stableKeyKind
+                == LfpStableChannelKey::Kind::
+                       identifier)
+            {
+                return left.stableIdentifier
+                           .compare (
+                               right
+                                   .stableIdentifier)
+                    < 0;
+            }
+            if (left.stableSourceNodeId
+                != right.stableSourceNodeId)
+            {
+                return left.stableSourceNodeId
+                    < right.stableSourceNodeId;
+            }
+            return left.stableLocalIndex
+                < right.stableLocalIndex;
+        });
+
+    auto* stateNode =
+        paneNode.createNewChildElement (
+            "WAVEFORM_VISIBILITY_STATE");
+    stateNode->setAttribute (
+        "version",
+        2);
+    for (const auto& record :
+         hiddenRecords)
+    {
+        auto* recordNode =
+            stateNode
+                ->createNewChildElement (
+                    "HIDDEN_CHANNEL");
+        recordNode->setAttribute (
+            "stream_key",
+            record.streamKey);
+        recordNode->setAttribute (
+            "stable_key_kind",
+            record.stableKeyKind
+                    == LfpStableChannelKey::
+                           Kind::identifier
+                ? "identifier"
+                : "source_local");
+        if (record.persistedIdentifier
+                .trim()
+                .isNotEmpty())
+        {
+            recordNode->setAttribute (
+                "identifier",
+                record
+                    .persistedIdentifier);
+        }
+        recordNode->setAttribute (
+            "source_node_id",
+            record.persistedSourceNodeId);
+        recordNode->setAttribute (
+            "local_index",
+            record.persistedLocalIndex);
+        recordNode->setAttribute (
+            "channel_name",
+            record.channelName);
+        recordNode->setAttribute (
+            "channel_type",
+            static_cast<int> (
+                record.channelType));
+    }
+}
+
+void LfpDisplay::
+    stageWaveformVisibilityState (
+        const XmlElement& paneNode)
+{
+    stagedWaveformVisibilityRecords
+        .clear();
+    stagedLegacyChannelDisplayState
+        .clear();
+    stagedWaveformVisibilityKind =
+        StagedWaveformVisibilityKind::
+            none;
+    stagedWaveformVisibilityPending =
+        true;
+
+    const XmlElement* stateNode =
+        nullptr;
+    int stateNodeCount = 0;
+    for (const auto* child :
+         paneNode.getChildIterator())
+    {
+        if (child->hasTagName (
+                "WAVEFORM_VISIBILITY_STATE"))
+        {
+            ++stateNodeCount;
+            stateNode = child;
+        }
+    }
+
+    if (stateNodeCount == 0)
+    {
+        stagedWaveformVisibilityKind =
+            StagedWaveformVisibilityKind::
+                legacy;
+        stagedLegacyChannelDisplayState =
+            paneNode
+                .getStringAttribute (
+                    "ChannelDisplayState");
+        return;
+    }
+
+    stagedWaveformVisibilityKind =
+        StagedWaveformVisibilityKind::
+            version2;
+    if (stateNodeCount != 1
+        || stateNode == nullptr
+        || ! stateNode->hasAttribute (
+            "version")
+        || stateNode
+                   ->getStringAttribute (
+                       "version")
+               != "2")
+    {
+        return;
+    }
+
+    const auto parseStrictInteger =
+        [] (const XmlElement& element,
+            const char* attribute,
+            int& result)
+        {
+            if (! element.hasAttribute (
+                    attribute))
+            {
+                return false;
+            }
+            const auto text =
+                element
+                    .getStringAttribute (
+                        attribute)
+                    .toStdString();
+            if (text.empty())
+                return false;
+
+            int parsed = 0;
+            const auto conversion =
+                std::from_chars (
+                    text.data(),
+                    text.data()
+                        + text.size(),
+                    parsed);
+            if (conversion.ec
+                    != std::errc()
+                || conversion.ptr
+                       != text.data()
+                              + text.size())
+            {
+                return false;
+            }
+            result = parsed;
+            return true;
+        };
+
+    for (const auto* child :
+         stateNode->getChildIterator())
+    {
+        StagedWaveformVisibilityRecord
+            record;
+        if (! child->hasTagName (
+                "HIDDEN_CHANNEL"))
+        {
+            stagedWaveformVisibilityRecords
+                .push_back (
+                    std::move (
+                        record));
+            continue;
+        }
+
+        record.streamKey =
+            child->getStringAttribute (
+                "stream_key");
+        const auto stableKeyKind =
+            child->getStringAttribute (
+                "stable_key_kind");
+        if (stableKeyKind
+            == "identifier")
+        {
+            record.stableKeyKind =
+                LfpStableChannelKey::Kind::
+                    identifier;
+        }
+        else if (stableKeyKind
+                 == "source_local")
+        {
+            record.stableKeyKind =
+                LfpStableChannelKey::Kind::
+                    sourceAndLocalIndex;
+        }
+        else
+        {
+            stagedWaveformVisibilityRecords
+                .push_back (
+                    std::move (
+                        record));
+            continue;
+        }
+
+        record.identifier =
+            child->getStringAttribute (
+                "identifier");
+        record.channelName =
+            child->getStringAttribute (
+                "channel_name");
+        int channelType = -1;
+        const bool sourceNodeIdIsValid =
+            parseStrictInteger (
+                *child,
+                "source_node_id",
+                record.sourceNodeId);
+        const bool localIndexIsValid =
+            parseStrictInteger (
+                *child,
+                "local_index",
+                record.localIndex);
+        const bool channelTypeWasParsed =
+            parseStrictInteger (
+                *child,
+                "channel_type",
+                channelType);
+        const bool integersAreValid =
+            sourceNodeIdIsValid
+            && localIndexIsValid
+            && channelTypeWasParsed;
+        const bool identifierIsValid =
+            record.stableKeyKind
+                    != LfpStableChannelKey::
+                           Kind::identifier
+            || (child->hasAttribute (
+                    "identifier")
+                && record.identifier
+                       .trim()
+                       .isNotEmpty());
+        const bool sourceLocalIsValid =
+            record.stableKeyKind
+                    != LfpStableChannelKey::
+                           Kind::
+                               sourceAndLocalIndex
+            || (sourceNodeIdIsValid
+                && localIndexIsValid
+                && record.sourceNodeId >= 0
+                && record.localIndex >= 0);
+        const bool channelTypeIsValid =
+            channelType
+                >= static_cast<int> (
+                    ContinuousChannel::Type::
+                        ELECTRODE)
+            && channelType
+                   <= static_cast<int> (
+                       ContinuousChannel::Type::
+                           ADC);
+        record.stableKeyWellFormed =
+            record.streamKey
+                .isNotEmpty()
+            && identifierIsValid
+            && sourceLocalIsValid;
+        record.wellFormed =
+            record.stableKeyWellFormed
+            && child->hasAttribute (
+                "channel_name")
+            && integersAreValid
+            && channelTypeIsValid;
+        if (channelTypeIsValid)
+        {
+            record.channelType =
+                static_cast<
+                    ContinuousChannel::Type> (
+                    channelType);
+        }
+        stagedWaveformVisibilityRecords
+            .push_back (
+                std::move (
+                    record));
+    }
+}
+
+void LfpDisplay::
+    commitStagedWaveformVisibilityState (
+        const Array<DisplayBuffer*>&
+            availableStreams)
+{
+    if (! stagedWaveformVisibilityPending)
+        return;
+
+    std::unordered_set<
+        StableChannelVisibilityKey,
+        StableChannelVisibilityKeyHash>
+        resolvedHiddenChannels;
+
+    if (stagedWaveformVisibilityKind
+        == StagedWaveformVisibilityKind::
+               version2)
+    {
+        struct CurrentIdentity
+        {
+            std::shared_ptr<
+                const LfpStableChannelIdentity>
+                identity;
+            StableChannelVisibilityKey
+                visibilityKey;
+        };
+        std::vector<CurrentIdentity>
+            currentIdentities;
+        for (const auto* stream :
+             availableStreams)
+        {
+            if (stream == nullptr)
+                continue;
+            const auto identities =
+                resolveStableChannelIdentities (
+                    canvasSplit != nullptr
+                        ? canvasSplit->splitID
+                        : -1,
+                    *stream,
+                    availableStreams);
+            for (const auto& identity :
+                 identities)
+            {
+                const auto* stableKey =
+                    identity != nullptr
+                        ? identity
+                              ->getStableChannelKey()
+                        : nullptr;
+                if (identity == nullptr
+                    || stableKey == nullptr)
+                {
+                    continue;
+                }
+                currentIdentities
+                    .push_back (
+                        { identity,
+                          StableChannelVisibilityKey (
+                              identity
+                                  ->getPaneIndex(),
+                              identity
+                                  ->getStreamKey(),
+                              *stableKey) });
+            }
+        }
+
+        struct ResolutionCount
+        {
+            int recordsForStableKey = 0;
+            int matchingSignatures = 0;
+        };
+        std::unordered_map<
+            StableChannelVisibilityKey,
+            ResolutionCount,
+            StableChannelVisibilityKeyHash>
+            resolutionCounts;
+        for (const auto& record :
+             stagedWaveformVisibilityRecords)
+        {
+            if (! record
+                      .stableKeyWellFormed)
+                continue;
+
+            const CurrentIdentity*
+                uniqueMatch = nullptr;
+            int stableKeyMatchCount = 0;
+            bool uniqueSignatureMatches =
+                false;
+            for (const auto& current :
+                 currentIdentities)
+            {
+                const auto* stableKey =
+                    current.identity
+                        ->getStableChannelKey();
+                if (stableKey == nullptr
+                    || current.identity
+                               ->getStreamKey()
+                           != record.streamKey
+                    || stableKey->getKind()
+                           != record.stableKeyKind)
+                {
+                    continue;
+                }
+
+                const bool stableKeyMatches =
+                    record.stableKeyKind
+                            == LfpStableChannelKey::
+                                   Kind::identifier
+                    ? stableKey
+                              ->getIdentifier()
+                          == record.identifier
+                    : stableKey
+                                  ->getSourceNodeId()
+                              == record.sourceNodeId
+                        && stableKey
+                                   ->getLocalIndex()
+                               == record.localIndex;
+                if (stableKeyMatches)
+                {
+                    ++stableKeyMatchCount;
+                    uniqueMatch =
+                        &current;
+                    uniqueSignatureMatches =
+                        record.wellFormed
+                        && current.identity
+                                    ->getPersistedChannelName()
+                                == record.channelName
+                        && current.identity
+                                   ->getPersistedChannelType()
+                               == record.channelType;
+                }
+            }
+
+            if (stableKeyMatchCount == 1
+                && uniqueMatch != nullptr)
+            {
+                auto& count = resolutionCounts[
+                    uniqueMatch->visibilityKey];
+                ++count.recordsForStableKey;
+                if (uniqueSignatureMatches)
+                {
+                    ++count.matchingSignatures;
+                }
+            }
+        }
+
+        for (const auto& resolution :
+             resolutionCounts)
+        {
+            if (resolution.second
+                        .recordsForStableKey
+                    == 1
+                && resolution.second
+                           .matchingSignatures
+                       == 1)
+            {
+                resolvedHiddenChannels
+                    .insert (
+                        resolution.first);
+            }
+        }
+    }
+    else if (
+        stagedWaveformVisibilityKind
+            == StagedWaveformVisibilityKind::
+                   legacy
+        && availableStreams.size() == 1
+        && availableStreams[0] != nullptr)
+    {
+        const auto* stream =
+            availableStreams[0];
+        const auto identities =
+            resolveStableChannelIdentities (
+                canvasSplit != nullptr
+                    ? canvasSplit->splitID
+                    : -1,
+                *stream,
+                availableStreams);
+        const auto migratedCount =
+            jmin (
+                static_cast<int> (
+                    identities.size()),
+                stagedLegacyChannelDisplayState
+                    .length());
+        for (int channel = 0;
+             channel < migratedCount;
+             ++channel)
+        {
+            if (stagedLegacyChannelDisplayState[
+                    channel]
+                != '0')
+            {
+                continue;
+            }
+            const auto& identity =
+                identities[
+                    static_cast<size_t> (
+                        channel)];
+            const auto* stableKey =
+                identity != nullptr
+                    ? identity
+                          ->getStableChannelKey()
+                    : nullptr;
+            if (identity != nullptr
+                && stableKey != nullptr)
+            {
+                resolvedHiddenChannels
+                    .insert (
+                        StableChannelVisibilityKey (
+                            identity
+                                ->getPaneIndex(),
+                            identity
+                                ->getStreamKey(),
+                            *stableKey));
+            }
+        }
+    }
+
+    hiddenStableChannels =
+        std::move (
+            resolvedHiddenChannels);
+    stagedWaveformVisibilityRecords
+        .clear();
+    stagedLegacyChannelDisplayState
+        .clear();
+    stagedWaveformVisibilityKind =
+        StagedWaveformVisibilityKind::
+            none;
+    stagedWaveformVisibilityPending =
+        false;
 }
 
 void LfpDisplay::

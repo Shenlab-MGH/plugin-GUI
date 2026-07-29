@@ -118,6 +118,27 @@ public:
     TESTABLE const LfpStableChannelKey*
     getStableChannelKey() const noexcept;
     const Uuid& getRuntimeUuid() const noexcept { return runtimeUuid; }
+    const String& getPersistedIdentifier() const noexcept
+    {
+        return persistedIdentifier;
+    }
+    int getPersistedSourceNodeId() const noexcept
+    {
+        return persistedSourceNodeId;
+    }
+    int getPersistedLocalIndex() const noexcept
+    {
+        return persistedLocalIndex;
+    }
+    const String& getPersistedChannelName() const noexcept
+    {
+        return persistedChannelName;
+    }
+    ContinuousChannel::Type
+    getPersistedChannelType() const noexcept
+    {
+        return persistedChannelType;
+    }
 
     /**
         Returns whether this immutable generation token is structurally valid
@@ -155,7 +176,13 @@ private:
         String streamKey,
         std::optional<LfpStableChannelKey>
             stableChannelKey,
-        Uuid runtimeUuid);
+        Uuid runtimeUuid,
+        String persistedIdentifier,
+        int persistedSourceNodeId,
+        int persistedLocalIndex,
+        String persistedChannelName,
+        ContinuousChannel::Type
+            persistedChannelType);
 
     struct GenerationState
     {
@@ -178,6 +205,12 @@ private:
         LfpStableChannelKey>
         stableChannelKey;
     const Uuid runtimeUuid;
+    const String persistedIdentifier;
+    const int persistedSourceNodeId;
+    const int persistedLocalIndex;
+    const String persistedChannelName;
+    const ContinuousChannel::Type
+        persistedChannelType;
     const std::shared_ptr<
         GenerationState>
         generationState;

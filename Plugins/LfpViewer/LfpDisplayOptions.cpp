@@ -3724,6 +3724,12 @@ void LfpDisplayOptions::saveParameters (XmlElement* xml)
     }
 
     xmlNode->setAttribute ("ChannelDisplayState", channelDisplayState);
+    lfpDisplay
+        ->saveWaveformVisibilityState (
+            *xmlNode,
+            canvasSplit
+                ->processor
+                ->getDisplayBuffers());
     xmlNode->setAttribute ("selectedChannelType", (int) selectedChannelType);
 
     xmlNode->setAttribute ("ScrollX", canvasSplit->viewport->getViewPositionX());
@@ -3759,6 +3765,10 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
         if (xmlNode->hasTagName ("LFPDISPLAY" + String (canvasSplit->splitID)))
         {
             //uint32 id = xmlNode->getIntAttribute("SubprocessorID");
+
+            lfpDisplay
+                ->stageWaveformVisibilityState (
+                    *xmlNode);
 
             String streamKey = xmlNode->getStringAttribute ("stream_key");
 
@@ -3927,20 +3937,6 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
 
             restoreEventOverlayState (
                 *xmlNode);
-
-            String channelDisplayState = xmlNode->getStringAttribute ("ChannelDisplayState");
-
-            for (int i = 0; i < channelDisplayState.length(); i++)
-            {
-                if (channelDisplayState.substring (i, i + 1).equalsIgnoreCase ("1"))
-                {
-                    lfpDisplay->setEnabledState (true, i, true);
-                }
-                else
-                {
-                    lfpDisplay->setEnabledState (false, i, true);
-                }
-            }
 
             //LOGD("    Set channel display state in ", MS_FROM_START, " milliseconds");
 

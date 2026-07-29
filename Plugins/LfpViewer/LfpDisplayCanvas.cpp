@@ -1565,6 +1565,13 @@ void LfpDisplaySplitter::updateSettings()
     const bool streamKeysAreAmbiguous =
         hasAmbiguousStreamKeys (
             availableBuffers);
+    if (streamKeysAreAmbiguous
+        || availableBuffers.isEmpty())
+    {
+        lfpDisplay
+            ->commitStagedWaveformVisibilityState (
+                availableBuffers);
+    }
     lfpDisplay
         ->pruneStoredVisibilityForAvailableStreams (
             availableBuffers);
@@ -1703,7 +1710,8 @@ void LfpDisplaySplitter::updateSettings()
                 resolveStableChannelIdentities (
                     splitID,
                     *displayBuffer,
-                    availableBuffers));
+                    availableBuffers),
+                availableBuffers);
     }
 
     lfpDisplay->rebuildDrawableChannelsList(); // calls setColours(), which calls refresh
@@ -2411,6 +2419,15 @@ bool LfpDisplaySplitter::
     if (! selected
         || safeSplitter == nullptr)
     {
+        if (safeSplitter != nullptr)
+        {
+            safeSplitter
+                ->lfpDisplay
+                ->commitStagedWaveformVisibilityState (
+                    safeSplitter
+                        ->processor
+                        ->getDisplayBuffers());
+        }
         return false;
     }
 

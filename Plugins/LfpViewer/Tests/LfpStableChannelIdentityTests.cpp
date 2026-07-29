@@ -22,6 +22,7 @@
 #include "../LfpDisplay.h"
 #include "../LfpDisplayCanvas.h"
 #include "../LfpDisplayEditor.h"
+#include "../LfpDisplayOptions.h"
 #include "../LfpStableChannelIdentity.h"
 #include <ModelProcessors.h>
 #include <TestFixtures.h>
@@ -290,6 +291,9 @@ DisplayBuffer::ChannelMetadata makeIdentityMetadata (
     metadata.sourceNodeId = sourceNodeId;
     metadata.localIndex = localIndex;
     metadata.uuid = uuid;
+    metadata.name = metadata.identifier;
+    metadata.type =
+        ContinuousChannel::Type::ELECTRODE;
     return metadata;
 }
 
@@ -338,6 +342,108 @@ std::vector<LfpDisplaySplitter*> getIdentityTestSplitters (
             return lhs->splitID < rhs->splitID;
         });
     return result;
+}
+
+Button* getIdentityTestEnableButton (
+    LfpChannelDisplayInfo& channelInfo)
+{
+    for (int child = 0;
+         child
+         < channelInfo
+               .getNumChildComponents();
+         ++child)
+    {
+        if (auto* button =
+                dynamic_cast<Button*> (
+                    channelInfo
+                        .getChildComponent (
+                            child)))
+        {
+            return button;
+        }
+    }
+    return nullptr;
+}
+
+void configureIdentityPersistenceChannel (
+    DisplayBuffer& buffer,
+    int channelIndex,
+    String identifier,
+    int sourceNodeId,
+    int localIndex,
+    String channelName,
+    ContinuousChannel::Type channelType)
+{
+    auto& metadata =
+        buffer.channelMetadata
+            .getReference (
+                channelIndex);
+    metadata.identifier =
+        std::move (
+            identifier);
+    metadata.sourceNodeId =
+        sourceNodeId;
+    metadata.localIndex =
+        localIndex;
+    metadata.name =
+        std::move (
+            channelName);
+    metadata.type =
+        channelType;
+}
+
+void showAllIdentityTestChannels (
+    LfpDisplaySplitter& splitter)
+{
+    for (int channel = 0;
+         channel
+         < splitter.lfpDisplay
+               ->getNumChannels();
+         ++channel)
+    {
+        splitter.lfpDisplay
+            ->setEnabledState (
+                true,
+                channel,
+                true);
+    }
+}
+
+XmlElement* getIdentityTestPane (
+    XmlElement& root,
+    int paneIndex = 0)
+{
+    return root.getChildByName (
+        "LFPDISPLAY"
+        + String (
+            paneIndex));
+}
+
+XmlElement* getIdentityTestVisibilityState (
+    XmlElement& root,
+    int paneIndex = 0)
+{
+    auto* pane =
+        getIdentityTestPane (
+            root,
+            paneIndex);
+    return pane != nullptr
+        ? pane->getChildByName (
+              "WAVEFORM_VISIBILITY_STATE")
+        : nullptr;
+}
+
+XmlElement* getIdentityTestHiddenRecord (
+    XmlElement& root,
+    int paneIndex = 0)
+{
+    auto* state =
+        getIdentityTestVisibilityState (
+            root,
+            paneIndex);
+    return state != nullptr
+        ? state->getFirstChildElement()
+        : nullptr;
 }
 
 Array<String> drainIdentityTestBroadcastMessages (
@@ -680,6 +786,27 @@ protected:
         processor =
             tester->createProcessor<LfpDisplayNode> (
                 Plugin::Processor::SINK);
+    }
+
+    std::unique_ptr<LfpDisplayCanvas>
+    createIdentityCanvas (
+        SplitLayouts layout)
+    {
+        auto canvas =
+            std::make_unique<
+                LfpDisplayCanvas> (
+                processor,
+                layout,
+                false);
+        canvas->updateSettings();
+        canvas->setSize (
+            900,
+            600);
+        canvas->resized();
+        canvas->setVisible (
+            true);
+        canvas->updateSettings();
+        return canvas;
     }
 
     std::unique_ptr<ProcessorTester> tester;
@@ -3829,5 +3956,1227 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             ->getStableIdentityAvailabilityWorkForTests(),
         static_cast<uint64> (
             channelCount * 20));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        SaveWritesLegacyStateAndDeterministicV2HiddenRecordsWithoutRuntimeCoordinates)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    ASSERT_GE (
+        buffers[0]->channelMetadata.size(),
+        2);
+    ASSERT_GE (
+        buffers[1]->channelMetadata.size(),
+        2);
+
+    buffers[0]->streamKey =
+        "stream.z";
+    buffers[1]->streamKey =
+        "stream.a";
+    auto& zChannel =
+        buffers[0]->channelMetadata
+            .getReference (0);
+    zChannel.identifier =
+        "identifier.z";
+    zChannel.sourceNodeId = 42;
+    zChannel.localIndex = 7;
+    zChannel.name = "Channel Z";
+    zChannel.type =
+        ContinuousChannel::Type::AUX;
+    auto& aChannel =
+        buffers[1]->channelMetadata
+            .getReference (1);
+    aChannel.identifier =
+        "identifier.a";
+    aChannel.sourceNodeId = 24;
+    aChannel.localIndex = 3;
+    aChannel.name = "Channel A";
+    aChannel.type =
+        ContinuousChannel::Type::ADC;
+    configureIdentityPersistenceChannel (
+        *buffers[1],
+        0,
+        "identifier.zeta",
+        25,
+        4,
+        "Channel A-Z",
+        ContinuousChannel::Type::ELECTRODE);
+    canvas->updateSettings();
+
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            "stream.z"));
+    auto* zEnable =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (zEnable, nullptr);
+    ASSERT_TRUE (
+        zEnable->getToggleState());
+    zEnable->triggerClick();
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (
+            20);
+    ASSERT_FALSE (
+        zEnable->getToggleState());
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                0));
+
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            "stream.a"));
+    auto* aEnable =
+        getIdentityTestEnableButton (
+            *display->channelInfo[1]);
+    ASSERT_NE (aEnable, nullptr);
+    aEnable->triggerClick();
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (
+            20);
+    ASSERT_FALSE (
+        display
+            ->getStoredChannelVisibility (
+                1));
+    display->setEnabledState (
+        false,
+        0,
+        true);
+
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            "stream.z"));
+    XmlElement root ("ROOT");
+    splitter->options
+        ->saveParameters (
+            &root);
+    auto* pane =
+        root.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (pane, nullptr);
+    ASSERT_EQ (
+        pane->getStringAttribute (
+            "ChannelDisplayState")
+            .length(),
+        display->getNumChannels());
+    EXPECT_EQ (
+        pane->getStringAttribute (
+            "ChannelDisplayState")
+            .substring (
+                0,
+                1),
+        "0");
+
+    auto* visibility =
+        pane->getChildByName (
+            "WAVEFORM_VISIBILITY_STATE");
+    ASSERT_NE (visibility, nullptr);
+    EXPECT_EQ (
+        visibility->getStringAttribute (
+            "version"),
+        "2");
+    ASSERT_EQ (
+        visibility
+            ->getNumChildElements(),
+        3);
+    const auto* first =
+        visibility
+            ->getChildElement (0);
+    const auto* second =
+        visibility
+            ->getChildElement (1);
+    const auto* third =
+        visibility
+            ->getChildElement (2);
+    ASSERT_NE (first, nullptr);
+    ASSERT_NE (second, nullptr);
+    ASSERT_NE (third, nullptr);
+    EXPECT_TRUE (
+        first->hasTagName (
+            "HIDDEN_CHANNEL"));
+    EXPECT_TRUE (
+        second->hasTagName (
+            "HIDDEN_CHANNEL"));
+    EXPECT_TRUE (
+        third->hasTagName (
+            "HIDDEN_CHANNEL"));
+    EXPECT_EQ (
+        first->getStringAttribute (
+            "stream_key"),
+        "stream.a");
+    EXPECT_EQ (
+        first->getStringAttribute (
+            "stable_key_kind"),
+        "identifier");
+    EXPECT_EQ (
+        first->getStringAttribute (
+            "identifier"),
+        "identifier.a");
+    EXPECT_EQ (
+        first->getIntAttribute (
+            "source_node_id"),
+        24);
+    EXPECT_EQ (
+        first->getIntAttribute (
+            "local_index"),
+        3);
+    EXPECT_EQ (
+        first->getStringAttribute (
+            "channel_name"),
+        "Channel A");
+    EXPECT_EQ (
+        first->getIntAttribute (
+            "channel_type"),
+        static_cast<int> (
+            ContinuousChannel::Type::ADC));
+    EXPECT_EQ (
+        second->getStringAttribute (
+            "stream_key"),
+        "stream.a");
+    EXPECT_EQ (
+        second->getStringAttribute (
+            "identifier"),
+        "identifier.zeta");
+    EXPECT_EQ (
+        third->getStringAttribute (
+            "stream_key"),
+        "stream.z");
+    EXPECT_EQ (
+        third->getStringAttribute (
+            "identifier"),
+        "identifier.z");
+    EXPECT_EQ (
+        third->getIntAttribute (
+            "source_node_id"),
+        42);
+    EXPECT_EQ (
+        third->getIntAttribute (
+            "local_index"),
+        7);
+    EXPECT_EQ (
+        third->getStringAttribute (
+            "channel_name"),
+        "Channel Z");
+    EXPECT_EQ (
+        third->getIntAttribute (
+            "channel_type"),
+        static_cast<int> (
+            ContinuousChannel::Type::AUX));
+
+    const auto savedXml =
+        root.toString();
+    EXPECT_FALSE (
+        savedXml.containsIgnoreCase (
+            "uuid"));
+    EXPECT_FALSE (
+        savedXml.contains (
+            "stream_id"));
+    EXPECT_FALSE (
+        savedXml.contains (
+            "global_index"));
+    EXPECT_FALSE (
+        savedXml.contains (
+            "drawable"));
+    EXPECT_FALSE (
+        savedXml.contains (
+            "screen"));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        V2RoundTripKeepsPaneAndStreamIsolationAcrossRuntimeRestartAndReorder)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::TWO_VERT);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_GE (splitters.size(), 2u);
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    buffers[0]->streamKey =
+        "roundtrip.z";
+    buffers[1]->streamKey =
+        "roundtrip.a";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        "roundtrip.identifier.z",
+        70,
+        0,
+        "Roundtrip Z",
+        ContinuousChannel::Type::AUX);
+    configureIdentityPersistenceChannel (
+        *buffers[1],
+        1,
+        "roundtrip.identifier.a",
+        80,
+        1,
+        "Roundtrip A",
+        ContinuousChannel::Type::ADC);
+    canvas->updateSettings();
+
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "roundtrip.z"));
+    ASSERT_TRUE (
+        splitters[1]
+            ->selectStreamByKey (
+                "roundtrip.a"));
+    splitters[0]
+        ->lfpDisplay
+        ->setEnabledState (
+            false,
+            0,
+            true);
+    splitters[0]
+        ->lfpDisplay
+        ->setEnabledState (
+            false,
+            2,
+            true);
+    splitters[1]
+        ->lfpDisplay
+        ->setEnabledState (
+            false,
+            1,
+            true);
+
+    XmlElement savedRoot (
+        "ROOT");
+    splitters[0]
+        ->options
+        ->saveParameters (
+            &savedRoot);
+    splitters[1]
+        ->options
+        ->saveParameters (
+            &savedRoot);
+
+    showAllIdentityTestChannels (
+        *splitters[0]);
+    showAllIdentityTestChannels (
+        *splitters[1]);
+    for (auto* buffer :
+         buffers)
+    {
+        for (auto& metadata :
+             buffer->channelMetadata)
+        {
+            metadata.uuid =
+                Uuid();
+        }
+    }
+    std::swap (
+        buffers[0]->channelMetadata
+            .getReference (0),
+        buffers[0]->channelMetadata
+            .getReference (1));
+    buffers[0]->channelMetadata
+        .getReference (1)
+        .localIndex = 99;
+    canvas->updateSettings();
+
+    splitters[0]
+        ->options
+        ->loadParameters (
+            &savedRoot);
+    splitters[1]
+        ->options
+        ->loadParameters (
+            &savedRoot);
+
+    ASSERT_EQ (
+        buffers[0]->channelMetadata[1]
+            .identifier,
+        "roundtrip.identifier.z");
+    EXPECT_TRUE (
+        splitters[0]
+            ->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_FALSE (
+        splitters[0]
+            ->lfpDisplay
+            ->getStoredChannelVisibility (
+                1));
+    EXPECT_FALSE (
+        splitters[0]
+            ->lfpDisplay
+            ->getStoredChannelVisibility (
+                2));
+    EXPECT_TRUE (
+        splitters[1]
+            ->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_FALSE (
+        splitters[1]
+            ->lfpDisplay
+            ->getStoredChannelVisibility (
+                1));
+    EXPECT_TRUE (
+        splitters[1]
+            ->lfpDisplay
+            ->getStoredChannelVisibility (
+                2));
+
+    XmlElement restoredRoot (
+        "ROOT");
+    splitters[0]
+        ->options
+        ->saveParameters (
+            &restoredRoot);
+    auto* restoredPane =
+        restoredRoot
+            .getChildByName (
+                "LFPDISPLAY0");
+    ASSERT_NE (
+        restoredPane,
+        nullptr);
+    auto* restoredState =
+        restoredPane
+            ->getChildByName (
+                "WAVEFORM_VISIBILITY_STATE");
+    ASSERT_NE (
+        restoredState,
+        nullptr);
+    const XmlElement* movedRecord =
+        nullptr;
+    for (const auto* record :
+         restoredState
+             ->getChildIterator())
+    {
+        if (record
+                ->getStringAttribute (
+                    "identifier")
+            == "roundtrip.identifier.z")
+        {
+            movedRecord = record;
+        }
+    }
+    ASSERT_NE (
+        movedRecord,
+        nullptr);
+    EXPECT_EQ (
+        movedRecord
+            ->getIntAttribute (
+                "local_index"),
+        99);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        V2AuthorityQuarantinesUnknownMalformedDuplicateConflictingAndUnmatchedRecords)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter =
+        splitters[0];
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    buffers[0]->streamKey =
+        "safe.stream";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        "safe.identifier",
+        50,
+        4,
+        "Safe Channel",
+        ContinuousChannel::Type::ELECTRODE);
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "safe.stream"));
+    splitter->lfpDisplay
+        ->setEnabledState (
+            false,
+            0,
+            true);
+    XmlElement baseline (
+        "ROOT");
+    splitter->options
+        ->saveParameters (
+            &baseline);
+    auto* baselinePane =
+        baseline.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (
+        baselinePane,
+        nullptr);
+    baselinePane->setAttribute (
+        "ChannelDisplayState",
+        "0000");
+
+    const auto expectTargetVisible =
+        [&] (
+            XmlElement& root,
+            const String& caseName)
+    {
+        SCOPED_TRACE (
+            caseName);
+        showAllIdentityTestChannels (
+            *splitter);
+        splitter->options
+            ->loadParameters (
+                &root);
+        EXPECT_TRUE (
+            splitter
+                ->lfpDisplay
+                ->getStoredChannelVisibility (
+                    0));
+        EXPECT_TRUE (
+            splitter
+                ->lfpDisplay
+                ->channels[0]
+                ->getEnabledState());
+    };
+
+    XmlElement unknownVersion (
+        baseline);
+    getIdentityTestVisibilityState (
+        unknownVersion)
+        ->setAttribute (
+            "version",
+            999);
+    expectTargetVisible (
+        unknownVersion,
+        "unknown version");
+
+    XmlElement malformedInteger (
+        baseline);
+    getIdentityTestHiddenRecord (
+        malformedInteger)
+        ->setAttribute (
+            "source_node_id",
+            "50tail");
+    expectTargetVisible (
+        malformedInteger,
+        "malformed integer");
+
+    XmlElement mixedMalformedRecord (
+        baseline);
+    auto* mixedMalformedState =
+        getIdentityTestVisibilityState (
+            mixedMalformedRecord);
+    auto* malformedSibling =
+        new XmlElement (
+            *mixedMalformedState
+                 ->getFirstChildElement());
+    malformedSibling->setAttribute (
+        "source_node_id",
+        "50tail");
+    mixedMalformedState
+        ->addChildElement (
+            malformedSibling);
+    expectTargetVisible (
+        mixedMalformedRecord,
+        "valid and malformed records share one stable key");
+
+    XmlElement duplicateRecord (
+        baseline);
+    auto* duplicateState =
+        getIdentityTestVisibilityState (
+            duplicateRecord);
+    duplicateState
+        ->addChildElement (
+            new XmlElement (
+                *duplicateState
+                     ->getFirstChildElement()));
+    expectTargetVisible (
+        duplicateRecord,
+        "duplicate record");
+
+    XmlElement conflictingRecord (
+        baseline);
+    auto* conflictingState =
+        getIdentityTestVisibilityState (
+            conflictingRecord);
+    auto* secondRecord =
+        new XmlElement (
+            *conflictingState
+                 ->getFirstChildElement());
+    secondRecord->setAttribute (
+        "local_index",
+        99);
+    conflictingState
+        ->addChildElement (
+            secondRecord);
+    expectTargetVisible (
+        conflictingRecord,
+        "multiple records resolve one identity");
+
+    XmlElement signatureConflict (
+        baseline);
+    getIdentityTestHiddenRecord (
+        signatureConflict)
+        ->setAttribute (
+            "channel_name",
+            "Replacement Channel");
+    expectTargetVisible (
+        signatureConflict,
+        "signature conflict");
+
+    XmlElement mixedSignatureConflict (
+        baseline);
+    auto* mixedSignatureState =
+        getIdentityTestVisibilityState (
+            mixedSignatureConflict);
+    auto* conflictingSignatureRecord =
+        new XmlElement (
+            *mixedSignatureState
+                 ->getFirstChildElement());
+    conflictingSignatureRecord
+        ->setAttribute (
+            "channel_name",
+            "Replacement Channel");
+    mixedSignatureState
+        ->addChildElement (
+            conflictingSignatureRecord);
+    expectTargetVisible (
+        mixedSignatureConflict,
+        "valid and signature-conflicting records share one key");
+
+    XmlElement unmatched (
+        baseline);
+    auto* unmatchedRecord =
+        getIdentityTestHiddenRecord (
+            unmatched);
+    unmatchedRecord->setAttribute (
+        "identifier",
+        "missing.identifier");
+    unmatchedRecord->setAttribute (
+        "source_node_id",
+        999);
+    unmatchedRecord->setAttribute (
+        "local_index",
+        999);
+    expectTargetVisible (
+        unmatched,
+        "unmatched record");
+
+    XmlElement ambiguousIdentifier (
+        baseline);
+    buffers[0]->channelMetadata
+        .getReference (1)
+        .identifier =
+        "safe.identifier";
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "safe.stream"));
+    expectTargetVisible (
+        ambiguousIdentifier,
+        "ambiguous current identifier");
+    buffers[0]->channelMetadata
+        .getReference (1)
+        .identifier =
+        "other.identifier";
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "safe.stream"));
+    EXPECT_TRUE (
+        splitter
+            ->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        LegacyMigrationRequiresOneUnambiguousStreamAndStrictBinaryCharacters)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter =
+        splitters[0];
+    const auto allBuffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (allBuffers.size(), 2);
+    allBuffers[1]->numChannels = 0;
+    canvas->updateSettings();
+    const auto oneBuffer =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (oneBuffer.size(), 1);
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                oneBuffer[0]
+                    ->streamKey));
+
+    XmlElement legacyRoot (
+        "ROOT");
+    splitter->options
+        ->saveParameters (
+            &legacyRoot);
+    auto* legacyPane =
+        legacyRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (
+        legacyPane,
+        nullptr);
+    legacyPane
+        ->removeChildElement (
+            legacyPane
+                ->getChildByName (
+                    "WAVEFORM_VISIBILITY_STATE"),
+            true);
+    legacyPane->setAttribute (
+        "ChannelDisplayState",
+        "01x");
+    showAllIdentityTestChannels (
+        *splitter);
+    splitter->options
+        ->loadParameters (
+            &legacyRoot);
+    ASSERT_GE (
+        splitter->lfpDisplay
+            ->getNumChannels(),
+        4);
+    EXPECT_FALSE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                1));
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                2));
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                3));
+
+    allBuffers[1]->numChannels =
+        allBuffers[1]
+            ->channelMetadata
+            .size();
+    canvas->updateSettings();
+    ASSERT_EQ (
+        processor
+            ->getDisplayBuffers()
+            .size(),
+        2);
+    legacyPane->setAttribute (
+        "ChannelDisplayState",
+        "0000");
+    showAllIdentityTestChannels (
+        *splitter);
+    splitter->options
+        ->loadParameters (
+            &legacyRoot);
+    for (int channel = 0;
+         channel
+         < splitter->lfpDisplay
+               ->getNumChannels();
+         ++channel)
+    {
+        EXPECT_TRUE (
+            splitter->lfpDisplay
+                ->getStoredChannelVisibility (
+                    channel));
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        SourceLocalV2RoundTripRequiresUniqueMatchAndExactNameTypeSignature)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter =
+        splitters[0];
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    buffers[0]->streamKey =
+        "source.local.stream";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        "",
+        91,
+        5,
+        "Source Local",
+        ContinuousChannel::Type::AUX);
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "source.local.stream"));
+    splitter->lfpDisplay
+        ->setEnabledState (
+            false,
+            0,
+            true);
+    XmlElement savedRoot (
+        "ROOT");
+    splitter->options
+        ->saveParameters (
+            &savedRoot);
+    auto* savedRecord =
+        getIdentityTestHiddenRecord (
+            savedRoot);
+    ASSERT_NE (
+        savedRecord,
+        nullptr);
+    EXPECT_EQ (
+        savedRecord
+            ->getStringAttribute (
+                "stable_key_kind"),
+        "source_local");
+    EXPECT_FALSE (
+        savedRecord->hasAttribute (
+            "identifier"));
+
+    showAllIdentityTestChannels (
+        *splitter);
+    buffers[0]->channelMetadata
+        .getReference (0)
+        .uuid =
+        Uuid();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "source.local.stream"));
+    splitter->options
+        ->loadParameters (
+            &savedRoot);
+    EXPECT_FALSE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+
+    showAllIdentityTestChannels (
+        *splitter);
+    buffers[0]->channelMetadata
+        .getReference (0)
+        .name =
+        "Replacement";
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "source.local.stream"));
+    splitter->options
+        ->loadParameters (
+            &savedRoot);
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        ValidEmptyAndMultipleV2NodesRemainAuthoritativeOverLegacyAndDirtyState)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter =
+        splitters[0];
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    buffers[0]->streamKey =
+        "authority.stream";
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "authority.stream"));
+    splitter->lfpDisplay
+        ->setEnabledState (
+            false,
+            0,
+            true);
+    XmlElement baseline (
+        "ROOT");
+    splitter->options
+        ->saveParameters (
+            &baseline);
+    auto* baselinePane =
+        baseline.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (
+        baselinePane,
+        nullptr);
+    baselinePane->setAttribute (
+        "ChannelDisplayState",
+        "0000");
+
+    showAllIdentityTestChannels (
+        *splitter);
+    splitter->options
+        ->loadParameters (
+            &baseline);
+    EXPECT_FALSE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+    for (int channel = 1;
+         channel
+         < splitter->lfpDisplay
+               ->getNumChannels();
+         ++channel)
+    {
+        EXPECT_TRUE (
+            splitter->lfpDisplay
+                ->getStoredChannelVisibility (
+                    channel));
+    }
+
+    XmlElement emptyState (
+        baseline);
+    auto* emptyStateNode =
+        getIdentityTestVisibilityState (
+            emptyState);
+    ASSERT_NE (
+        emptyStateNode,
+        nullptr);
+    emptyStateNode
+        ->deleteAllChildElements();
+    splitter->lfpDisplay
+        ->setEnabledState (
+            false,
+            1,
+            true);
+    splitter->options
+        ->loadParameters (
+            &emptyState);
+    for (int channel = 0;
+         channel
+         < splitter->lfpDisplay
+               ->getNumChannels();
+         ++channel)
+    {
+        EXPECT_TRUE (
+            splitter->lfpDisplay
+                ->getStoredChannelVisibility (
+                    channel));
+    }
+
+    XmlElement multipleStates (
+        baseline);
+    auto* multiplePane =
+        getIdentityTestPane (
+            multipleStates);
+    ASSERT_NE (
+        multiplePane,
+        nullptr);
+    multiplePane
+        ->addChildElement (
+            new XmlElement (
+                *multiplePane
+                     ->getChildByName (
+                         "WAVEFORM_VISIBILITY_STATE")));
+    splitter->lfpDisplay
+        ->setEnabledState (
+            false,
+            2,
+            true);
+    splitter->options
+        ->loadParameters (
+            &multipleStates);
+    for (int channel = 0;
+         channel
+         < splitter->lfpDisplay
+               ->getNumChannels();
+         ++channel)
+    {
+        EXPECT_TRUE (
+            splitter->lfpDisplay
+                ->getStoredChannelVisibility (
+                    channel));
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        RemovedAmbiguousAndKindChangedChannelsDoNotResurrectStagedHiddenState)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter =
+        splitters[0];
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    buffers[0]->streamKey =
+        "no.resurrection";
+    buffers[1]->streamKey =
+        "other.stream";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        "no.resurrection.identifier",
+        120,
+        6,
+        "No Resurrection",
+        ContinuousChannel::Type::ELECTRODE);
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "no.resurrection"));
+    splitter->lfpDisplay
+        ->setEnabledState (
+            false,
+            0,
+            true);
+    XmlElement savedRoot (
+        "ROOT");
+    splitter->options
+        ->saveParameters (
+            &savedRoot);
+
+    showAllIdentityTestChannels (
+        *splitter);
+    auto removedMetadata =
+        buffers[0]->channelMetadata[0];
+    buffers[0]->channelMetadata
+        .remove (
+            0);
+    buffers[0]->numChannels =
+        buffers[0]->channelMetadata
+            .size();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "no.resurrection"));
+    splitter->options
+        ->loadParameters (
+            &savedRoot);
+    buffers[0]->channelMetadata
+        .insert (
+            0,
+            removedMetadata);
+    buffers[0]->numChannels =
+        buffers[0]->channelMetadata
+            .size();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "no.resurrection"));
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+
+    splitter->lfpDisplay
+        ->setEnabledState (
+            false,
+            0,
+            true);
+    XmlElement currentSavedRoot (
+        "ROOT");
+    splitter->options
+        ->saveParameters (
+            &currentSavedRoot);
+    showAllIdentityTestChannels (
+        *splitter);
+    buffers[0]->channelMetadata
+        .getReference (1)
+        .identifier =
+        "no.resurrection.identifier";
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "no.resurrection"));
+    splitter->options
+        ->loadParameters (
+            &currentSavedRoot);
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+    buffers[0]->channelMetadata
+        .getReference (1)
+        .identifier =
+        "other.identifier";
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "no.resurrection"));
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+
+    buffers[1]->streamKey =
+        "no.resurrection";
+    splitter->options
+        ->loadParameters (
+            &currentSavedRoot);
+    buffers[1]->streamKey =
+        "other.stream";
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitter
+            ->selectStreamByKey (
+                "no.resurrection"));
+    EXPECT_TRUE (
+        splitter->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        ThreePanesRoundTripHiddenStateForEveryCurrentStreamIndependently)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::THREE_VERT);
+    const auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3u);
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    buffers[0]->streamKey =
+        "three.stream.a";
+    buffers[1]->streamKey =
+        "three.stream.b";
+    canvas->updateSettings();
+
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "three.stream.a"));
+    splitters[0]->lfpDisplay
+        ->setEnabledState (
+            false,
+            0,
+            true);
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "three.stream.b"));
+    splitters[0]->lfpDisplay
+        ->setEnabledState (
+            false,
+            1,
+            true);
+    ASSERT_TRUE (
+        splitters[1]
+            ->selectStreamByKey (
+                "three.stream.b"));
+    splitters[1]->lfpDisplay
+        ->setEnabledState (
+            false,
+            2,
+            true);
+    ASSERT_TRUE (
+        splitters[2]
+            ->selectStreamByKey (
+                "three.stream.a"));
+    splitters[2]->lfpDisplay
+        ->setEnabledState (
+            false,
+            3,
+            true);
+
+    XmlElement savedRoot (
+        "ROOT");
+    for (auto* splitter :
+         splitters)
+    {
+        splitter->options
+            ->saveParameters (
+                &savedRoot);
+        for (const auto* buffer :
+             buffers)
+        {
+            ASSERT_TRUE (
+                splitter
+                    ->selectStreamByKey (
+                        buffer
+                            ->streamKey));
+            showAllIdentityTestChannels (
+                *splitter);
+        }
+    }
+
+    for (auto* splitter :
+         splitters)
+    {
+        splitter->options
+            ->loadParameters (
+                &savedRoot);
+    }
+
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "three.stream.a"));
+    EXPECT_FALSE (
+        splitters[0]->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_TRUE (
+        splitters[0]->lfpDisplay
+            ->getStoredChannelVisibility (
+                1));
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "three.stream.b"));
+    EXPECT_TRUE (
+        splitters[0]->lfpDisplay
+            ->getStoredChannelVisibility (
+                0));
+    EXPECT_FALSE (
+        splitters[0]->lfpDisplay
+            ->getStoredChannelVisibility (
+                1));
+    ASSERT_TRUE (
+        splitters[1]
+            ->selectStreamByKey (
+                "three.stream.b"));
+    EXPECT_FALSE (
+        splitters[1]->lfpDisplay
+            ->getStoredChannelVisibility (
+                2));
+    ASSERT_TRUE (
+        splitters[2]
+            ->selectStreamByKey (
+                "three.stream.a"));
+    EXPECT_FALSE (
+        splitters[2]->lfpDisplay
+            ->getStoredChannelVisibility (
+                3));
 }
 } // namespace
