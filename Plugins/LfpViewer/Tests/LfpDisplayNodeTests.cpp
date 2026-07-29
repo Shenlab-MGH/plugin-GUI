@@ -3437,6 +3437,12 @@ TEST_F (LfpDisplayNodeTests,
                 ->getSourceNode());
     ASSERT_NE (source, nullptr);
 
+    source->setStreamName (
+        0,
+        "Alpha");
+    source->setStreamName (
+        1,
+        "Bravo");
     source->setStreamSourceNodeId (
         0,
         17);
@@ -3445,6 +3451,26 @@ TEST_F (LfpDisplayNodeTests,
         29);
     dynamicTester
         ->updateSourceNodeSettings();
+
+    const auto findBufferByKey =
+        [&] (const String& streamKey)
+    {
+        for (auto* buffer :
+             dynamicProcessor
+                 ->getDisplayBuffers())
+        {
+            if (buffer->streamKey
+                == streamKey)
+            {
+                return buffer;
+            }
+        }
+
+        return static_cast<
+            LfpViewer::
+                DisplayBuffer*> (
+            nullptr);
+    };
 
     const auto expectMetadataToMatchChannels =
         [&]
@@ -3519,17 +3545,182 @@ TEST_F (LfpDisplayNodeTests,
 
     expectMetadataToMatchChannels();
 
-    const auto replacedUuid =
+    const auto initialStreams =
         dynamicProcessor
-            ->getContinuousChannel (0)
-            ->getUniqueId()
-            .toString();
+            ->getDataStreams();
+    ASSERT_EQ (initialStreams.size(), 2);
+    EXPECT_EQ (
+        initialStreams[0]
+            ->getKey(),
+        "17|Alpha");
+    EXPECT_EQ (
+        initialStreams[1]
+            ->getKey(),
+        "29|Bravo");
+
+    auto* alphaBuffer =
+        findBufferByKey (
+            "17|Alpha");
+    auto* bravoBuffer =
+        findBufferByKey (
+            "29|Bravo");
+    ASSERT_NE (alphaBuffer, nullptr);
+    ASSERT_NE (bravoBuffer, nullptr);
+    ASSERT_EQ (
+        alphaBuffer
+            ->channelMetadata
+            .size(),
+        2);
+    ASSERT_EQ (
+        bravoBuffer
+            ->channelMetadata
+            .size(),
+        2);
+
+    std::array<String, 2> alphaUuids;
+    std::array<String, 2> bravoUuids;
+    for (int channel = 0;
+         channel < 2;
+         ++channel)
+    {
+        const auto& alphaMetadata =
+            alphaBuffer
+                ->channelMetadata[
+                    channel];
+        alphaUuids[channel] =
+            alphaMetadata.uuid
+                .toString();
+        EXPECT_EQ (
+            alphaMetadata.identifier,
+            "identifier.g0.s0.c"
+                + String (channel));
+        EXPECT_EQ (
+            alphaMetadata.sourceNodeId,
+            17);
+        EXPECT_EQ (
+            alphaMetadata.localIndex,
+            channel);
+
+        const auto& bravoMetadata =
+            bravoBuffer
+                ->channelMetadata[
+                    channel];
+        bravoUuids[channel] =
+            bravoMetadata.uuid
+                .toString();
+        EXPECT_EQ (
+            bravoMetadata.identifier,
+            "identifier.g0.s1.c"
+                + String (channel));
+        EXPECT_EQ (
+            bravoMetadata.sourceNodeId,
+            29);
+        EXPECT_EQ (
+            bravoMetadata.localIndex,
+            channel);
+    }
+
+    dynamicTester
+        ->updateSourceNodeSettings();
+    expectMetadataToMatchChannels();
+    alphaBuffer = findBufferByKey ("17|Alpha");
+    bravoBuffer = findBufferByKey ("29|Bravo");
+    ASSERT_NE (alphaBuffer, nullptr);
+    ASSERT_NE (bravoBuffer, nullptr);
+    for (int channel = 0;
+         channel < 2;
+         ++channel)
+    {
+        EXPECT_EQ (
+            alphaBuffer
+                ->channelMetadata[
+                    channel]
+                .uuid
+                .toString(),
+            alphaUuids[channel]);
+        EXPECT_EQ (
+            bravoBuffer
+                ->channelMetadata[
+                    channel]
+                .uuid
+                .toString(),
+            bravoUuids[channel]);
+    }
+
     source->moveStream (
         1,
         0);
     dynamicTester
         ->updateSourceNodeSettings();
     expectMetadataToMatchChannels();
+
+    const auto reorderedSourceStreams =
+        source
+            ->getDataStreams();
+    ASSERT_EQ (
+        reorderedSourceStreams
+            .size(),
+        2);
+    EXPECT_EQ (
+        reorderedSourceStreams[0]
+            ->getKey(),
+        "29|Bravo");
+    EXPECT_EQ (
+        reorderedSourceStreams[1]
+            ->getKey(),
+        "17|Alpha");
+    const auto reorderedStreams =
+        dynamicProcessor
+            ->getDataStreams();
+    ASSERT_EQ (
+        reorderedStreams.size(),
+        2);
+    EXPECT_EQ (
+        reorderedStreams[0]
+            ->getKey(),
+        "29|Bravo");
+    EXPECT_EQ (
+        reorderedStreams[1]
+            ->getKey(),
+        "17|Alpha");
+
+    alphaBuffer = findBufferByKey ("17|Alpha");
+    bravoBuffer = findBufferByKey ("29|Bravo");
+    ASSERT_NE (alphaBuffer, nullptr);
+    ASSERT_NE (bravoBuffer, nullptr);
+    for (int channel = 0;
+         channel < 2;
+         ++channel)
+    {
+        EXPECT_EQ (
+            alphaBuffer
+                ->channelMetadata[
+                    channel]
+                .uuid
+                .toString(),
+            alphaUuids[channel]);
+        EXPECT_EQ (
+            alphaBuffer
+                ->channelMetadata[
+                    channel]
+                .identifier,
+            "identifier.g0.s0.c"
+                + String (channel));
+        EXPECT_EQ (
+            bravoBuffer
+                ->channelMetadata[
+                    channel]
+                .uuid
+                .toString(),
+            bravoUuids[channel]);
+        EXPECT_EQ (
+            bravoBuffer
+                ->channelMetadata[
+                    channel]
+                .identifier,
+            "identifier.g0.s1.c"
+                + String (channel));
+    }
 
     source->setStreamCountPreservingExisting (
         2,
@@ -3553,17 +3744,84 @@ TEST_F (LfpDisplayNodeTests,
             1 });
     dynamicTester
         ->updateSourceNodeSettings();
+    source->setStreamName (
+        0,
+        "Replacement");
+    source->setStreamSourceNodeId (
+        0,
+        43);
+    dynamicTester
+        ->updateSourceNodeSettings();
     ASSERT_EQ (
         dynamicProcessor
             ->getTotalContinuousChannels(),
         3);
-    EXPECT_NE (
-        dynamicProcessor
-            ->getContinuousChannel (0)
-            ->getUniqueId()
-            .toString(),
-        replacedUuid);
     expectMetadataToMatchChannels();
+
+    const auto replacementStreams =
+        dynamicProcessor
+            ->getDataStreams();
+    ASSERT_EQ (
+        replacementStreams.size(),
+        1);
+    ASSERT_EQ (
+        dynamicProcessor
+            ->getDisplayBuffers()
+            .size(),
+        1);
+    ASSERT_EQ (
+        dynamicProcessor
+            ->displayBufferMap
+            .size(),
+        size_t (1));
+    EXPECT_EQ (
+        replacementStreams[0]
+            ->getKey(),
+        "43|Replacement");
+    auto* replacementBuffer =
+        findBufferByKey (
+            "43|Replacement");
+    ASSERT_NE (replacementBuffer, nullptr);
+    ASSERT_EQ (
+        replacementBuffer
+            ->channelMetadata
+            .size(),
+        3);
+    for (int channel = 0;
+         channel < 3;
+         ++channel)
+    {
+        const auto& replacementMetadata =
+            replacementBuffer
+                ->channelMetadata[
+                    channel];
+        EXPECT_EQ (
+            replacementMetadata.identifier,
+            "identifier.g1.s0.c"
+                + String (channel));
+        EXPECT_EQ (
+            replacementMetadata.sourceNodeId,
+            43);
+        EXPECT_EQ (
+            replacementMetadata.localIndex,
+            channel);
+        EXPECT_NE (
+            replacementMetadata.uuid
+                .toString(),
+            alphaUuids[0]);
+        EXPECT_NE (
+            replacementMetadata.uuid
+                .toString(),
+            alphaUuids[1]);
+        EXPECT_NE (
+            replacementMetadata.uuid
+                .toString(),
+            bravoUuids[0]);
+        EXPECT_NE (
+            replacementMetadata.uuid
+                .toString(),
+            bravoUuids[1]);
+    }
 }
 
 TEST_F (LfpDisplayNodeTests,

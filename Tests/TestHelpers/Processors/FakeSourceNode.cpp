@@ -1,11 +1,26 @@
 #include "FakeSourceNode.h"
 
+#include <algorithm>
+
 namespace
 {
 class FakeDataStream final : public DataStream
 {
 public:
     using DataStream::DataStream;
+
+    void setFakeSourceNodeId (
+        int sourceNodeId)
+    {
+        setSourceNodeId (
+            sourceNodeId);
+    }
+};
+
+class FakeContinuousChannel final : public ContinuousChannel
+{
+public:
+    using ContinuousChannel::ContinuousChannel;
 
     void setFakeSourceNodeId (
         int sourceNodeId)
@@ -27,46 +42,49 @@ FakeSourceNode::~FakeSourceNode() = default;
 
 void FakeSourceNode::updateSettings()
 {
-    // Don't recreate datastreams, or the IDs / pointer locations keep changing.
+    // Keep stream and channel identity stable across ordinary settings updates.
     if (cachedDataStreams.size() == 0)
     {
         for (int i = 0; i < params.streams; i++)
         {
-            DataStream::Settings settings {
-                "FakeSourceNode" + String (i),
-                "description",
-                "identifier",
-                params.sampleRate
-            };
-
-            cachedDataStreams.add (
-                new FakeDataStream (
-                    settings));
+            addCachedDataStream();
         }
     }
+
+    updateCachedContinuousChannels();
 
     continuousChannels.clear();
     dataStreams.clear();
     for (const auto& item : cachedDataStreams)
     {
         // Copy it over
-        dataStreams.add (new DataStream (*item));
+        auto* stream = new DataStream (*item);
+        stream->clearContinuousChannels();
+        dataStreams.add (stream);
     }
-    for (int i = 0; i < params.streams; i++)
+    for (int streamIndex = 0;
+         streamIndex < cachedDataStreams.size();
+         ++streamIndex)
     {
-        for (int index = 0; index < params.channels; index++)
+        const auto streamId =
+            cachedDataStreams[
+                streamIndex]
+                ->getStreamId();
+        for (const auto* cachedChannel :
+             cachedContinuousChannels)
         {
-            ContinuousChannel::Settings settings {
-                ContinuousChannel::Type::ELECTRODE,
-                "CH" + String (index),
-                String (index),
-                "identifier",
-                params.bitVolts,
-                dataStreams[i]
-
-            };
-
-            continuousChannels.add (new ContinuousChannel (settings));
+            if (cachedChannel->getStreamId()
+                == streamId)
+            {
+                continuousChannels.add (
+                    new ContinuousChannel (
+                        *cachedChannel));
+                continuousChannels
+                    .getLast()
+                    ->setDataStream (
+                        dataStreams[
+                            streamIndex]);
+            }
         }
     }
 
@@ -95,7 +113,10 @@ void FakeSourceNode::updateSettings()
 void FakeSourceNode::setParams (const FakeSourceNodeParams& params)
 {
     this->params = params;
+    cachedContinuousChannels.clear();
     cachedDataStreams.clear();
+    cachedStreamIdentityIndices.clear();
+    ++channelIdentityGeneration;
 }
 
 void FakeSourceNode::
@@ -111,24 +132,33 @@ void FakeSourceNode::
     while (cachedDataStreams.size()
            < streams)
     {
-        const auto streamIndex =
-            cachedDataStreams.size();
-        DataStream::Settings settings {
-            "FakeSourceNode"
-                + String (
-                    streamIndex),
-            "description",
-            "identifier",
-            params.sampleRate
-        };
-        cachedDataStreams.add (
-            new FakeDataStream (
-                settings));
+        addCachedDataStream();
     }
 
     while (cachedDataStreams.size()
            > streams)
     {
+        const auto streamId =
+            cachedDataStreams
+                .getLast()
+                ->getStreamId();
+        for (int channelIndex =
+                 cachedContinuousChannels.size()
+                 - 1;
+             channelIndex >= 0;
+             --channelIndex)
+        {
+            if (cachedContinuousChannels[
+                    channelIndex]
+                    ->getStreamId()
+                == streamId)
+            {
+                cachedContinuousChannels
+                    .remove (channelIndex);
+            }
+        }
+        cachedStreamIdentityIndices.erase (
+            streamId);
         cachedDataStreams.removeLast();
     }
 
@@ -167,6 +197,143 @@ void FakeSourceNode::setStreamSourceNodeId (
     {
         stream->setFakeSourceNodeId (
             sourceNodeId);
+
+        for (auto* channel :
+             cachedContinuousChannels)
+        {
+            if (channel->getStreamId()
+                == stream->getStreamId())
+            {
+                auto* fakeChannel =
+                    dynamic_cast<
+                        FakeContinuousChannel*> (
+                        channel);
+                jassert (fakeChannel != nullptr);
+                if (fakeChannel != nullptr)
+                {
+                    fakeChannel
+                        ->setFakeSourceNodeId (
+                            sourceNodeId);
+                }
+            }
+        }
+    }
+}
+
+void FakeSourceNode::addCachedDataStream()
+{
+    const auto streamIdentityIndex =
+        cachedDataStreams.size();
+    DataStream::Settings settings {
+        "FakeSourceNode"
+            + String (
+                streamIdentityIndex),
+        "description",
+        "identifier",
+        params.sampleRate
+    };
+    auto* stream = new FakeDataStream (settings);
+    cachedStreamIdentityIndices[
+        stream->getStreamId()] =
+        streamIdentityIndex;
+    cachedDataStreams.add (stream);
+}
+
+void FakeSourceNode::updateCachedContinuousChannels()
+{
+    for (auto* stream :
+         cachedDataStreams)
+    {
+        stream->clearContinuousChannels();
+    }
+
+    for (int channelIndex =
+             cachedContinuousChannels.size()
+             - 1;
+         channelIndex >= 0;
+         --channelIndex)
+    {
+        const auto* channel =
+            cachedContinuousChannels[
+                channelIndex];
+        const auto matchingStream =
+            std::find_if (
+                cachedDataStreams.begin(),
+                cachedDataStreams.end(),
+                [&] (const DataStream* stream)
+                {
+                    return stream->getStreamId()
+                           == channel->getStreamId();
+                });
+        if (matchingStream
+                == cachedDataStreams.end()
+            || channel->getLocalIndex()
+                   >= params.channels)
+        {
+            cachedContinuousChannels
+                .remove (channelIndex);
+        }
+    }
+
+    for (auto* stream :
+         cachedDataStreams)
+    {
+        Array<ContinuousChannel*> streamChannels;
+        for (auto* channel :
+             cachedContinuousChannels)
+        {
+            if (channel->getStreamId()
+                == stream->getStreamId())
+            {
+                streamChannels.add (channel);
+            }
+        }
+        std::sort (
+            streamChannels.begin(),
+            streamChannels.end(),
+            [] (const ContinuousChannel* lhs,
+                const ContinuousChannel* rhs)
+            {
+                return lhs->getLocalIndex()
+                       < rhs->getLocalIndex();
+            });
+        for (auto* channel :
+             streamChannels)
+        {
+            stream->addChannel (channel);
+        }
+
+        const auto streamIdentityIndex =
+            cachedStreamIdentityIndices[
+                stream->getStreamId()];
+        for (int channelIndex =
+                 streamChannels.size();
+             channelIndex < params.channels;
+             ++channelIndex)
+        {
+            ContinuousChannel::Settings settings {
+                ContinuousChannel::Type::ELECTRODE,
+                "CH" + String (channelIndex),
+                String (channelIndex),
+                "identifier.g"
+                    + String (
+                        channelIdentityGeneration)
+                    + ".s"
+                    + String (
+                        streamIdentityIndex)
+                    + ".c"
+                    + String (channelIndex),
+                params.bitVolts,
+                stream
+            };
+            auto* channel =
+                new FakeContinuousChannel (
+                    settings);
+            channel->setFakeSourceNodeId (
+                stream->getSourceNodeId());
+            cachedContinuousChannels.add (
+                channel);
+        }
     }
 }
 

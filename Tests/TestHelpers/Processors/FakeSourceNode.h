@@ -4,6 +4,8 @@
 #include <NonAPIHeaders.h>
 #include <ProcessorHeaders.h>
 
+#include <map>
+
 /** Collection of optional, settable parameters for configuring the FakeSourceNode for testing. */
 struct FakeSourceNodeParams
 {
@@ -37,8 +39,14 @@ public:
         int sourceNodeId);
 
 private:
+    void addCachedDataStream();
+    void updateCachedContinuousChannels();
+
     FakeSourceNodeParams params;
     OwnedArray<DataStream> cachedDataStreams;
+    OwnedArray<ContinuousChannel> cachedContinuousChannels;
+    std::map<uint16, int> cachedStreamIdentityIndices;
+    int channelIdentityGeneration = 0;
 };
 
 #endif
