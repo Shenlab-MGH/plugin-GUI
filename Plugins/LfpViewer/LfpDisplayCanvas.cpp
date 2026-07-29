@@ -840,13 +840,9 @@ LfpDisplaySplitter::LfpDisplaySplitter (LfpDisplayNode* node,
     displayBuffer = nullptr;
 }
 
-String LfpDisplaySplitter::getStreamKey()
+String LfpDisplaySplitter::getStreamKey() const
 {
-    if (processor->getDataStreams().size() == 0 || selectedStreamId == 0)
-        return "";
-
-    DataStream* stream = processor->getDataStream (selectedStreamId);
-    return stream->getKey();
+    return selectedStreamKey;
 }
 
 void LfpDisplaySplitter::refreshLeftMargin()
@@ -1011,41 +1007,18 @@ void LfpDisplaySplitter::recordingStopped()
 
 void LfpDisplaySplitter::updateSettings()
 {
-    if (displayBuffer != nullptr)
-        displayBuffer->removeDisplay (splitID);
-
     isUpdating = true;
 
     Array<DisplayBuffer*> availableBuffers = processor->getDisplayBuffers();
 
-    if (availableBuffers.size() == 0)
-        displayBuffer = nullptr;
-
     streamSelection->clear (dontSendNotification);
 
-    bool foundMatchingBuffer = false;
-
     for (auto buffer : availableBuffers)
-    {
         streamSelection->addItem (buffer->name, buffer->id);
 
-        if (displayBuffer != nullptr)
-        {
-            if (buffer->streamKey == displayBuffer->streamKey)
-                foundMatchingBuffer = true;
-        }
-    }
-
-    if (! foundMatchingBuffer)
-        displayBuffer = nullptr;
-
-    if (displayBuffer == nullptr) // displayBuffer was deleted
-    {
-        if (availableBuffers.size() > 0)
-        {
-            displayBuffer = availableBuffers[0];
-        }
-    }
+    selectStreamByKey (
+        selectedStreamKey,
+        true);
 
     if (displayBuffer == nullptr) // no inputs to this processor
     {
@@ -1057,11 +1030,6 @@ void LfpDisplaySplitter::updateSettings()
     }
     else
     {
-        displayBuffer->addDisplay (splitID);
-
-        streamSelection->setSelectedId (displayBuffer->id, dontSendNotification);
-        selectedStreamId = displayBuffer->id;
-
         displayBufferSize = displayBuffer->getNumSamples();
         nChans = displayBuffer->numChannels;
         sampleRate = displayBuffer->sampleRate;
@@ -1745,10 +1713,143 @@ void LfpDisplaySplitter::setDrawableSampleRate (float samplerate)
 
 void LfpDisplaySplitter::setDrawableStream (uint16 sp)
 {
-    selectedStreamId = sp;
-    displayBuffer = processor->displayBufferMap[processor->getDataStream (sp)->getStreamId()];
+    auto* stream =
+        processor->getDataStream (sp);
+    if (stream == nullptr)
+    {
+        streamSelection->setSelectedId (
+            selectedStreamId,
+            dontSendNotification);
+        streamSelection
+            ->synchroniseAccessibilityState();
+        return;
+    }
 
-    updateSettings();
+    if (selectStreamByKey (
+            stream->getKey()))
+    {
+        updateSettings();
+    }
+}
+
+bool LfpDisplaySplitter::selectStreamByKey (
+    const String& streamKey,
+    bool fallBackToFirst)
+{
+    jassert (
+        MessageManager::getInstance()
+            ->isThisTheMessageThread());
+
+    const auto availableBuffers =
+        processor->getDisplayBuffers();
+    if (availableBuffers.isEmpty())
+    {
+        clearStreamSelection (
+            "No data streams");
+        return false;
+    }
+
+    if (hasAmbiguousStreamKeys (
+            availableBuffers))
+    {
+        LOGE (
+            "LFP Viewer cannot select a data stream because multiple streams have the same stable key.");
+        clearStreamSelection (
+            "Ambiguous data streams");
+        return false;
+    }
+
+    DisplayBuffer* selectedBuffer =
+        nullptr;
+    for (auto* buffer :
+         availableBuffers)
+    {
+        if (buffer->streamKey
+            == streamKey)
+        {
+            selectedBuffer = buffer;
+            break;
+        }
+    }
+
+    if (selectedBuffer == nullptr
+        && fallBackToFirst)
+    {
+        selectedBuffer =
+            availableBuffers.getFirst();
+    }
+    if (selectedBuffer == nullptr)
+        return false;
+
+    if (displayBuffer != nullptr
+        && displayBuffer
+               != selectedBuffer)
+    {
+        displayBuffer->removeDisplay (
+            splitID);
+    }
+
+    displayBuffer = selectedBuffer;
+    displayBuffer->addDisplay (
+        splitID);
+    selectedStreamKey =
+        displayBuffer->streamKey;
+    selectedStreamId =
+        static_cast<uint16> (
+            displayBuffer->id);
+    streamSelection->setEnabled (
+        true);
+    streamSelection->setSelectedId (
+        displayBuffer->id,
+        dontSendNotification);
+    streamSelection
+        ->synchroniseAccessibilityState();
+    return true;
+}
+
+void LfpDisplaySplitter::
+    clearStreamSelection (
+        const String& placeholder)
+{
+    if (displayBuffer != nullptr)
+    {
+        displayBuffer->removeDisplay (
+            splitID);
+    }
+
+    displayBuffer = nullptr;
+    selectedStreamId = 0;
+    selectedStreamKey.clear();
+    streamSelection->setSelectedId (
+        0,
+        dontSendNotification);
+    streamSelection->setText (
+        placeholder,
+        dontSendNotification);
+    streamSelection->setEnabled (
+        false);
+    streamSelection
+        ->synchroniseAccessibilityState();
+}
+
+bool LfpDisplaySplitter::
+    hasAmbiguousStreamKeys (
+        const Array<DisplayBuffer*>&
+            buffers) const
+{
+    StringArray keys;
+    for (auto* buffer : buffers)
+    {
+        if (buffer->streamKey.isEmpty()
+            || keys.contains (
+                buffer->streamKey))
+        {
+            return true;
+        }
+        keys.add (
+            buffer->streamKey);
+    }
+    return false;
 }
 
 void LfpDisplaySplitter::redraw()

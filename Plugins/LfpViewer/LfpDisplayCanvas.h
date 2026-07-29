@@ -270,6 +270,10 @@ public:
         this canvas */
     void setDrawableStream (uint16 streamId);
 
+    /** Selects a stream by its stable key, optionally falling back to the first available stream. */
+    bool selectStreamByKey (const String& streamKey,
+                            bool fallBackToFirst = false);
+
     /** Gets the X coordinate (in s) for a particular channel / sample combo */
     const float getXCoord (int chan, int samp);
 
@@ -383,6 +387,7 @@ public:
     void monitorChannel (int channel);
 
     uint16 selectedStreamId = 0;
+    String selectedStreamKey;
 
     void refreshScreenBuffer();
 
@@ -391,9 +396,12 @@ public:
     void setFilteredChannels (Array<int> channels) { filteredChannels = channels; }
     Array<int> getFilteredChannels() { return filteredChannels; }
 
-    String getStreamKey();
+    String getStreamKey() const;
 
 private:
+    void clearStreamSelection (const String& placeholder);
+    bool hasAmbiguousStreamKeys (
+        const Array<DisplayBuffer*>& buffers) const;
     void refreshLeftMargin();
 
     bool isSelected;

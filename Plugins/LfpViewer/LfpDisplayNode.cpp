@@ -77,13 +77,19 @@ void LfpDisplayNode::updateSettings()
 
         if (displayBufferMap.count (streamId) == 0)
         {
-            displayBuffers.add (new DisplayBuffer (streamId, name, channel->getSampleRate()));
+            displayBuffers.add (
+                new DisplayBuffer (
+                    streamId,
+                    name,
+                    stream_key,
+                    channel->getSampleRate()));
             displayBufferMap[streamId] = displayBuffers.getLast();
         }
         else
         {
             displayBufferMap[streamId]->sampleRate = channel->getSampleRate();
             displayBufferMap[streamId]->name = name;
+            displayBufferMap[streamId]->streamKey = stream_key;
         }
 
         bool hasGroupMetadata = (! channel->group.name.equalsIgnoreCase ("default"));

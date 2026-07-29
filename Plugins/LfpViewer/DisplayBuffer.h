@@ -44,7 +44,10 @@ class TESTABLE DisplayBuffer : public AudioBuffer<float>
 {
 public:
     /** Constructor */
-    DisplayBuffer (int id, String name, float sampleRate);
+    DisplayBuffer (int id,
+                   String name,
+                   String streamKey,
+                   float sampleRate);
 
     /** Destructor */
     ~DisplayBuffer();

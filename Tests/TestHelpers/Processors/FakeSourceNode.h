@@ -23,6 +23,15 @@ public:
     void updateSettings() override;
     void process (AudioBuffer<float>& continuousBuffer) override;
     void setParams (const FakeSourceNodeParams& params);
+    void setStreamCountPreservingExisting (
+        int streams,
+        int channels);
+    void moveStream (
+        int currentIndex,
+        int newIndex);
+    void setStreamName (
+        int streamIndex,
+        const String& name);
 
 private:
     FakeSourceNodeParams params;

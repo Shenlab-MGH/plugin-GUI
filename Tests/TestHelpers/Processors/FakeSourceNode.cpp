@@ -80,4 +80,59 @@ void FakeSourceNode::setParams (const FakeSourceNodeParams& params)
     cachedDataStreams.clear();
 }
 
+void FakeSourceNode::
+    setStreamCountPreservingExisting (
+        int streams,
+        int channels)
+{
+    jassert (streams > 0);
+    jassert (
+        cachedDataStreams.size()
+        > 0);
+
+    while (cachedDataStreams.size()
+           < streams)
+    {
+        const auto streamIndex =
+            cachedDataStreams.size();
+        DataStream::Settings settings {
+            "FakeSourceNode"
+                + String (
+                    streamIndex),
+            "description",
+            "identifier",
+            params.sampleRate
+        };
+        cachedDataStreams.add (
+            new DataStream (
+                settings));
+    }
+
+    while (cachedDataStreams.size()
+           > streams)
+    {
+        cachedDataStreams.removeLast();
+    }
+
+    params.streams = streams;
+    params.channels = channels;
+}
+
+void FakeSourceNode::moveStream (
+    int currentIndex,
+    int newIndex)
+{
+    cachedDataStreams.move (
+        currentIndex,
+        newIndex);
+}
+
+void FakeSourceNode::setStreamName (
+    int streamIndex,
+    const String& name)
+{
+    cachedDataStreams[streamIndex]
+        ->setName (name);
+}
+
 void FakeSourceNode::process (AudioBuffer<float>& continuousBuffer) {}

@@ -3762,21 +3762,10 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
 
             int64 start = Time::getHighResolutionTicks();
 
-            if (canvasSplit->displayBuffer != nullptr)
-                canvasSplit->displayBuffer->removeDisplay (canvasSplit->splitID);
-
-            int streamId = 0;
-
-            if (auto stream = processor->getDataStream (streamKey))
-                streamId = stream->getStreamId();
-
-            if (processor->displayBufferMap.find (streamId) == processor->displayBufferMap.end())
-                canvasSplit->displayBuffer = processor->getDisplayBuffers().getFirst();
-            else
-                canvasSplit->displayBuffer = processor->displayBufferMap[streamId];
-
-            if (canvasSplit->displayBuffer != nullptr)
-                canvasSplit->displayBuffer->addDisplay (canvasSplit->splitID);
+            canvasSplit
+                ->selectStreamByKey (
+                    streamKey,
+                    true);
 
             //LOGD("    Added displays in ", MS_FROM_START, " milliseconds");
             start = Time::getHighResolutionTicks();

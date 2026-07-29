@@ -28,7 +28,16 @@ namespace LfpViewer
 
 #define BUFFER_LENGTH_S 1.0f
 
-DisplayBuffer::DisplayBuffer (int id_, String name_, float sampleRate_) : id (id_), name (name_), sampleRate (sampleRate_), isNeeded (true)
+DisplayBuffer::DisplayBuffer (
+    int id_,
+    String name_,
+    String streamKey_,
+    float sampleRate_)
+    : name (std::move (name_)),
+      id (id_),
+      streamKey (std::move (streamKey_)),
+      sampleRate (sampleRate_),
+      isNeeded (true)
 {
     previousSize = 0;
     numChannels = 0;
