@@ -369,7 +369,9 @@ private:
     // THRESHOLDS SECTION
     std::unique_ptr<GroupComponent> thresholdsGroup;
 
-    std::unique_ptr<ComboBox> spikeRasterSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        spikeRasterSelection;
     std::unique_ptr<Label> spikeRasterabel;
 
     std::unique_ptr<ComboBox> saturationWarningSelection; // optionally raise hell if the actual data is saturating

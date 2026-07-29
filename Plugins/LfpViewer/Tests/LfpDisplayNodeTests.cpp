@@ -6873,6 +6873,548 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesSpikeRasterForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const std::array<String, 8>
+        choices {
+            "OFF",
+            "-50",
+            "-100",
+            "-150",
+            "-200",
+            "-300",
+            "-400",
+            "-500"
+        };
+    const std::array<String, 8>
+        choiceIds {
+            "off",
+            "minus_50",
+            "minus_100",
+            "minus_150",
+            "minus_200",
+            "minus_300",
+            "minus_400",
+            "minus_500"
+        };
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".spike_raster";
+        auto* spikeRaster =
+            dynamic_cast<
+                MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (
+            spikeRaster,
+            nullptr)
+            << id;
+        EXPECT_EQ (
+            spikeRaster->getName(),
+            "spikeRasterSelection");
+        EXPECT_EQ (
+            spikeRaster->getNumItems(),
+            static_cast<int> (
+                choices.size()));
+        for (int choiceIndex = 0;
+             choiceIndex
+             < static_cast<int> (
+                   choices.size());
+             ++choiceIndex)
+        {
+            EXPECT_EQ (
+                spikeRaster->getItemText (
+                    choiceIndex),
+                choices[choiceIndex]);
+        }
+
+        int choiceIndex = 0;
+        for (PopupMenu::MenuItemIterator
+                 iterator (
+                     *spikeRaster
+                          ->getRootMenu(),
+                     false);
+             iterator.next();)
+        {
+            ASSERT_LT (
+                choiceIndex,
+                static_cast<int> (
+                    choiceIds.size()));
+            EXPECT_EQ (
+                iterator
+                    .getItem()
+                    .accessibilityId,
+                id
+                    + ".choice."
+                    + choiceIds[choiceIndex]);
+            ++choiceIndex;
+        }
+        EXPECT_EQ (
+            choiceIndex,
+            static_cast<int> (
+                choiceIds.size()));
+
+        auto* handler =
+            spikeRaster
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (displayNumber)
+                + " spike raster threshold");
+        const auto description =
+            "Choose the negative-going spike raster threshold for LFP display "
+            + String (displayNumber)
+            + ": OFF shows continuous traces; -50, -100, -150, -200, -300, -400, -500, or a custom non-zero magnitude up to 500 replaces continuous traces with raster marks where the signal crosses the threshold relative to its per-pixel mean. Spike raster keeps subtract offset on. This changes display rendering only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        auto* value =
+            handler->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_FALSE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            "OFF");
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::press));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::showMenu));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::expand));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::collapse));
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *spikeRaster)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    std::vector<Label*> labels;
+    collectLfpDescendants (
+        *canvas,
+        labels);
+    for (const auto* label : labels)
+    {
+        if (label->getName()
+            == "SpikeRasterLabel")
+        {
+            EXPECT_FALSE (
+                label->isAccessible());
+        }
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SpikeRasterWorkerValuesCanonicaliseAndKeepOffsetOwnershipCoherent)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.";
+    auto* spikeRaster =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix + "spike_raster"));
+    auto* subtractOffset =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                prefix + "subtract_offset"));
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::LfpDisplay> (
+            *canvas);
+    ASSERT_NE (spikeRaster, nullptr);
+    ASSERT_NE (subtractOffset, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* value =
+        spikeRaster
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    const auto writeFromWorker =
+        [&] (StringRef newValue)
+    {
+        std::atomic<bool> workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                value->setValueAsString (
+                    String (newValue));
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+    };
+
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    LfpThreadTrackingComboBoxListener listener;
+    spikeRaster->addListener (&listener);
+    writeFromWorker ("125");
+    spikeRaster->removeListener (&listener);
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (listener.callbackUsedMessageThread.load());
+    EXPECT_EQ (spikeRaster->getText(), "-125");
+    EXPECT_EQ (value->getCurrentValueAsString(), "-125");
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
+    EXPECT_TRUE (subtractOffset->getToggleState());
+
+    for (const auto& testCase :
+         std::array<std::pair<String, String>, 4> {
+             std::make_pair ("-125", "-125"),
+             std::make_pair ("600", "-500"),
+             std::make_pair ("0", "OFF"),
+             std::make_pair ("invalid", "OFF") })
+    {
+        writeFromWorker (testCase.first);
+        EXPECT_EQ (spikeRaster->getText(), testCase.second);
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            testCase.second);
+        EXPECT_EQ (
+            display->getSpikeRasterPlotting(),
+            testCase.second != "OFF");
+    }
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -500.0f);
+    EXPECT_FALSE (subtractOffset->getToggleState());
+
+    const auto retainedActions =
+        spikeRaster
+            ->getAccessibilityHandler()
+            ->getActions();
+    auto retainedHandler =
+        spikeRaster
+            ->createAccessibilityHandler();
+    ASSERT_NE (retainedHandler, nullptr);
+    auto* retainedValue =
+        retainedHandler
+            ->getValueInterface();
+    ASSERT_NE (retainedValue, nullptr);
+    spikeRaster->setEnabled (false);
+    writeFromWorker ("-50");
+    EXPECT_EQ (spikeRaster->getText(), "OFF");
+    canvas.reset();
+    retainedValue->setValueAsString ("-50");
+    EXPECT_EQ (
+        retainedValue->getCurrentValueAsString(),
+        "OFF");
+    std::atomic<bool> workerReturned { false };
+    bool staleActionFound = false;
+    std::thread staleWorker (
+        [&]
+        {
+            staleActionFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::press);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        workerReturned);
+    EXPECT_TRUE (staleActionFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SpikeRasterAccessibilityValueSurvivesZeroChannelsBufferRemovalAndXmlRestore)
+{
+    auto zeroChannelTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<LfpViewer::LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (zeroChannelProcessor->getNodeId())
+        + ".lfp.display_1.spike_raster";
+    auto* spikeRaster =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (spikeRaster, nullptr);
+    ASSERT_NE (display, nullptr);
+    auto* options =
+        findLfpAncestor<LfpViewer::LfpDisplayOptions> (
+            *spikeRaster);
+    ASSERT_NE (options, nullptr);
+    auto* value =
+        spikeRaster
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    value->setValueAsString ("-100");
+    EXPECT_EQ (value->getCurrentValueAsString(), "-100");
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -100.0f);
+    canvas->removeBufferForDisplay (0);
+    value->setValueAsString ("125");
+    EXPECT_EQ (value->getCurrentValueAsString(), "-125");
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
+
+    XmlElement savedRoot ("ROOT");
+    options->saveParameters (&savedRoot);
+    auto* savedPane =
+        savedRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (savedPane, nullptr);
+    savedPane->setAttribute ("spikeRaster", "OFF");
+    LfpThreadTrackingComboBoxListener listener;
+    spikeRaster->addListener (&listener);
+    options->loadParameters (&savedRoot);
+    spikeRaster->removeListener (&listener);
+    EXPECT_EQ (listener.callbackCount.load(), 0);
+    EXPECT_EQ (value->getCurrentValueAsString(), "OFF");
+    EXPECT_FALSE (display->getSpikeRasterPlotting());
+}
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerWritesAndSelectsSpikeRaster)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    const auto id = prefix + "1.spike_raster";
+    auto* spikeRaster =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (*canvas);
+    ASSERT_NE (spikeRaster, nullptr);
+    ASSERT_NE (display, nullptr);
+    const auto window =
+        static_cast<HWND> (canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto runAction =
+        [&] (StringRef targetId,
+             LfpWindowsUiaAction action,
+             StringRef value = {})
+    {
+        LfpWindowsUiaInvokeResult actionResult;
+        std::atomic<bool> workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                actionResult =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (targetId)
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (value)
+                                .toWideCharPointer()));
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (worker, workerReturned);
+        return actionResult;
+    };
+
+    const auto description =
+        L"Choose the negative-going spike raster threshold for LFP display 1: OFF shows continuous traces; -50, -100, -150, -200, -300, -400, -500, or a custom non-zero magnitude up to 500 replaces continuous traces with raster marks where the signal crosses the threshold relative to its per-pixel mean. Spike raster keeps subtract offset on. This changes display rendering only; acquisition and recording are unaffected.";
+    const auto initialResult =
+        runAction (id, LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (initialResult.invokeResult, S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 spike raster threshold");
+    EXPECT_EQ (initialResult.help, description);
+    EXPECT_TRUE (initialResult.valuePatternAvailable);
+    EXPECT_EQ (initialResult.valueReadOnly, FALSE);
+    EXPECT_TRUE (initialResult.expandCollapsePatternAvailable);
+    EXPECT_TRUE (initialResult.invokePatternAvailable);
+    EXPECT_EQ (initialResult.value, L"OFF");
+    EXPECT_FALSE (spikeRaster->isPopupActive());
+
+    const auto expandResult =
+        runAction (id, LfpWindowsUiaAction::expand);
+    EXPECT_EQ (expandResult.invokeResult, S_OK);
+    EXPECT_TRUE (spikeRaster->isPopupActive());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    const auto choiceId =
+        id + ".choice.minus_100";
+    const auto selectResult =
+        runAction (
+            choiceId,
+            LfpWindowsUiaAction::select);
+    EXPECT_EQ (selectResult.invokeResult, S_OK);
+    EXPECT_EQ (spikeRaster->getText(), "-100");
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -100.0f);
+
+    const auto setValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "125");
+    EXPECT_EQ (setValueResult.invokeResult, S_OK);
+    EXPECT_EQ (setValueResult.value, L"-125");
+    EXPECT_EQ (spikeRaster->getText(), "-125");
+    EXPECT_TRUE (display->getSpikeRasterPlotting());
+    EXPECT_FLOAT_EQ (display->getSpikeRasterThreshold(), -125.0f);
+    const auto reexpandResult =
+        runAction (id, LfpWindowsUiaAction::expand);
+    EXPECT_EQ (reexpandResult.invokeResult, S_OK);
+    EXPECT_TRUE (spikeRaster->isPopupActive());
+
+    spikeRaster->setEnabled (false);
+    const auto disabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "-50");
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (UIA_E_ELEMENTNOTENABLED));
+    spikeRaster->setEnabled (true);
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix + "2.spike_raster",
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (hiddenPaneResult.invokeResult, E_FAIL);
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult =
+        runAction (id, LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (closedDrawerResult.invokeResult, E_FAIL);
+}
+#endif
+
+TEST_F (LfpDisplayNodeTests,
         ColourGroupingWorkerSelectsByShankOnMessageThread)
 {
     auto canvas =

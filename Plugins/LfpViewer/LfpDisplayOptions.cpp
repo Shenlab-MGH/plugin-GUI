@@ -1558,16 +1558,67 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     selectedSpikeRasterThreshold = 1;
     selectedSpikeRasterThresholdValue = spikeRasterSelectionOptions[selectedSpikeRasterThreshold - 1];
 
-    spikeRasterSelection = std::make_unique<ComboBox> ("spikeRasterSelection");
+    spikeRasterSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    spikeRasterSelection->setName (
+        "spikeRasterSelection");
+    const auto spikeRasterDescription =
+        "Choose the negative-going spike raster threshold for LFP display "
+        + String (displayNumber)
+        + ": OFF shows continuous traces; -50, -100, -150, -200, -300, -400, -500, or a custom non-zero magnitude up to 500 replaces continuous traces with raster marks where the signal crosses the threshold relative to its per-pixel mean. Spike raster keeps subtract offset on. This changes display rendering only; acquisition and recording are unaffected.";
+    applyLfpDisplayParameterMetadata (
+        *spikeRasterSelection,
+        *processor,
+        displayNumber,
+        "spike_raster",
+        "LFP display "
+            + String (displayNumber)
+            + " spike raster threshold",
+        spikeRasterDescription);
     for (int i = 0; i < spikeRasterSelectionOptions.size(); i++)
         spikeRasterSelection->addItem (spikeRasterSelectionOptions[i], i + 1);
+    const std::array<String, 8>
+        spikeRasterChoiceIds {
+            "off",
+            "minus_50",
+            "minus_100",
+            "minus_150",
+            "minus_200",
+            "minus_300",
+            "minus_400",
+            "minus_500"
+        };
+    int spikeRasterChoiceIndex = 0;
+    for (PopupMenu::MenuItemIterator
+             iterator (
+                 *spikeRasterSelection
+                      ->getRootMenu(),
+                 false);
+         iterator.next();)
+    {
+        iterator
+            .getItem()
+            .accessibilityId =
+            spikeRasterSelection
+                ->getComponentID()
+            + ".choice."
+            + spikeRasterChoiceIds[
+                  spikeRasterChoiceIndex++];
+    }
     spikeRasterSelection->setSelectedId (selectedSpikeRasterThreshold, dontSendNotification);
     spikeRasterSelection->setEditableText (true);
+    spikeRasterSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
     spikeRasterSelection->addListener (this);
     extendedOptions->addAndMakeVisible (spikeRasterSelection.get());
+    spikeRasterSelection
+        ->synchroniseAccessibilityState();
 
     spikeRasterabel = std::make_unique<Label> ("SpikeRasterLabel", "Spike raster: ");
     spikeRasterabel->setFont (labelFont);
+    spikeRasterabel->setAccessible (false);
     spikeRasterabel->attachToComponent (spikeRasterSelection.get(), true);
     extendedOptions->addAndMakeVisible (spikeRasterabel.get());
 
@@ -2612,6 +2663,8 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
                     medianOffsetPlottingButton->setToggleState (false, sendNotification);
                     medianOffsetOnForSpikeRaster = false;
                 }
+                spikeRasterSelection
+                    ->synchroniseAccessibilityState();
                 return;
             }
 
@@ -2647,6 +2700,8 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
                 medianOffsetPlottingButton->setToggleState (false, sendNotification);
                 medianOffsetOnForSpikeRaster = false;
             }
+            spikeRasterSelection
+                ->synchroniseAccessibilityState();
             return;
         }
         else
@@ -2663,6 +2718,8 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
 
             lfpDisplay->setSpikeRasterPlotting (true);
         }
+        spikeRasterSelection
+            ->synchroniseAccessibilityState();
     }
     if (canvasSplit->getNumChannels() == 0)
         return;
@@ -3236,6 +3293,8 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
                 lfpDisplay->setSpikeRasterPlotting (false);
                 medianOffsetOnForSpikeRaster = false;
             }
+            spikeRasterSelection
+                ->synchroniseAccessibilityState();
 
             // CLIP WARNING
             int clipWarning = xmlNode->getIntAttribute ("clipWarning", 1);
