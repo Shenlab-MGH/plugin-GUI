@@ -206,7 +206,8 @@ struct LfpViewer::
             button.getComponent();
         if (currentButton == nullptr
             || ! currentButton->isEnabled()
-            || ! currentButton->isShowing())
+            || ! isExposedThroughAncestors (
+                *currentButton))
         {
             return;
         }
@@ -215,6 +216,35 @@ struct LfpViewer::
     }
 
 private:
+    static bool isExposedThroughAncestors (
+        Component& component)
+    {
+        if (! component.isShowing())
+            return false;
+
+        auto exposedBounds =
+            component.getLocalBounds();
+        auto* child = &component;
+        for (auto* parent =
+                 child->getParentComponent();
+             parent != nullptr;
+             parent =
+                 child->getParentComponent())
+        {
+            exposedBounds =
+                parent->getLocalArea (
+                    child,
+                    exposedBounds)
+                    .getIntersection (
+                        parent
+                            ->getLocalBounds());
+            if (exposedBounds.isEmpty())
+                return false;
+            child = parent;
+        }
+        return ! exposedBounds.isEmpty();
+    }
+
     mutable std::mutex textMutex;
     String title;
     String description;
@@ -883,8 +913,7 @@ void LfpOptionActionButton::
         getDescription(),
         std::move (help),
         false,
-        Component::isEnabled()
-            && isShowing(),
+        Component::isEnabled(),
         hasKeyboardFocus (false));
 }
 

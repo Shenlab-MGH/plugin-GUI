@@ -778,6 +778,189 @@ invokeLfpWindowsUiaControl (
     return finish (
         invokePattern->Invoke());
 }
+
+class LfpRetainedWindowsInvokeSession final
+{
+public:
+    LfpRetainedWindowsInvokeSession (
+        HWND windowToUse,
+        std::wstring automationIdToUse)
+        : window (windowToUse),
+          automationId (
+              std::move (
+                  automationIdToUse)),
+          worker (
+              [this]
+              {
+                  run();
+              })
+    {
+    }
+
+    ~LfpRetainedWindowsInvokeSession()
+    {
+        command.store (stopCommand);
+        if (worker.joinable())
+            worker.join();
+    }
+
+    bool isReady() const
+    {
+        return ready.load();
+    }
+
+    HRESULT getSetupResult() const
+    {
+        return setupResult.load();
+    }
+
+    void requestInvoke()
+    {
+        invokeCompleted.store (false);
+        command.store (invokeCommand);
+    }
+
+    bool hasInvokeCompleted() const
+    {
+        return invokeCompleted.load();
+    }
+
+    HRESULT getInvokeResult() const
+    {
+        return invokeResult.load();
+    }
+
+private:
+    void run()
+    {
+        const LfpScopedComApartment
+            comApartment;
+        auto result =
+            comApartment.getResult();
+        Microsoft::WRL::ComPtr<
+            IUIAutomation>
+            automation;
+        Microsoft::WRL::ComPtr<
+            IUIAutomationElement>
+            rootElement;
+        Microsoft::WRL::ComPtr<
+            IUIAutomationCondition>
+            idCondition;
+        Microsoft::WRL::ComPtr<
+            IUIAutomationElement>
+            element;
+        Microsoft::WRL::ComPtr<
+            IUIAutomationInvokePattern>
+            invokePattern;
+
+        if (SUCCEEDED (result))
+        {
+            result = CoCreateInstance (
+                CLSID_CUIAutomation,
+                nullptr,
+                CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS (
+                    &automation));
+        }
+        if (SUCCEEDED (result))
+        {
+            result = automation
+                         ->ElementFromHandle (
+                             window,
+                             &rootElement);
+            if (SUCCEEDED (result)
+                && rootElement == nullptr)
+            {
+                result = E_FAIL;
+            }
+        }
+        if (SUCCEEDED (result))
+        {
+            VARIANT expectedId;
+            VariantInit (&expectedId);
+            expectedId.vt = VT_BSTR;
+            expectedId.bstrVal =
+                SysAllocString (
+                    automationId.c_str());
+            if (expectedId.bstrVal == nullptr)
+            {
+                result = E_OUTOFMEMORY;
+            }
+            else
+            {
+                result = automation
+                             ->CreatePropertyCondition (
+                                 UIA_AutomationIdPropertyId,
+                                 expectedId,
+                                 &idCondition);
+            }
+            VariantClear (&expectedId);
+        }
+        if (SUCCEEDED (result))
+        {
+            result = rootElement
+                         ->FindFirst (
+                             TreeScope_Subtree,
+                             idCondition.Get(),
+                             &element);
+            if (SUCCEEDED (result)
+                && element == nullptr)
+            {
+                result = E_FAIL;
+            }
+        }
+        if (SUCCEEDED (result))
+        {
+            result = element
+                         ->GetCurrentPatternAs (
+                             UIA_InvokePatternId,
+                             IID_PPV_ARGS (
+                                 &invokePattern));
+            if (SUCCEEDED (result)
+                && invokePattern == nullptr)
+            {
+                result = E_NOINTERFACE;
+            }
+        }
+
+        setupResult.store (result);
+        ready.store (true);
+
+        while (true)
+        {
+            const auto requested =
+                command.exchange (
+                    noCommand);
+            if (requested == stopCommand)
+                return;
+            if (requested == invokeCommand)
+            {
+                invokeResult.store (
+                    invokePattern != nullptr
+                        ? invokePattern->Invoke()
+                        : result);
+                invokeCompleted.store (true);
+            }
+            std::this_thread::yield();
+        }
+    }
+
+    static constexpr int noCommand = 0;
+    static constexpr int invokeCommand = 1;
+    static constexpr int stopCommand = 2;
+
+    const HWND window;
+    const std::wstring automationId;
+    std::atomic<bool> ready { false };
+    std::atomic<bool>
+        invokeCompleted { false };
+    std::atomic<HRESULT>
+        setupResult { E_PENDING };
+    std::atomic<HRESULT>
+        invokeResult { E_PENDING };
+    std::atomic<int> command { noCommand };
+    std::thread worker;
+};
 #endif
 } // namespace
 
@@ -1077,6 +1260,40 @@ protected:
                 ->runDispatchLoopUntil (10);
         }
     }
+
+#if JUCE_WINDOWS
+    LfpWindowsUiaInvokeResult
+    invokeWindowsUiaFromWorker (
+        HWND window,
+        StringRef id,
+        LfpWindowsUiaAction action)
+    {
+        LfpWindowsUiaInvokeResult result;
+        std::atomic<bool> workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result = invokeLfpWindowsUiaControl (
+                    window,
+                    std::wstring (
+                        String (id)
+                            .toWideCharPointer()),
+                    action);
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return result;
+    }
+#endif
 
     /*Creates a new AudioBuffer filled with sinusoidal waves*/
     AudioBuffer<float> createBufferSinusoidal (int cycles, int numChannels, int numSamples, int amplitude)
@@ -8623,6 +8840,116 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ResetTrialsActionRecoversWhenAncestorsBecomeShowing)
+{
+    auto canvas = createAveragingCanvas();
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.reset_trials";
+    auto* reset = dynamic_cast<Button*> (
+        findLfpDescendantById (*canvas, id));
+    ASSERT_NE (reset, nullptr);
+    auto* options =
+        findLfpAncestor<LfpViewer::LfpDisplayOptions> (*reset);
+    ASSERT_NE (options, nullptr);
+
+    XmlElement restoredRoot ("ROOT");
+    options->saveParameters (&restoredRoot);
+    auto* restoredPane =
+        restoredRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (restoredPane, nullptr);
+    restoredPane->setAttribute ("trialAvg", true);
+    options->loadParameters (&restoredRoot);
+    ASSERT_TRUE (reset->isVisible());
+    ASSERT_FALSE (reset->isShowing());
+
+    canvas->addToDesktop (0);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (reset->isShowing());
+    auto* handler = reset->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    const auto retainedActions = handler->getActions();
+    LfpThreadTrackingButtonListener listener;
+    reset->addListener (&listener);
+    EXPECT_TRUE (handler->isEnabled());
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    pumpUntilButtonCallbacks (listener, 1);
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+
+    canvas->setVisible (false);
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    MessageManager::getInstance()->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    canvas->setVisible (true);
+    ASSERT_TRUE (reset->isShowing());
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    pumpUntilButtonCallbacks (listener, 2);
+    EXPECT_EQ (listener.callbackCount.load(), 2);
+
+    canvas->toggleOptionsDrawer (false);
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    MessageManager::getInstance()->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.callbackCount.load(), 2);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (reset->isShowing());
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    pumpUntilButtonCallbacks (listener, 3);
+    EXPECT_EQ (listener.callbackCount.load(), 3);
+
+    reset->setEnabled (false);
+    EXPECT_FALSE (handler->isEnabled());
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    MessageManager::getInstance()->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.callbackCount.load(), 3);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ResetTrialsActionRejectsClippedAncestorsAndRecovers)
+{
+    auto canvas = createAveragingCanvas();
+    canvas->addToDesktop (0);
+    canvas->toggleOptionsDrawer (true);
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.reset_trials";
+    auto* reset = dynamic_cast<Button*> (
+        findLfpDescendantById (*canvas, id));
+    ASSERT_NE (reset, nullptr);
+    auto* options =
+        findLfpAncestor<LfpViewer::LfpDisplayOptions> (*reset);
+    ASSERT_NE (options, nullptr);
+    options->setAveraging (true);
+    ASSERT_TRUE (reset->isShowing());
+    const auto retainedActions =
+        reset->getAccessibilityHandler()->getActions();
+    LfpThreadTrackingButtonListener listener;
+    reset->addListener (&listener);
+
+    canvas->toggleOptionsDrawer (false);
+    ASSERT_TRUE (reset->isShowing());
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    MessageManager::getInstance()->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.callbackCount.load(), 0);
+
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (reset->isShowing());
+    EXPECT_TRUE (invokeLfpActionFromWorker (
+        retainedActions, AccessibilityActionType::press));
+    pumpUntilButtonCallbacks (listener, 1);
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (listener.callbackUsedMessageThread.load());
+}
+
+TEST_F (LfpDisplayNodeTests,
         BeginAnimationResetsTrialAveragingWithoutDisplayBuffer)
 {
     auto canvas = createAveragingCanvas();
@@ -8812,6 +9139,186 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 #if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaRetainedResetTrialsInvokeHonoursDrawerClipping)
+{
+    auto canvas = createAveragingCanvas();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->toggleOptionsDrawer (true);
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.reset_trials";
+    auto* reset = dynamic_cast<Button*> (
+        findLfpDescendantById (*canvas, id));
+    ASSERT_NE (reset, nullptr);
+    auto* options =
+        findLfpAncestor<LfpViewer::LfpDisplayOptions> (*reset);
+    ASSERT_NE (options, nullptr);
+    options->setAveraging (true);
+    ASSERT_TRUE (reset->isShowing());
+    LfpThreadTrackingButtonListener listener;
+    reset->addListener (&listener);
+    const auto window =
+        static_cast<HWND> (canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+    LfpRetainedWindowsInvokeSession retained (
+        window,
+        std::wstring (
+            id.toWideCharPointer()));
+    for (int attempt = 0;
+         attempt < 100 && ! retained.isReady();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    ASSERT_TRUE (retained.isReady());
+    ASSERT_EQ (retained.getSetupResult(), S_OK);
+
+    const auto waitForInvoke =
+        [&]
+    {
+        for (int attempt = 0;
+             attempt < 100
+                 && ! retained
+                         .hasInvokeCompleted();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        ASSERT_TRUE (
+            retained.hasInvokeCompleted());
+    };
+
+    canvas->toggleOptionsDrawer (false);
+    ASSERT_TRUE (reset->isShowing());
+    retained.requestInvoke();
+    waitForInvoke();
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    EXPECT_EQ (listener.callbackCount.load(), 0);
+
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (reset->isShowing());
+    retained.requestInvoke();
+    waitForInvoke();
+    if (SUCCEEDED (
+            retained.getInvokeResult()))
+    {
+        pumpUntilButtonCallbacks (
+            listener,
+            1);
+    }
+    else
+    {
+        SCOPED_TRACE (
+            "Retained native InvokePattern became unavailable after the drawer reopened; verifying recovery through a fresh provider.");
+        EXPECT_EQ (
+            invokeWindowsUiaFromWorker (
+                window,
+                id,
+                LfpWindowsUiaAction::invoke)
+                .invokeResult,
+            S_OK);
+        pumpUntilButtonCallbacks (
+            listener,
+            1);
+    }
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaResetTrialsRecoversAfterOffscreenRestore)
+{
+    auto canvas = createAveragingCanvas();
+    canvas->setSize (1200, 800);
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.reset_trials";
+    auto* reset = dynamic_cast<Button*> (
+        findLfpDescendantById (*canvas, id));
+    ASSERT_NE (reset, nullptr);
+    auto* options =
+        findLfpAncestor<LfpViewer::LfpDisplayOptions> (*reset);
+    ASSERT_NE (options, nullptr);
+
+    XmlElement restoredRoot ("ROOT");
+    options->saveParameters (&restoredRoot);
+    auto* restoredPane =
+        restoredRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (restoredPane, nullptr);
+    restoredPane->setAttribute ("trialAvg", true);
+    options->loadParameters (&restoredRoot);
+    ASSERT_TRUE (reset->isVisible());
+    ASSERT_FALSE (reset->isShowing());
+
+    LfpThreadTrackingButtonListener listener;
+    reset->addListener (&listener);
+    canvas->addToDesktop (0);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (reset->isShowing());
+    const auto window =
+        static_cast<HWND> (canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto available =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryInvoke);
+    EXPECT_EQ (available.invokeResult, S_OK);
+    EXPECT_EQ (available.enabled, TRUE);
+    EXPECT_TRUE (available.invokePatternAvailable);
+    EXPECT_EQ (
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::invoke)
+            .invokeResult,
+        S_OK);
+    pumpUntilButtonCallbacks (listener, 1);
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+
+    canvas->toggleOptionsDrawer (false);
+    EXPECT_EQ (
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryInvoke)
+            .invokeResult,
+        E_FAIL);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (reset->isShowing());
+    EXPECT_EQ (
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::invoke)
+            .invokeResult,
+        S_OK);
+    pumpUntilButtonCallbacks (listener, 2);
+    EXPECT_EQ (listener.callbackCount.load(), 2);
+
+    reset->setEnabled (false);
+    EXPECT_EQ (
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::invoke)
+            .invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_EQ (listener.callbackCount.load(), 2);
+}
+
 TEST_F (LfpDisplayNodeTests,
         WindowsUiaInvokesResetTrialsAsAButton)
 {
