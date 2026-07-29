@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "LfpDisplayClasses.h"
+#include "LfpStableChannelIdentity.h"
 #include "LfpDisplayNode.h"
 
 namespace LfpViewer
@@ -69,7 +70,17 @@ public:
     void resized() override;
 
     /** Updates the number of displayed channels */
-    void setNumChannels (int numChannels);
+    TESTABLE void setNumChannels (int numChannels);
+
+    /** Invalidates all channel and info identity bindings. */
+    void invalidateStableChannelIdentities();
+
+    /** Binds one shared immutable identity to each channel/info pair. */
+    void bindStableChannelIdentities (
+        const std::vector<
+            std::shared_ptr<
+                const LfpStableChannelIdentity>>&
+            identities);
 
     /** Returns the number of display channels*/
     TESTABLE int getNumChannels();
@@ -126,10 +137,10 @@ public:
     TESTABLE bool getChannelsReversed();
 
     /** Reorders the displayed channels, reversed if state == true and normal if false */
-    void setChannelsReversed (bool state);
+    TESTABLE void setChannelsReversed (bool state);
 
     /** Reorders the displayed channels by depth if state == true and normal if false */
-    void orderChannelsByDepth (bool state);
+    TESTABLE void orderChannelsByDepth (bool state);
 
     /** Returns true if channels are ordered by depth */
     TESTABLE bool shouldOrderChannelsByDepth();
@@ -138,7 +149,7 @@ public:
     TESTABLE int getChannelDisplaySkipAmount();
 
     /** Set the amount of channels to skip (hide) between each that is displayed */
-    void setChannelDisplaySkipAmount (int skipAmt);
+    TESTABLE void setChannelDisplaySkipAmount (int skipAmt);
 
     /** Updates colours across channels */
     void setColours();
@@ -238,7 +249,8 @@ public:
                         Note: this parameter is NOT the index in channel[], but
                         the index of the channel in drawableChannels[].
      */
-    void toggleSingleChannel (LfpChannelTrack drawableChannel);
+    TESTABLE void toggleSingleChannel (
+        LfpChannelTrack drawableChannel);
 
     /** Reconstructs the list of drawableChannels based on ordering and filterning parameters */
     void rebuildDrawableChannelsList();

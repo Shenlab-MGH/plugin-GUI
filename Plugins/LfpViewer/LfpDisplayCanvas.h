@@ -228,7 +228,7 @@ public:
     void visibleAreaChanged();
 
     /** Selects this split display */
-    void select();
+    TESTABLE void select();
 
     /** De-selects this split display */
     void deselect();

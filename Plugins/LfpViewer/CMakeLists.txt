@@ -22,6 +22,8 @@ add_sources(
   LfpChannelDisplay.h
   LfpChannelDisplayInfo.cpp
   LfpChannelDisplayInfo.h
+  LfpStableChannelIdentity.cpp
+  LfpStableChannelIdentity.h
   LfpDisplay.cpp
   LfpDisplay.h
   LfpDisplayClasses.h

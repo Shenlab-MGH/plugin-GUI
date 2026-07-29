@@ -194,6 +194,8 @@ void LfpDisplay::updateRange (int i)
 
 void LfpDisplay::setNumChannels (int newChannelCount)
 {
+    invalidateStableChannelIdentities();
+
     if (numChans > newChannelCount)
     {
         for (int i = newChannelCount; i < numChans; i++)
@@ -334,6 +336,54 @@ void LfpDisplay::setColours()
         colourSchemeChanged = true;
 
         refresh();
+    }
+}
+
+void LfpDisplay::
+    invalidateStableChannelIdentities()
+{
+    for (auto* channel :
+         channels)
+    {
+        channel
+            ->invalidateStableChannelIdentity();
+    }
+    for (auto* info :
+         channelInfo)
+    {
+        info
+            ->invalidateStableChannelIdentity();
+    }
+}
+
+void LfpDisplay::
+    bindStableChannelIdentities (
+        const std::vector<
+            std::shared_ptr<
+                const LfpStableChannelIdentity>>&
+            identities)
+{
+    invalidateStableChannelIdentities();
+    const auto count =
+        jmin (
+            channels.size(),
+            channelInfo.size(),
+            static_cast<int> (
+                identities.size()));
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        channels[index]
+            ->bindStableChannelIdentity (
+                identities[
+                    static_cast<size_t> (
+                        index)]);
+        channelInfo[index]
+            ->bindStableChannelIdentity (
+                identities[
+                    static_cast<size_t> (
+                        index)]);
     }
 }
 

@@ -26,11 +26,13 @@
 
 #include <VisualizerWindowHeaders.h>
 
+#include <atomic>
 #include <array>
 #include <vector>
 
 #include "LfpDisplayClasses.h"
 #include "LfpDisplayNode.h"
+#include "LfpStableChannelIdentity.h"
 
 namespace LfpViewer
 {
@@ -125,6 +127,20 @@ public:
     /** Return the units string for this channel */
     const String& getUnits() const;
 
+    /** Binds a copied immutable identity for this component generation. */
+    void bindStableChannelIdentity (
+        std::shared_ptr<
+            const LfpStableChannelIdentity>
+            identity);
+
+    /** Invalidates this component as an agent mutation target. */
+    void invalidateStableChannelIdentity();
+
+    /** Returns the immutable identity currently bound to this component. */
+    TESTABLE std::shared_ptr<
+        const LfpStableChannelIdentity>
+    getStableChannelIdentity() const noexcept;
+
     /** Returns the assigned channel number for this display, relative
         to the subset of channels being drawn to the canvas */
     int getDrawableChannelNumber();
@@ -214,6 +230,10 @@ protected:
     bool isRecorded;
 
     String units;
+
+    std::shared_ptr<
+        const LfpStableChannelIdentity>
+        stableChannelIdentity;
 
     FontOptions channelFont;
 

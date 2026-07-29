@@ -1209,6 +1209,8 @@ void LfpDisplaySplitter::recordingStopped()
 void LfpDisplaySplitter::updateSettings()
 {
     isUpdating = true;
+    lfpDisplay
+        ->invalidateStableChannelIdentities();
 
     if (streamChoiceRebuildPending)
     {
@@ -1400,6 +1402,16 @@ void LfpDisplaySplitter::updateSettings()
         {
             options->setSelectedType (displayBuffer->channelMetadata[i].type);
         }
+    }
+
+    if (displayBuffer != nullptr)
+    {
+        lfpDisplay
+            ->bindStableChannelIdentities (
+                resolveStableChannelIdentities (
+                    splitID,
+                    *displayBuffer,
+                    availableBuffers));
     }
 
     lfpDisplay->rebuildDrawableChannelsList(); // calls setColours(), which calls refresh
@@ -2169,6 +2181,8 @@ bool LfpDisplaySplitter::
         && displayBuffer
                != selectedBuffer)
     {
+        lfpDisplay
+            ->invalidateStableChannelIdentities();
         displayBuffer->removeDisplay (
             splitID);
     }
@@ -2202,6 +2216,9 @@ void LfpDisplaySplitter::
     clearStreamSelection (
         const String& placeholder)
 {
+    lfpDisplay
+        ->invalidateStableChannelIdentities();
+
     if (displayBuffer != nullptr)
     {
         displayBuffer->removeDisplay (

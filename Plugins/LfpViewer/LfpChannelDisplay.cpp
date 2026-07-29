@@ -89,6 +89,39 @@ const String& LfpChannelDisplay::getUnits() const
     return units;
 }
 
+void LfpChannelDisplay::
+    bindStableChannelIdentity (
+        std::shared_ptr<
+            const LfpStableChannelIdentity>
+            identity)
+{
+    std::atomic_store_explicit (
+        &stableChannelIdentity,
+        std::move (
+            identity),
+        std::memory_order_release);
+}
+
+void LfpChannelDisplay::
+    invalidateStableChannelIdentity()
+{
+    std::atomic_store_explicit (
+        &stableChannelIdentity,
+        std::shared_ptr<
+            const LfpStableChannelIdentity>(),
+        std::memory_order_release);
+}
+
+std::shared_ptr<
+    const LfpStableChannelIdentity>
+LfpChannelDisplay::
+    getStableChannelIdentity() const noexcept
+{
+    return std::atomic_load_explicit (
+        &stableChannelIdentity,
+        std::memory_order_acquire);
+}
+
 void LfpChannelDisplay::setEnabledState (bool state)
 {
     /*if (state)
