@@ -291,6 +291,12 @@ public:
     /** Sets the channel to use for display triggering */
     void setTriggerChannel (int);
 
+    /** Returns the channel used for display triggering, or -1 for continuous scrolling. */
+    int getTriggerChannel() const noexcept
+    {
+        return triggerChannel;
+    }
+
     /** Returns true if the display is in triggered mode */
     bool isInTriggeredMode() { return triggerChannel > -1; }
 

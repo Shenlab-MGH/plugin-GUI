@@ -231,6 +231,10 @@ public:
     void setChannelDisplaySkipSelection (
         int itemId);
 
+    /** Applies a trigger-source item id and refreshes display and accessibility state. */
+    void setTriggerSourceSelection (
+        int itemId);
+
     /** Sets whether channel order should be reversed */
     void setChannelsReversed (bool);
 
@@ -419,7 +423,9 @@ private:
     // TRIGGERED DISPLAY SECTION
     std::unique_ptr<GroupComponent> triggeredDisplayGroup;
     
-    std::unique_ptr<ComboBox> triggerSourceSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        triggerSourceSelection;
     std::unique_ptr<Label> triggerSourceLabel;
 
     std::unique_ptr<UtilityButton> averageSignalButton;

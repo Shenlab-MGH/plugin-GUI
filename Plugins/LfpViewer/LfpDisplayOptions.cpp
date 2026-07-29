@@ -2007,15 +2007,65 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
         triggerSources.add (String (k));
     }
 
-    triggerSourceSelection = std::make_unique<ComboBox> ("Trigger Source");
+    triggerSourceSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    triggerSourceSelection->setName (
+        "Trigger Source");
+    const auto triggerSourceDescription =
+        "Choose the TTL line that triggers LFP display "
+        + String (displayNumber)
+        + ": None uses continuous scrolling; 1 through 16 starts each triggered view from the corresponding TTL event line. This changes display timing only; acquisition and recording are unaffected.";
+    applyLfpDisplayParameterMetadata (
+        *triggerSourceSelection,
+        *processor,
+        displayNumber,
+        "trigger_source",
+        "LFP display "
+            + String (displayNumber)
+            + " trigger source",
+        triggerSourceDescription);
     for (int i = 0; i < triggerSources.size(); i++)
         triggerSourceSelection->addItem (triggerSources[i], i + 1);
-    triggerSourceSelection->setSelectedId (1, sendNotification);
+    int triggerSourceChoiceIndex = 0;
+    for (PopupMenu::MenuItemIterator
+             iterator (
+                 *triggerSourceSelection
+                      ->getRootMenu(),
+                 false);
+         iterator.next();)
+    {
+        const auto suffix =
+            triggerSourceChoiceIndex == 0
+                ? String ("none")
+                : "line_"
+                      + String (
+                          triggerSourceChoiceIndex);
+        iterator
+            .getItem()
+            .accessibilityId =
+            triggerSourceSelection
+                ->getComponentID()
+            + ".choice."
+            + suffix;
+        ++triggerSourceChoiceIndex;
+    }
+    triggerSourceSelection->setSelectedId (
+        1,
+        dontSendNotification);
+    triggerSourceSelection->setEditableText (
+        false);
+    triggerSourceSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
     triggerSourceSelection->addListener (this);
     extendedOptions->addAndMakeVisible (triggerSourceSelection.get());
+    triggerSourceSelection
+        ->synchroniseAccessibilityState();
 
     triggerSourceLabel = std::make_unique<Label> ("TriggerSourceLabel", "Trigger channel:");
     triggerSourceLabel->setFont (labelFont);
+    triggerSourceLabel->setAccessible (false);
     extendedOptions->addAndMakeVisible (triggerSourceLabel.get());
 
     // average signal
@@ -2869,6 +2919,13 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         return;
     }
 
+    if (cb == triggerSourceSelection.get())
+    {
+        setTriggerSourceSelection (
+            cb->getSelectedId());
+        return;
+    }
+
     if (canvasSplit->getNumChannels() == 0)
         return;
 
@@ -3060,12 +3117,6 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         lfpDisplay->setChannelHeight (lfpDisplay->getChannelHeight());
         canvasSplit->redraw();
     }
-    else if (cb == triggerSourceSelection.get())
-    {
-        canvasSplit->setTriggerChannel (cb->getSelectedId() - 2);
-        processor->setParameter (cb->getSelectedId() - 2, float (canvasSplit->splitID));
-    }
-
     if (cb == timebaseSelection.get()
         || cb == rangeSelection.get()
         || cb == spreadSelection.get())
@@ -3146,6 +3197,31 @@ void LfpDisplayOptions::
         ->setChannelDisplaySkipAmount (
             1 << (validId - 1));
     channelDisplaySkipSelection
+        ->synchroniseAccessibilityState();
+}
+
+void LfpDisplayOptions::
+    setTriggerSourceSelection (
+        int itemId)
+{
+    const auto validId =
+        itemId >= 1
+                && itemId
+                       <= triggerSources.size()
+            ? itemId
+            : 1;
+    triggerSourceSelection
+        ->setSelectedId (
+            validId,
+            dontSendNotification);
+    const auto triggerLine =
+        validId - 2;
+    canvasSplit->setTriggerChannel (
+        triggerLine);
+    processor->setParameter (
+        triggerLine,
+        float (canvasSplit->splitID));
+    triggerSourceSelection
         ->synchroniseAccessibilityState();
 }
 
@@ -3481,9 +3557,10 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
                     1));
 
             // TRIGGER SOURCE
-            triggerSourceSelection->setSelectedId (xmlNode->getIntAttribute ("triggerSource"), dontSendNotification);
-            canvasSplit->setTriggerChannel (triggerSourceSelection->getSelectedId() - 2);
-            processor->setParameter (triggerSourceSelection->getSelectedId() - 2, float (canvasSplit->splitID));
+            setTriggerSourceSelection (
+                xmlNode->getIntAttribute (
+                    "triggerSource",
+                    1));
 
             //LOGD("    Set trigger source in ", MS_FROM_START, " milliseconds");
             start = Time::getHighResolutionTicks();

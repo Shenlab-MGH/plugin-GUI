@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <limits>
 #include <thread>
+#include <tuple>
 
 #if JUCE_WINDOWS
 #include <UIAutomation.h>
@@ -7070,6 +7071,800 @@ TEST_F (LfpDisplayNodeTests,
             }),
         3);
 }
+
+TEST_F (LfpDisplayNodeTests,
+        ExposesTriggerSourceForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".trigger_source";
+        auto* triggerSource =
+            dynamic_cast<
+                MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (
+            triggerSource,
+            nullptr)
+            << id;
+        EXPECT_EQ (
+            triggerSource->getName(),
+            "Trigger Source");
+        EXPECT_EQ (
+            triggerSource->getNumItems(),
+            17);
+        for (int choiceIndex = 0;
+             choiceIndex < 17;
+             ++choiceIndex)
+        {
+            EXPECT_EQ (
+                triggerSource->getItemText (
+                    choiceIndex),
+                choiceIndex == 0
+                    ? String ("None")
+                    : String (choiceIndex));
+        }
+
+        int choiceIndex = 0;
+        for (PopupMenu::MenuItemIterator
+                 iterator (
+                     *triggerSource
+                          ->getRootMenu(),
+                     false);
+             iterator.next();)
+        {
+            const auto suffix =
+                choiceIndex == 0
+                    ? String ("none")
+                    : "line_"
+                          + String (
+                              choiceIndex);
+            EXPECT_EQ (
+                iterator
+                    .getItem()
+                    .accessibilityId,
+                id
+                    + ".choice."
+                    + suffix);
+            ++choiceIndex;
+        }
+        EXPECT_EQ (choiceIndex, 17);
+
+        auto* handler =
+            triggerSource
+                ->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (displayNumber)
+                + " trigger source");
+        const auto description =
+            "Choose the TTL line that triggers LFP display "
+            + String (displayNumber)
+            + ": None uses continuous scrolling; 1 through 16 starts each triggered view from the corresponding TTL event line. This changes display timing only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        auto* value =
+            handler->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_FALSE (value->isReadOnly());
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            "None");
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::press));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::showMenu));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::expand));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::collapse));
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *triggerSource)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    std::vector<Label*> labels;
+    collectLfpDescendants (
+        *canvas,
+        labels);
+    for (const auto* label : labels)
+    {
+        if (label->getName()
+            == "TriggerSourceLabel")
+        {
+            EXPECT_FALSE (
+                label->isAccessible());
+        }
+    }
+    EXPECT_EQ (
+        std::count_if (
+            labels.begin(),
+            labels.end(),
+            [] (const Label* label)
+            {
+                return label->getName()
+                       == "TriggerSourceLabel";
+            }),
+        3);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        TriggerSourceWorkerValuesTrackExactModelAndSurviveTeardown)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.trigger_source";
+    auto* triggerSource =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (triggerSource, nullptr);
+    ASSERT_NE (split, nullptr);
+    auto liveHandler =
+        triggerSource
+            ->createAccessibilityHandler();
+    ASSERT_NE (liveHandler, nullptr);
+    auto* value =
+        liveHandler
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    const auto writeFromWorker =
+        [&] (StringRef newValue)
+    {
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                value->setValueAsString (
+                    String (newValue));
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+    };
+
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    LfpThreadTrackingComboBoxListener
+        listener;
+    triggerSource->addListener (&listener);
+    writeFromWorker ("8");
+    triggerSource->removeListener (&listener);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_EQ (
+        triggerSource->getSelectedId(),
+        9);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "8");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        7);
+    EXPECT_TRUE (
+        split->isInTriggeredMode());
+
+    const std::array<
+        std::tuple<
+            String,
+            int,
+            int,
+            bool>,
+        4>
+        cases {
+            std::tuple<String, int, int, bool> {
+                "None", 1, -1, false },
+            std::tuple<String, int, int, bool> {
+                "1", 2, 0, true },
+            std::tuple<String, int, int, bool> {
+                "8", 9, 7, true },
+            std::tuple<String, int, int, bool> {
+                "16", 17, 15, true }
+        };
+    for (const auto& [
+             text,
+             selectedId,
+             triggerLine,
+             triggered] :
+         cases)
+    {
+        writeFromWorker (text);
+        EXPECT_EQ (
+            triggerSource->getSelectedId(),
+            selectedId);
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            text);
+        EXPECT_EQ (
+            split->getTriggerChannel(),
+            triggerLine);
+        EXPECT_EQ (
+            split->isInTriggeredMode(),
+            triggered);
+    }
+
+    triggerSource->setEnabled (false);
+    writeFromWorker ("None");
+    EXPECT_EQ (
+        triggerSource->getSelectedId(),
+        17);
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        15);
+
+    triggerSource->setEnabled (true);
+    triggerSource
+        ->synchroniseAccessibilityState();
+    auto retainedHandler =
+        triggerSource
+            ->createAccessibilityHandler();
+    ASSERT_NE (retainedHandler, nullptr);
+    auto* retainedValue =
+        retainedHandler
+            ->getValueInterface();
+    ASSERT_NE (retainedValue, nullptr);
+    const auto retainedActions =
+        retainedHandler
+            ->getActions();
+
+    canvas.reset();
+    std::atomic<bool>
+        workerReturned { false };
+    bool stalePressFound = false;
+    bool staleShowMenuFound = false;
+    std::thread staleWorker (
+        [&]
+        {
+            retainedValue
+                ->setValueAsString (
+                    "None");
+            stalePressFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        press);
+            staleShowMenuFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        showMenu);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        workerReturned);
+    EXPECT_EQ (
+        retainedValue
+            ->getCurrentValueAsString(),
+        "16");
+    EXPECT_TRUE (stalePressFound);
+    EXPECT_TRUE (staleShowMenuFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        TriggerSourceValueSurvivesZeroChannelsBufferRemovalAndXmlRestore)
+{
+    auto zeroChannelTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            zeroChannelProcessor
+                ->getNodeId())
+        + ".lfp.display_1.trigger_source";
+    auto* triggerSource =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (triggerSource, nullptr);
+    ASSERT_NE (split, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *triggerSource);
+    ASSERT_NE (options, nullptr);
+    auto* value =
+        triggerSource
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    value->setValueAsString ("16");
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "16");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        15);
+    canvas->removeBufferForDisplay (0);
+    value->setValueAsString ("None");
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "None");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        -1);
+    EXPECT_FALSE (
+        split->isInTriggeredMode());
+
+    value->setValueAsString ("8");
+    XmlElement savedRoot ("ROOT");
+    options->saveParameters (&savedRoot);
+    auto* savedPane =
+        savedRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (savedPane, nullptr);
+    EXPECT_EQ (
+        savedPane->getIntAttribute (
+            "triggerSource"),
+        9);
+
+    value->setValueAsString ("None");
+    LfpThreadTrackingComboBoxListener
+        listener;
+    triggerSource->addListener (&listener);
+    options->loadParameters (&savedRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "8");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        7);
+    EXPECT_TRUE (
+        split->isInTriggeredMode());
+
+    XmlElement noneRoot (savedRoot);
+    auto* nonePane =
+        noneRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (nonePane, nullptr);
+    nonePane->setAttribute (
+        "triggerSource",
+        1);
+    options->loadParameters (&noneRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "None");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        -1);
+
+    XmlElement missingRoot (savedRoot);
+    auto* missingPane =
+        missingRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (missingPane, nullptr);
+    missingPane->removeAttribute (
+        "triggerSource");
+    options->loadParameters (
+        &missingRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "None");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        -1);
+
+    XmlElement malformedRoot (
+        savedRoot);
+    auto* malformedPane =
+        malformedRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (malformedPane, nullptr);
+    malformedPane->setAttribute (
+        "triggerSource",
+        999);
+    options->loadParameters (
+        &malformedRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "None");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        -1);
+
+    XmlElement legacyZeroRoot (
+        savedRoot);
+    auto* legacyZeroPane =
+        legacyZeroRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (legacyZeroPane, nullptr);
+    legacyZeroPane->setAttribute (
+        "triggerSource",
+        0);
+    options->loadParameters (
+        &legacyZeroRoot);
+    triggerSource->removeListener (
+        &listener);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+    EXPECT_EQ (
+        triggerSource->getSelectedId(),
+        1);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "None");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        -1);
+    EXPECT_FALSE (
+        split->isInTriggeredMode());
+}
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWritesAndSelectsTriggerSource)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.trigger_source";
+    auto* triggerSource =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (triggerSource, nullptr);
+    ASSERT_NE (split, nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto runAction =
+        [&] (StringRef targetId,
+             LfpWindowsUiaAction action,
+             StringRef newValue = {})
+    {
+        LfpWindowsUiaInvokeResult result;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (targetId)
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (newValue)
+                                .toWideCharPointer()));
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return result;
+    };
+
+    const auto description =
+        L"Choose the TTL line that triggers LFP display 1: None uses continuous scrolling; 1 through 16 starts each triggered view from the corresponding TTL event line. This changes display timing only; acquisition and recording are unaffected.";
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 trigger source");
+    EXPECT_EQ (
+        initialResult.help,
+        description);
+    EXPECT_TRUE (
+        initialResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult.valueReadOnly,
+        FALSE);
+    EXPECT_TRUE (
+        initialResult
+            .expandCollapsePatternAvailable);
+    EXPECT_TRUE (
+        initialResult
+            .invokePatternAvailable);
+    EXPECT_EQ (
+        initialResult.value,
+        L"None");
+
+    const auto setValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            "8");
+    EXPECT_EQ (
+        setValueResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        setValueResult.value,
+        L"8");
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        7);
+
+    const auto expandResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand);
+    EXPECT_EQ (
+        expandResult.focusResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.expansionState,
+        ExpandCollapseState_Expanded);
+    EXPECT_TRUE (
+        triggerSource
+            ->isPopupActive());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (50);
+    const auto choiceId =
+        id
+        + ".choice.line_16";
+    const auto selectResult =
+        runAction (
+            choiceId,
+            LfpWindowsUiaAction::
+                select);
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (50);
+    EXPECT_EQ (
+        selectResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        selectResult.controlType,
+        UIA_MenuItemControlTypeId);
+    EXPECT_TRUE (
+        selectResult
+            .selectionItemPatternAvailable);
+    EXPECT_EQ (
+        triggerSource
+            ->getSelectedId(),
+        17);
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        15);
+
+    const auto reexpandedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand);
+    EXPECT_EQ (
+        reexpandedResult.invokeResult,
+        S_OK);
+    const auto selectedChoiceResult =
+        runAction (
+            choiceId,
+            LfpWindowsUiaAction::
+                querySelection);
+    EXPECT_EQ (
+        selectedChoiceResult.invokeResult,
+        S_OK);
+    EXPECT_TRUE (
+        selectedChoiceResult.selected);
+    const auto collapseResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                collapse);
+    EXPECT_EQ (
+        collapseResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        collapseResult.expansionState,
+        ExpandCollapseState_Collapsed);
+    EXPECT_FALSE (
+        triggerSource
+            ->isPopupActive());
+
+    triggerSource->setEnabled (false);
+    const auto disabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            "None");
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        UIA_E_ELEMENTNOTENABLED);
+    EXPECT_EQ (
+        split->getTriggerChannel(),
+        15);
+    triggerSource->setEnabled (true);
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix
+                + "2.trigger_source",
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
+        E_FAIL);
+
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        closedDrawerResult.invokeResult,
+        E_FAIL);
+}
+#endif
 
 TEST_F (LfpDisplayNodeTests,
         SpikeRasterWorkerValuesCanonicaliseAndKeepOffsetOwnershipCoherent)
