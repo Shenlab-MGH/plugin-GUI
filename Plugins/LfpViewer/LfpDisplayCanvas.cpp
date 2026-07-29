@@ -250,6 +250,13 @@ void LfpDisplayCanvas::resized()
         else
             displaySplits[i]->options->setBounds (0, getHeight() - 60, getWidth(), 60);
     }
+
+    for (auto* split :
+         displaySplits)
+    {
+        split->timescale
+            ->refreshPaneSelectorAccessibilityState();
+    }
 }
 
 void LfpDisplayCanvas::beginAnimation()
@@ -308,6 +315,13 @@ void LfpDisplayCanvas::select (LfpDisplaySplitter* splitter)
     }
 
     splitter->options->resized();
+
+    for (auto* split :
+         displaySplits)
+    {
+        split->timescale
+            ->refreshPaneSelectorAccessibilityState();
+    }
 }
 
 void LfpDisplayCanvas::setLayout (SplitLayouts sl)
@@ -342,6 +356,28 @@ bool LfpDisplayCanvas::canSelect (int splitID)
     }
 
     return false;
+}
+
+bool LfpDisplayCanvas::isPaneActive (
+    int splitID) const noexcept
+{
+    if (splitID < 0
+        || splitID >= displaySplits.size())
+    {
+        return false;
+    }
+
+    if (selectedLayout == SINGLE)
+        return splitID == 0;
+
+    const auto visiblePaneCount =
+        selectedLayout == TWO_VERT
+                || selectedLayout == TWO_HORZ
+            ? 2
+            : 3;
+    return splitID < visiblePaneCount
+           && displaySplits[splitID]
+                  ->getSelectedState();
 }
 
 void LfpDisplayCanvas::mouseMove (const MouseEvent& e)
@@ -743,7 +779,10 @@ LfpDisplaySplitter::LfpDisplaySplitter (LfpDisplayNode* node,
 {
     viewport = std::make_unique<LfpViewport> (this);
     lfpDisplay = std::make_unique<LfpDisplay> (this, viewport.get());
-    timescale = std::make_unique<LfpTimescale> (this, lfpDisplay.get());
+    timescale = std::make_unique<LfpTimescale> (
+        this,
+        lfpDisplay.get(),
+        processor->getNodeId());
     options = std::make_unique<LfpDisplayOptions> (canvas, this, timescale.get(), lfpDisplay.get(), node);
 
     streamSelection =
@@ -940,6 +979,8 @@ void LfpDisplaySplitter::select()
         canvas->select (this);
     }
 
+    timescale
+        ->refreshPaneSelectorAccessibilityState();
     repaint();
 }
 
@@ -947,6 +988,8 @@ void LfpDisplaySplitter::deselect()
 {
     isSelected = false;
 
+    timescale
+        ->refreshPaneSelectorAccessibilityState();
     repaint();
 }
 

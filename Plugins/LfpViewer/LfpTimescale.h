@@ -34,6 +34,8 @@
 namespace LfpViewer
 {
 
+struct LfpPaneSelectorAccessibilityState;
+
 /**
  
     Displays the timescale of the LfpDisplaySplitter in the viewport.
@@ -44,10 +46,10 @@ class LfpTimescale : public Component,
 {
 public:
     /** Constructor */
-    LfpTimescale (LfpDisplaySplitter*, LfpDisplay*);
+    LfpTimescale (LfpDisplaySplitter*, LfpDisplay*, int nodeId);
 
     /** Destructor */
-    ~LfpTimescale() {}
+    ~LfpTimescale() override;
 
     /** Renders timescale*/
     void paint (Graphics& g) override;
@@ -61,6 +63,9 @@ public:
     void mouseDown (const MouseEvent& e) override;
     void mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w) override;
     bool keyPressed (const KeyPress& key) override;
+
+    /** Refreshes the thread-safe UI automation snapshot for this pane selector. */
+    void refreshPaneSelectorAccessibilityState();
 
     /** Changes the time interval*/
     void setTimebase (float t, float offset = 0.0f);
@@ -77,7 +82,15 @@ public:
     /** Timer callback -- used to throttle scrolling */
     void timerCallback() override;
 
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
 private:
+    void enablementChanged() override;
+    void focusGained (FocusChangeType cause) override;
+    void focusLost (FocusChangeType cause) override;
+
     LfpDisplaySplitter* canvasSplit;
     LfpDisplay* lfpDisplay;
 
@@ -98,8 +111,15 @@ private:
     Array<bool> isMajor;
     Array<float> fractionWidth;
 
+    std::shared_ptr<
+        LfpPaneSelectorAccessibilityState>
+        paneSelectorAccessibilityState;
+
     /** Updates timer offeset according to delta value */
     bool scrollTimescale (int delta);
+
+    friend struct
+        LfpPaneSelectorAccessibilityState;
 };
 
 }; // namespace LfpViewer

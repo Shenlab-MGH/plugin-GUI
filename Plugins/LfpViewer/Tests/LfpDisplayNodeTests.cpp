@@ -2204,6 +2204,865 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesPaneSelectorForEveryDisplay)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto help =
+        "Select LFP display %d as the active pane. In multi-pane layouts, the active pane shows its options and receives Space-bar pause commands. This changes display focus only; acquisition and recording are unaffected.";
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".pane_selector";
+        auto* selector =
+            findLfpDescendantById (
+                *canvas,
+                id);
+        ASSERT_NE (
+            selector,
+            nullptr)
+            << id;
+        auto* timescale =
+            dynamic_cast<
+                LfpViewer::
+                    LfpTimescale*> (
+                selector);
+        ASSERT_NE (
+            timescale,
+            nullptr);
+        auto* handler =
+            timescale
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                radioButton);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (
+                    displayNumber)
+                + " selector");
+        EXPECT_EQ (
+            handler->getDescription(),
+            String::formatted (
+                help,
+                displayNumber));
+        EXPECT_EQ (
+            handler->getHelp(),
+            String::formatted (
+                help,
+                displayNumber));
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (
+            value,
+            nullptr);
+        EXPECT_TRUE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            displayIndex == 0
+                ? "Selected"
+                : "Not selected");
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        toggle));
+        EXPECT_EQ (
+            timescale->isShowing(),
+            displayIndex == 0);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PaneSelectorWorkerSelectsOnePaneAndRoutesOptionsAndSpace)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::
+                    THREE_HORZ,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+
+    EXPECT_TRUE (
+        canvas->isPaneActive (0));
+    EXPECT_FALSE (
+        canvas->isPaneActive (1));
+    EXPECT_FALSE (
+        canvas->isPaneActive (2));
+    EXPECT_TRUE (
+        splitters[0]
+            ->options
+            ->isVisible());
+    EXPECT_FALSE (
+        splitters[1]
+            ->options
+            ->isVisible());
+    EXPECT_FALSE (
+        splitters[2]
+            ->options
+            ->isVisible());
+
+    auto* handler =
+        splitters[1]
+            ->timescale
+            ->getAccessibilityHandler();
+    ASSERT_NE (
+        handler,
+        nullptr);
+    const auto actions =
+        handler->getActions();
+    EXPECT_TRUE (
+        invokeLfpActionFromWorker (
+            actions,
+            AccessibilityActionType::
+                press));
+
+    EXPECT_FALSE (
+        canvas->isPaneActive (0));
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+    EXPECT_FALSE (
+        canvas->isPaneActive (2));
+    EXPECT_FALSE (
+        splitters[0]
+            ->getSelectedState());
+    EXPECT_TRUE (
+        splitters[1]
+            ->getSelectedState());
+    EXPECT_FALSE (
+        splitters[2]
+            ->getSelectedState());
+    EXPECT_FALSE (
+        splitters[0]
+            ->options
+            ->isVisible());
+    EXPECT_TRUE (
+        splitters[1]
+            ->options
+            ->isVisible());
+    EXPECT_FALSE (
+        splitters[2]
+            ->options
+            ->isVisible());
+    EXPECT_EQ (
+        splitters[0]
+            ->timescale
+            ->getAccessibilityHandler()
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Not selected");
+    EXPECT_EQ (
+        handler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Selected");
+
+    EXPECT_TRUE (
+        canvas->keyPressed (
+            KeyPress (
+                KeyPress::spaceKey,
+                ModifierKeys(),
+                ' ')));
+    EXPECT_FALSE (
+        splitters[0]
+            ->lfpDisplay
+            ->isPaused());
+    EXPECT_TRUE (
+        splitters[1]
+            ->lfpDisplay
+            ->isPaused());
+    EXPECT_FALSE (
+        splitters[2]
+            ->lfpDisplay
+            ->isPaused());
+
+    EXPECT_TRUE (
+        invokeLfpActionFromWorker (
+            actions,
+            AccessibilityActionType::
+                press));
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PaneSelectorTracksSingleAndHiddenPaneLayoutTransitions)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::
+                    THREE_VERT,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+    ASSERT_TRUE (
+        invokeLfpActionFromWorker (
+            splitters[1]
+                ->timescale
+                ->getAccessibilityHandler()
+                ->getActions(),
+            AccessibilityActionType::
+                press));
+    ASSERT_TRUE (
+        splitters[1]
+            ->getSelectedState());
+
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::SINGLE);
+    EXPECT_TRUE (
+        canvas->isPaneActive (0));
+    EXPECT_FALSE (
+        canvas->isPaneActive (1));
+    EXPECT_FALSE (
+        canvas->isPaneActive (2));
+    EXPECT_EQ (
+        splitters[0]
+            ->timescale
+            ->getAccessibilityHandler()
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Selected");
+    EXPECT_EQ (
+        splitters[1]
+            ->timescale
+            ->getAccessibilityHandler()
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Not selected");
+    EXPECT_TRUE (
+        splitters[1]
+            ->getSelectedState());
+
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::
+                THREE_HORZ);
+    EXPECT_FALSE (
+        canvas->isPaneActive (0));
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+    EXPECT_FALSE (
+        canvas->isPaneActive (2));
+
+    ASSERT_TRUE (
+        invokeLfpActionFromWorker (
+            splitters[2]
+                ->timescale
+                ->getAccessibilityHandler()
+                ->getActions(),
+            AccessibilityActionType::
+                press));
+    ASSERT_TRUE (
+        canvas->isPaneActive (2));
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::
+                TWO_HORZ);
+    EXPECT_TRUE (
+        canvas->isPaneActive (0));
+    EXPECT_FALSE (
+        canvas->isPaneActive (1));
+    EXPECT_FALSE (
+        canvas->isPaneActive (2));
+    EXPECT_FALSE (
+        splitters[2]
+            ->isVisible());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PaneSelectorMatchesTimescaleWaveformStreamAndZeroChannelPaths)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::
+                    THREE_HORZ,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+
+    const auto mouseDown =
+        [] (Component& component)
+    {
+        const auto now =
+            Time::getCurrentTime();
+        MouseEvent event (
+            Desktop::getInstance()
+                .getMainMouseSource(),
+            Point<float> (10.0f, 10.0f),
+            ModifierKeys (
+                ModifierKeys::
+                    leftButtonModifier),
+            1.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            &component,
+            &component,
+            now,
+            Point<float> (10.0f, 10.0f),
+            now,
+            1,
+            false);
+        component.mouseDown (
+            event);
+    };
+
+    mouseDown (
+        *splitters[1]
+             ->timescale);
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+
+    mouseDown (
+        *splitters[0]
+             ->lfpDisplay);
+    EXPECT_TRUE (
+        canvas->isPaneActive (0));
+
+    auto* stream =
+        splitters[2]
+            ->streamSelection
+            .get();
+    ASSERT_NE (
+        stream,
+        nullptr);
+    const auto streamId =
+        stream->getItemId (0);
+    ASSERT_GT (
+        streamId,
+        0);
+    stream->setSelectedId (
+        0,
+        dontSendNotification);
+    stream->setSelectedId (
+        streamId,
+        sendNotification);
+    for (int attempt = 0;
+         attempt < 100
+             && ! canvas
+                       ->isPaneActive (2);
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (
+                10);
+    }
+    EXPECT_TRUE (
+        canvas->isPaneActive (2));
+
+    auto zeroChannelTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto zeroCanvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::
+                SplitLayouts::
+                    TWO_HORZ,
+            false);
+    zeroCanvas->updateSettings();
+    zeroCanvas->setSize (
+        900,
+        800);
+    zeroCanvas->addToDesktop (0);
+    zeroCanvas->setVisible (true);
+    const auto zeroSplitters =
+        getDisplaySplitters (
+            *zeroCanvas);
+    ASSERT_EQ (
+        zeroSplitters.size(),
+        3);
+    EXPECT_EQ (
+        zeroChannelProcessor
+            ->getNumInputs(),
+        0);
+    EXPECT_TRUE (
+        invokeLfpActionFromWorker (
+            zeroSplitters[1]
+                ->timescale
+                ->getAccessibilityHandler()
+                ->getActions(),
+            AccessibilityActionType::
+                press));
+    EXPECT_TRUE (
+        zeroCanvas
+            ->isPaneActive (1));
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PaneSelectorRetainedActionsHonourLatestAvailabilityAndDestruction)
+{
+    AccessibilityActions
+        retainedActions;
+    {
+        auto canvas =
+            std::make_unique<
+                LfpViewer::
+                    LfpDisplayCanvas> (
+                processor,
+                LfpViewer::
+                    SplitLayouts::
+                        TWO_VERT,
+                false);
+        canvas->updateSettings();
+        canvas->setSize (900, 800);
+        canvas->addToDesktop (0);
+        canvas->setVisible (true);
+        const auto splitters =
+            getDisplaySplitters (
+                *canvas);
+        ASSERT_EQ (
+            splitters.size(),
+            3);
+        auto* handler =
+            splitters[1]
+                ->timescale
+                ->getAccessibilityHandler();
+        ASSERT_NE (
+            handler,
+            nullptr);
+        retainedActions =
+            handler->getActions();
+
+        std::atomic<bool>
+            workerReturned { false };
+        bool invoked = false;
+        std::thread worker (
+            [&]
+            {
+                invoked =
+                    retainedActions.invoke (
+                        AccessibilityActionType::
+                            press);
+                workerReturned.store (
+                    true);
+            });
+        splitters[1]
+            ->timescale
+            ->setEnabled (
+                false);
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (
+                    10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        EXPECT_TRUE (invoked);
+        EXPECT_TRUE (
+            canvas->isPaneActive (0));
+
+        splitters[1]
+            ->timescale
+            ->setEnabled (
+                true);
+        const auto originalBounds =
+            splitters[1]
+                ->timescale
+                ->getBounds();
+        splitters[1]
+            ->timescale
+            ->setBounds (
+                -originalBounds
+                     .getWidth()
+                    - 10,
+                originalBounds
+                    .getY(),
+                originalBounds
+                    .getWidth(),
+                originalBounds
+                    .getHeight());
+        EXPECT_TRUE (
+            invokeLfpActionFromWorker (
+                retainedActions,
+                AccessibilityActionType::
+                    press));
+        EXPECT_TRUE (
+            canvas->isPaneActive (0));
+        splitters[1]
+            ->timescale
+            ->setBounds (
+                originalBounds);
+
+        canvas->setLayout (
+            LfpViewer::
+                SplitLayouts::SINGLE);
+        EXPECT_TRUE (
+            invokeLfpActionFromWorker (
+                retainedActions,
+                AccessibilityActionType::
+                    press));
+        EXPECT_TRUE (
+            canvas->isPaneActive (0));
+        EXPECT_FALSE (
+            canvas->isPaneActive (1));
+    }
+
+    EXPECT_TRUE (
+        invokeLfpActionFromWorker (
+            retainedActions,
+            AccessibilityActionType::
+                press));
+
+    auto replacement =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::
+                    TWO_VERT,
+            false);
+    replacement->updateSettings();
+    replacement->setSize (
+        900,
+        800);
+    replacement->addToDesktop (0);
+    replacement->setVisible (true);
+    ASSERT_TRUE (
+        replacement
+            ->isPaneActive (0));
+    EXPECT_TRUE (
+        invokeLfpActionFromWorker (
+            retainedActions,
+            AccessibilityActionType::
+                press));
+    EXPECT_TRUE (
+        replacement
+            ->isPaneActive (0));
+    EXPECT_FALSE (
+        replacement
+            ->isPaneActive (1));
+}
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaSelectsPaneWithoutHidingExistingPaneControls)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::
+                    THREE_HORZ,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 900);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->setAlwaysOnTop (
+        true);
+    canvas->toFront (false);
+    ASSERT_TRUE (
+        canvas->isShowing());
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto firstId =
+        prefix
+        + "1.pane_selector";
+    const auto secondId =
+        prefix
+        + "2.pane_selector";
+    const auto window =
+        static_cast<HWND> (
+            canvas
+                ->getWindowHandle());
+    ASSERT_NE (
+        window,
+        nullptr);
+
+    const auto initialResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            firstId,
+            LfpWindowsUiaAction::
+                querySelection);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_RadioButtonControlTypeId);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 selector");
+    EXPECT_EQ (
+        initialResult.help,
+        L"Select LFP display 1 as the active pane. In multi-pane layouts, the active pane shows its options and receives Space-bar pause commands. This changes display focus only; acquisition and recording are unaffected.");
+    EXPECT_TRUE (
+        initialResult
+            .selectionItemPatternAvailable);
+    EXPECT_TRUE (
+        initialResult
+            .invokePatternAvailable);
+    EXPECT_FALSE (
+        initialResult
+            .togglePatternAvailable);
+    EXPECT_TRUE (
+        initialResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult
+            .valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        initialResult.value,
+        L"Selected");
+    EXPECT_EQ (
+        initialResult.selected,
+        TRUE);
+
+    const auto selectResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            secondId,
+            LfpWindowsUiaAction::
+                select);
+    EXPECT_EQ (
+        selectResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        selectResult.selected,
+        TRUE);
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+    EXPECT_TRUE (
+        splitters[1]
+            ->options
+            ->isVisible());
+
+    const auto secondValue =
+        invokeWindowsUiaFromWorker (
+            window,
+            secondId,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        secondValue.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        secondValue.value,
+        L"Selected");
+    const auto firstSelection =
+        invokeWindowsUiaFromWorker (
+            window,
+            firstId,
+            LfpWindowsUiaAction::
+                querySelection);
+    EXPECT_EQ (
+        firstSelection.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        firstSelection.selected,
+        FALSE);
+
+    const auto streamResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            prefix
+                + "2.stream",
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        streamResult.invokeResult,
+        S_OK);
+    const auto timebaseResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            prefix
+                + "2.timebase",
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        timebaseResult.invokeResult,
+        S_OK);
+    const auto pauseResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            prefix
+                + "2.pause",
+            LfpWindowsUiaAction::
+                queryToggle);
+    EXPECT_EQ (
+        pauseResult.invokeResult,
+        S_OK);
+
+    const auto invokeResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            prefix
+                + "3.pane_selector",
+            LfpWindowsUiaAction::
+                invoke);
+    EXPECT_EQ (
+        invokeResult.invokeResult,
+        S_OK);
+    EXPECT_TRUE (
+        canvas->isPaneActive (2));
+    const auto reselectResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            secondId,
+            LfpWindowsUiaAction::
+                select);
+    EXPECT_EQ (
+        reselectResult.invokeResult,
+        S_OK);
+    EXPECT_TRUE (
+        canvas->isPaneActive (1));
+
+    splitters[1]
+        ->timescale
+        ->setEnabled (
+            false);
+    const auto disabledResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            secondId,
+            LfpWindowsUiaAction::
+                select);
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    splitters[1]
+        ->timescale
+        ->setEnabled (
+            true);
+
+    canvas->setLayout (
+        LfpViewer::
+            SplitLayouts::SINGLE);
+    const auto hiddenResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            secondId,
+            LfpWindowsUiaAction::
+                querySelection);
+    EXPECT_EQ (
+        hiddenResult.invokeResult,
+        E_FAIL);
+
+    canvas->removeFromDesktop();
+    const auto closedResult =
+        invokeWindowsUiaFromWorker (
+            window,
+            firstId,
+            LfpWindowsUiaAction::
+                querySelection);
+    EXPECT_EQ (
+        closedResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTAVAILABLE));
+}
+#endif
+
+TEST_F (LfpDisplayNodeTests,
         ExposesStableStreamSelectorForEveryDisplay)
 {
     auto canvas =

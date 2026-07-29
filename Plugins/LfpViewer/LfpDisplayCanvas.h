@@ -92,6 +92,9 @@ public:
     /** Returns true if a split display can be selected */
     bool canSelect (int splitID);
 
+    /** Returns whether a split display is the active visible pane. */
+    bool isPaneActive (int splitID) const noexcept;
+
     /** Selects a particular split display */
     void select (LfpDisplaySplitter*);
 
@@ -228,7 +231,13 @@ public:
     void deselect();
 
     /** Returns true if this split display is selected */
-    bool getSelectedState() { return isSelected; }
+    bool getSelectedState() const noexcept { return isSelected; }
+
+    /** Returns whether this split display is the active visible pane. */
+    bool isActivePane() const noexcept
+    {
+        return canvas->isPaneActive (splitID);
+    }
 
     /** Toggles pause button for this split display */
     void handleSpaceKeyPauseEvent();
