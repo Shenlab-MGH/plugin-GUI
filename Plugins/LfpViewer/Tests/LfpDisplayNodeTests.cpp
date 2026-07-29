@@ -8085,6 +8085,703 @@ TEST_F (LfpDisplayNodeTests,
 #endif
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesSaturationWarningForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const std::array<String, 6> choices {
+        "OFF",
+        "0.5",
+        "100",
+        "1000",
+        "5000",
+        "6389"
+    };
+    const std::array<String, 6> choiceIds {
+        "off",
+        "0_5",
+        "100",
+        "1000",
+        "5000",
+        "6389"
+    };
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".saturation_warning";
+        auto* saturationWarning =
+            dynamic_cast<MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (saturationWarning, nullptr)
+            << id;
+        EXPECT_EQ (
+            saturationWarning->getName(),
+            "Saturation Warning");
+        EXPECT_EQ (
+            saturationWarning->getNumItems(),
+            static_cast<int> (choices.size()));
+        for (int choiceIndex = 0;
+             choiceIndex
+             < static_cast<int> (choices.size());
+             ++choiceIndex)
+        {
+            EXPECT_EQ (
+                saturationWarning->getItemText (
+                    choiceIndex),
+                choices[choiceIndex]);
+        }
+
+        int choiceIndex = 0;
+        for (PopupMenu::MenuItemIterator iterator (
+                 *saturationWarning->getRootMenu(),
+                 false);
+             iterator.next();)
+        {
+            ASSERT_LT (
+                choiceIndex,
+                static_cast<int> (
+                    choiceIds.size()));
+            EXPECT_EQ (
+                iterator.getItem().accessibilityId,
+                id
+                    + ".choice."
+                    + choiceIds[choiceIndex]);
+            ++choiceIndex;
+        }
+        EXPECT_EQ (
+            choiceIndex,
+            static_cast<int> (choiceIds.size()));
+
+        auto* handler =
+            saturationWarning
+                ->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (displayNumber)
+                + " saturation warning threshold");
+        const auto description =
+            "Choose the absolute raw sample-magnitude threshold for saturation warnings in LFP display "
+            + String (displayNumber)
+            + ": OFF hides saturation warnings; 0.5, 100, 1000, 5000, or 6389 shows a red-and-white warning when a raw sample exceeds the selected magnitude. This affects display rendering only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        auto* value =
+            handler->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_FALSE (value->isReadOnly());
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            "OFF");
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::press));
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::showMenu));
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::expand));
+        EXPECT_TRUE (
+            handler->getActions().contains (
+                AccessibilityActionType::collapse));
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::LfpDisplayOptions> (
+                *saturationWarning)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    std::vector<Label*> labels;
+    collectLfpDescendants (*canvas, labels);
+    EXPECT_EQ (
+        std::count_if (
+            labels.begin(),
+            labels.end(),
+            [] (const Label* label)
+            {
+                return label->getName()
+                       == "SaturationWarningLabel";
+            }),
+        3);
+    for (const auto* label : labels)
+    {
+        if (label->getName()
+            == "SaturationWarningLabel")
+        {
+            EXPECT_FALSE (label->isAccessible());
+        }
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SaturationWarningWorkerValueTracksRenderingAndSurvivesTeardown)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.saturation_warning";
+    auto* saturationWarning =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    ASSERT_NE (saturationWarning, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::LfpDisplayOptions> (
+            *saturationWarning);
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (options, nullptr);
+    ASSERT_NE (split, nullptr);
+    auto liveHandler =
+        saturationWarning
+            ->createAccessibilityHandler();
+    ASSERT_NE (liveHandler, nullptr);
+    auto* value =
+        liveHandler->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    LfpThreadTrackingComboBoxListener listener;
+    saturationWarning->addListener (&listener);
+    std::atomic<bool> workerReturned { false };
+    std::thread worker (
+        [&]
+        {
+            value->setValueAsString ("0.5");
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (worker, workerReturned);
+    saturationWarning->removeListener (&listener);
+
+    EXPECT_EQ (listener.callbackCount.load(), 1);
+    EXPECT_TRUE (
+        listener.callbackUsedMessageThread.load());
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        2);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "0.5");
+    EXPECT_TRUE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.5f);
+
+    const std::array<std::pair<String, float>, 4>
+        remainingChoices {
+            std::pair<String, float> {
+                "100",
+                100.0f },
+            std::pair<String, float> {
+                "1000",
+                1000.0f },
+            std::pair<String, float> {
+                "5000",
+                5000.0f },
+            std::pair<String, float> {
+                "6389",
+                6389.0f }
+        };
+    for (const auto& [text, threshold] :
+         remainingChoices)
+    {
+        value->setValueAsString (text);
+        EXPECT_EQ (
+            value->getCurrentValueAsString(),
+            text);
+        EXPECT_TRUE (
+            split->drawSaturationWarning);
+        EXPECT_FLOAT_EQ (
+            options
+                ->selectedSaturationValueFloat,
+            threshold);
+    }
+
+    value->setValueAsString ("OFF");
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        1);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.0f);
+
+    value->setValueAsString ("unsupported");
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        1);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.0f);
+
+    saturationWarning->setEnabled (false);
+    value->setValueAsString ("6389");
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        1);
+    EXPECT_FALSE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.0f);
+
+    saturationWarning->setEnabled (true);
+    saturationWarning
+        ->synchroniseAccessibilityState();
+    auto retainedHandler =
+        saturationWarning
+            ->createAccessibilityHandler();
+    ASSERT_NE (retainedHandler, nullptr);
+    auto* retainedValue =
+        retainedHandler->getValueInterface();
+    ASSERT_NE (retainedValue, nullptr);
+    const auto retainedActions =
+        retainedHandler->getActions();
+    EXPECT_EQ (
+        retainedValue->getCurrentValueAsString(),
+        "OFF");
+
+    canvas.reset();
+    workerReturned.store (false);
+    bool stalePressFound = false;
+    bool staleShowMenuFound = false;
+    std::thread staleWorker (
+        [&]
+        {
+            retainedValue->setValueAsString (
+                "100");
+            stalePressFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::press);
+            staleShowMenuFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::showMenu);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        workerReturned);
+    EXPECT_EQ (
+        retainedValue->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_TRUE (stalePressFound);
+    EXPECT_TRUE (staleShowMenuFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        SaturationWarningValueSurvivesZeroChannelsBufferRemovalAndXmlRestore)
+{
+    auto zeroChannelTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            zeroChannelProcessor
+                ->getNodeId())
+        + ".lfp.display_1.saturation_warning";
+    auto* saturationWarning =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    ASSERT_NE (saturationWarning, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::LfpDisplayOptions> (
+            *saturationWarning);
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (options, nullptr);
+    ASSERT_NE (split, nullptr);
+    auto* value =
+        saturationWarning
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    value->setValueAsString ("100");
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "100");
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        3);
+    EXPECT_TRUE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        100.0f);
+
+    canvas->removeBufferForDisplay (0);
+    value->setValueAsString ("OFF");
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.0f);
+
+    value->setValueAsString ("6389");
+    XmlElement onRoot ("ROOT");
+    options->saveParameters (&onRoot);
+    auto* onPane =
+        onRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (onPane, nullptr);
+    EXPECT_EQ (
+        onPane->getIntAttribute (
+            "satWarning"),
+        6);
+
+    value->setValueAsString ("OFF");
+    LfpThreadTrackingComboBoxListener listener;
+    saturationWarning->addListener (&listener);
+    options->loadParameters (&onRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "6389");
+    EXPECT_TRUE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        6389.0f);
+
+    XmlElement offRoot (onRoot);
+    auto* offPane =
+        offRoot.getChildByName ("LFPDISPLAY0");
+    ASSERT_NE (offPane, nullptr);
+    offPane->setAttribute ("satWarning", 1);
+    options->loadParameters (&offRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.0f);
+
+    XmlElement missingRoot (onRoot);
+    auto* missingPane =
+        missingRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (missingPane, nullptr);
+    missingPane->removeAttribute ("satWarning");
+    options->loadParameters (&missingRoot);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.0f);
+
+    XmlElement malformedRoot (onRoot);
+    auto* malformedPane =
+        malformedRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (malformedPane, nullptr);
+    malformedPane->setAttribute (
+        "satWarning",
+        999);
+    options->loadParameters (&malformedRoot);
+    saturationWarning->removeListener (
+        &listener);
+    EXPECT_EQ (listener.callbackCount.load(), 0);
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        1);
+    EXPECT_EQ (
+        value->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_FALSE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.0f);
+}
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWritesAndSelectsSaturationWarning)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.saturation_warning";
+    auto* saturationWarning =
+        dynamic_cast<MessageThreadComboBox*> (
+            findLfpDescendantById (*canvas, id));
+    ASSERT_NE (saturationWarning, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::LfpDisplayOptions> (
+            *saturationWarning);
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (options, nullptr);
+    ASSERT_NE (split, nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto runAction =
+        [&] (StringRef targetId,
+             LfpWindowsUiaAction action,
+             StringRef newValue = {})
+    {
+        LfpWindowsUiaInvokeResult result;
+        std::atomic<bool> workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (targetId)
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (newValue)
+                                .toWideCharPointer()));
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return result;
+    };
+
+    const auto description =
+        L"Choose the absolute raw sample-magnitude threshold for saturation warnings in LFP display 1: OFF hides saturation warnings; 0.5, 100, 1000, 5000, or 6389 shows a red-and-white warning when a raw sample exceeds the selected magnitude. This affects display rendering only; acquisition and recording are unaffected.";
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 saturation warning threshold");
+    EXPECT_EQ (
+        initialResult.help,
+        description);
+    EXPECT_TRUE (
+        initialResult.valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult.valueReadOnly,
+        FALSE);
+    EXPECT_TRUE (
+        initialResult
+            .expandCollapsePatternAvailable);
+    EXPECT_TRUE (
+        initialResult.invokePatternAvailable);
+    EXPECT_EQ (initialResult.value, L"OFF");
+
+    const auto setValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "1000");
+    EXPECT_EQ (
+        setValueResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        setValueResult.value,
+        L"1000");
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        4);
+    EXPECT_TRUE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        1000.0f);
+
+    const auto expandResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::expand);
+    EXPECT_EQ (
+        expandResult.focusResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.invokeResult,
+        S_OK);
+    EXPECT_TRUE (
+        saturationWarning->isPopupActive());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    const auto selectResult =
+        runAction (
+            id + ".choice.0_5",
+            LfpWindowsUiaAction::select);
+    EXPECT_EQ (
+        selectResult.invokeResult,
+        S_OK);
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (30);
+    EXPECT_EQ (
+        saturationWarning->getSelectedId(),
+        2);
+    EXPECT_TRUE (split->drawSaturationWarning);
+    EXPECT_FLOAT_EQ (
+        options->selectedSaturationValueFloat,
+        0.5f);
+
+    saturationWarning->setEnabled (false);
+    const auto disabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::setValue,
+            "OFF");
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    saturationWarning->setEnabled (true);
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix
+                + "2.saturation_warning",
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
+        E_FAIL);
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::queryValue);
+    EXPECT_EQ (
+        closedDrawerResult.invokeResult,
+        E_FAIL);
+}
+#endif
+
+TEST_F (LfpDisplayNodeTests,
         ColourGroupingWorkerSelectsByShankOnMessageThread)
 {
     auto canvas =

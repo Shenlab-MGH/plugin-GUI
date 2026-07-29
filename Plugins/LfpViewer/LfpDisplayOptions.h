@@ -305,6 +305,8 @@ public:
 
 private:
     void updateRangeAccessibilityMetadata();
+    void setSaturationWarningSelection (
+        int selectedId);
 
     LfpDisplayCanvas* canvas;
     LfpDisplaySplitter* canvasSplit;
@@ -374,7 +376,9 @@ private:
         spikeRasterSelection;
     std::unique_ptr<Label> spikeRasterabel;
 
-    std::unique_ptr<ComboBox> saturationWarningSelection; // optionally raise hell if the actual data is saturating
+    std::unique_ptr<
+        MessageThreadComboBox>
+        saturationWarningSelection; // optionally raise hell if the actual data is saturating
     std::unique_ptr<Label> saturationWarningLabel;
 
     std::unique_ptr<

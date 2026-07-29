@@ -1687,16 +1687,60 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     saturationThresholds.add ("5000");
     saturationThresholds.add ("6389");
 
-    saturationWarningSelection = std::make_unique<ComboBox> ("Saturation Warning");
+    saturationWarningSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    saturationWarningSelection->setName (
+        "Saturation Warning");
+    const auto saturationWarningDescription =
+        "Choose the absolute raw sample-magnitude threshold for saturation warnings in LFP display "
+        + String (displayNumber)
+        + ": OFF hides saturation warnings; 0.5, 100, 1000, 5000, or 6389 shows a red-and-white warning when a raw sample exceeds the selected magnitude. This affects display rendering only; acquisition and recording are unaffected.";
+    applyLfpDisplayParameterMetadata (
+        *saturationWarningSelection,
+        *processor,
+        displayNumber,
+        "saturation_warning",
+        "LFP display "
+            + String (displayNumber)
+            + " saturation warning threshold",
+        saturationWarningDescription);
     for (int i = 0; i < saturationThresholds.size(); i++)
         saturationWarningSelection->addItem (saturationThresholds[i], i + 1);
-    saturationWarningSelection->setSelectedId (1, dontSendNotification);
+    const std::array<String, 6>
+        saturationWarningChoiceIds {
+            "off",
+            "0_5",
+            "100",
+            "1000",
+            "5000",
+            "6389"
+        };
+    int saturationWarningChoiceIndex = 0;
+    for (PopupMenu::MenuItemIterator iterator (
+             *saturationWarningSelection
+                  ->getRootMenu(),
+             false);
+         iterator.next();)
+    {
+        iterator.getItem().accessibilityId =
+            saturationWarningSelection
+                ->getComponentID()
+            + ".choice."
+            + saturationWarningChoiceIds[
+                  saturationWarningChoiceIndex++];
+    }
     saturationWarningSelection->addListener (this);
     saturationWarningSelection->setEditableText (false);
+    saturationWarningSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
     extendedOptions->addAndMakeVisible (saturationWarningSelection.get());
+    setSaturationWarningSelection (1);
 
     saturationWarningLabel = std::make_unique<Label> ("SaturationWarningLabel", "Sat. warning:");
     saturationWarningLabel->setFont (labelFont);
+    saturationWarningLabel->setAccessible (false);
     saturationWarningLabel->attachToComponent (saturationWarningSelection.get(), true);
     extendedOptions->addAndMakeVisible (saturationWarningLabel.get());
 
@@ -2668,6 +2712,34 @@ void LfpDisplayOptions::setTimebaseAndSelectionText (float timebase)
         ->synchroniseAccessibilityState();
 }
 
+void LfpDisplayOptions::
+    setSaturationWarningSelection (
+        int selectedId)
+{
+    const auto canonicalId =
+        isPositiveAndBelow (
+            selectedId,
+            saturationThresholds.size() + 1)
+            ? selectedId
+            : 1;
+    saturationWarningSelection
+        ->setSelectedId (
+            canonicalId,
+            dontSendNotification);
+
+    canvasSplit->drawSaturationWarning =
+        canonicalId > 1;
+    selectedSaturationValueFloat =
+        canvasSplit->drawSaturationWarning
+            ? saturationThresholds[
+                  canonicalId - 1]
+                  .getFloatValue()
+            : 0.0f;
+    canvasSplit->redraw();
+    saturationWarningSelection
+        ->synchroniseAccessibilityState();
+}
+
 void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
 {
     if (cb
@@ -2781,6 +2853,14 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
         canvasSplit->redraw();
         clipWarningSelection
             ->synchroniseAccessibilityState();
+        return;
+    }
+
+    if (cb
+        == saturationWarningSelection.get())
+    {
+        setSaturationWarningSelection (
+            cb->getSelectedId());
         return;
     }
 
@@ -2932,20 +3012,6 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
 
         if (! lfpDisplay->getSingleChannelState())
             canvasSplit->redraw();
-    }
-    else if (cb == saturationWarningSelection.get())
-    {
-        if (cb->getSelectedId() > 1)
-        {
-            selectedSaturationValueFloat = (saturationThresholds[cb->getSelectedId() - 1].getFloatValue());
-            canvasSplit->drawSaturationWarning = true;
-        }
-        else
-        {
-            canvasSplit->drawSaturationWarning = false;
-        }
-
-        canvasSplit->redraw();
     }
     else if (cb == overlapSelection.get())
     {
@@ -3361,13 +3427,10 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
                 ->synchroniseAccessibilityState();
 
             // SATURATION WARNING
-            saturationWarningSelection->setSelectedId (xmlNode->getIntAttribute ("satWarning"), dontSendNotification);
-
-            if (saturationWarningSelection->getSelectedId() > 1)
-            {
-                selectedSaturationValueFloat = (saturationThresholds[saturationWarningSelection->getSelectedId() - 1].getFloatValue());
-                canvasSplit->drawSaturationWarning = true;
-            }
+            setSaturationWarningSelection (
+                xmlNode->getIntAttribute (
+                    "satWarning",
+                    1));
 
             //LOGD("    Additional settings in ", MS_FROM_START, " milliseconds");
             start = Time::getHighResolutionTicks();
