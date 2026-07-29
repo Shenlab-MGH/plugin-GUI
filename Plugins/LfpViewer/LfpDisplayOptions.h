@@ -109,6 +109,36 @@ private:
         accessibilityState;
 };
 
+/** A worker-safe momentary action for display-only options. */
+class TESTABLE LfpOptionActionButton
+    : public UtilityButton
+{
+public:
+    explicit LfpOptionActionButton (
+        String label);
+    ~LfpOptionActionButton() override;
+
+    /** Publishes the current state for accessibility providers. */
+    void refreshAccessibilityState();
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
+
+private:
+    void buttonStateChanged() override;
+    void enablementChanged() override;
+    void visibilityChanged() override;
+    void focusGained (
+        FocusChangeType cause) override;
+    void focusLost (
+        FocusChangeType cause) override;
+
+    std::shared_ptr<
+        LfpOptionButtonAccessibilityState>
+        accessibilityState;
+};
+
 /** A channel-type radio control with worker-safe UI Automation state and actions. */
 class TESTABLE LfpChannelTypeButton : public UtilityButton
 {
@@ -431,7 +461,7 @@ private:
     std::unique_ptr<LfpOptionToggleButton> averageSignalButton;
     std::unique_ptr<Label> averageSignalLabel;
 
-    std::unique_ptr<UtilityButton> resetButton;
+    std::unique_ptr<LfpOptionActionButton> resetButton;
 
     Array<String> voltageRanges[CHANNEL_TYPES];
     Array<String> timebases;

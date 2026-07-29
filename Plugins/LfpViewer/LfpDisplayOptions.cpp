@@ -197,6 +197,23 @@ struct LfpViewer::
                 sendNotification);
     }
 
+    void performPressOnMessageThread()
+    {
+        jassert (
+            MessageManager::getInstance()
+                ->isThisTheMessageThread());
+        auto* currentButton =
+            button.getComponent();
+        if (currentButton == nullptr
+            || ! currentButton->isEnabled()
+            || ! currentButton->isShowing())
+        {
+            return;
+        }
+
+        currentButton->triggerClick();
+    }
+
 private:
     mutable std::mutex textMutex;
     String title;
@@ -500,6 +517,96 @@ private:
         state;
 };
 
+class LfpActionButtonAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    LfpActionButtonAccessibilityHandler (
+        Button& button,
+        std::shared_ptr<
+            LfpOptionButtonAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              button,
+              AccessibilityRole::button,
+              createActions (stateToUse)),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState
+    getCurrentState() const override
+    {
+        auto current =
+            AccessibleState().withFocusable();
+        if (state->isFocused())
+            current = current.withFocused();
+        return current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isAvailable();
+    }
+
+private:
+    static AccessibilityActions
+    createActions (
+        const std::shared_ptr<
+            LfpOptionButtonAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::press,
+                [state]
+                {
+                    if (! state->isAvailable())
+                        return;
+
+                    auto* messageManager =
+                        MessageManager::
+                            getInstanceWithoutCreating();
+                    if (messageManager == nullptr)
+                        return;
+
+                    if (messageManager
+                            ->isThisTheMessageThread())
+                    {
+                        state
+                            ->performPressOnMessageThread();
+                        return;
+                    }
+
+                    MessageManager::callSync (
+                        [state]
+                        {
+                            state
+                                ->performPressOnMessageThread();
+                        });
+                });
+    }
+
+    std::shared_ptr<
+        LfpOptionButtonAccessibilityState>
+        state;
+};
+
 void applyLfpDisplayControlMetadata (
     Component& component,
     LfpDisplayNode& processor,
@@ -728,6 +835,93 @@ void LfpOptionToggleButton::
 {
     UtilityButton::focusLost (
         cause);
+    refreshAccessibilityState();
+}
+
+LfpOptionActionButton::
+    LfpOptionActionButton (
+        String label)
+    : UtilityButton (
+          std::move (label)),
+      accessibilityState (
+          std::make_shared<
+              LfpOptionButtonAccessibilityState>())
+{
+    accessibilityState->attach (this);
+    setClickingTogglesState (false);
+    refreshAccessibilityState();
+}
+
+LfpOptionActionButton::
+    ~LfpOptionActionButton()
+{
+    accessibilityState->detach();
+}
+
+std::unique_ptr<AccessibilityHandler>
+LfpOptionActionButton::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        LfpActionButtonAccessibilityHandler> (
+        *this,
+        accessibilityState);
+}
+
+void LfpOptionActionButton::
+    refreshAccessibilityState()
+{
+    auto title = getTitle();
+    if (title.isEmpty())
+        title = getName();
+    auto help = getHelpText();
+    if (help.isEmpty())
+        help = getDescription();
+
+    accessibilityState->synchronise (
+        std::move (title),
+        getDescription(),
+        std::move (help),
+        false,
+        Component::isEnabled()
+            && isShowing(),
+        hasKeyboardFocus (false));
+}
+
+void LfpOptionActionButton::
+    buttonStateChanged()
+{
+    UtilityButton::buttonStateChanged();
+    refreshAccessibilityState();
+}
+
+void LfpOptionActionButton::
+    enablementChanged()
+{
+    UtilityButton::enablementChanged();
+    refreshAccessibilityState();
+}
+
+void LfpOptionActionButton::
+    visibilityChanged()
+{
+    UtilityButton::visibilityChanged();
+    refreshAccessibilityState();
+}
+
+void LfpOptionActionButton::
+    focusGained (
+        FocusChangeType cause)
+{
+    UtilityButton::focusGained (cause);
+    refreshAccessibilityState();
+}
+
+void LfpOptionActionButton::
+    focusLost (
+        FocusChangeType cause)
+{
+    UtilityButton::focusLost (cause);
     refreshAccessibilityState();
 }
 
@@ -2104,14 +2298,33 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     extendedOptions->addAndMakeVisible (averageSignalLabel.get());
 
     // reset triggered display
-    resetButton = std::make_unique<UtilityButton> ("RESET");
+    resetButton =
+        std::make_unique<
+            LfpOptionActionButton> (
+            "RESET");
     resetButton->setRadius (5.0f);
     resetButton->setEnabledState (true);
     resetButton->setCorners (true, true, true, true);
     resetButton->addListener (this);
     resetButton->setClickingTogglesState (false);
-    resetButton->setToggleState (false, sendNotification);
+    resetButton->setToggleState (
+        false,
+        dontSendNotification);
+    const auto resetTrialsDescription =
+        "Reset the accumulated trial average for LFP display "
+        + String (displayNumber)
+        + ". The next triggered view starts a new average. This changes display averaging only; the trigger source, acquisition, and recording are unaffected.";
+    applyLfpDisplayControlMetadata (
+        *resetButton,
+        *processor,
+        displayNumber,
+        "reset_trials",
+        "LFP display "
+            + String (displayNumber)
+            + " reset trials",
+        resetTrialsDescription);
     extendedOptions->addChildComponent (resetButton.get());
+    resetButton->refreshAccessibilityState();
 
     // init show/hide options button
     showHideOptionsButton = std::make_unique<ShowHideOptionsButton> (this);
