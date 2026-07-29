@@ -140,7 +140,7 @@ void LfpChannelDisplay::setEnabledState (bool state)
     if (isEnabled == state)
         return;
 
-    if (! state
+    if (state != isEnabled
         && display != nullptr)
     {
         display

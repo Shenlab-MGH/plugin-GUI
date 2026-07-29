@@ -531,7 +531,6 @@ struct LfpWindowsUiaDesiredToggleResult
     LfpWindowsUiaInvokeResult after;
     HRESULT transportResult = E_PENDING;
     bool toggleAttempted = false;
-    int toggleCallCount = 0;
     bool verified = false;
 };
 
@@ -2061,7 +2060,6 @@ protected:
         }
 
         result.toggleAttempted = true;
-        ++result.toggleCallCount;
         result.transportResult =
             invokeWindowsUiaFromWorker (
                 window,
@@ -22086,6 +22084,19 @@ TEST_F (LfpDisplayNodeTests,
                        == static_cast<HRESULT> (
                               UIA_E_ELEMENTNOTENABLED);
         };
+    int providerStateMutationCount = 0;
+    display->setStableIdentityLifecycleTestHook (
+        [&] (LfpViewer::LfpDisplay::StableIdentityLifecycleTestPhase phase,
+             int channelIndex)
+        {
+            if (phase
+                    == LfpViewer::LfpDisplay::StableIdentityLifecycleTestPhase::
+                           beforeChannelStateMutation
+                && channelIndex == 0)
+            {
+                ++providerStateMutationCount;
+            }
+        });
     const auto hiddenMutation =
         setWaveformVisibilityWithFreshWindowsUia (
             window,
@@ -22094,7 +22105,7 @@ TEST_F (LfpDisplayNodeTests,
             expectedHelp,
             false);
     EXPECT_TRUE (hiddenMutation.toggleAttempted);
-    EXPECT_EQ (hiddenMutation.toggleCallCount, 1);
+    EXPECT_EQ (providerStateMutationCount, 2);
     EXPECT_TRUE (
         isIndeterminateTransport (
             hiddenMutation.transportResult));
@@ -22139,7 +22150,7 @@ TEST_F (LfpDisplayNodeTests,
             expectedHelp,
             true);
     EXPECT_TRUE (visibleMutation.toggleAttempted);
-    EXPECT_EQ (visibleMutation.toggleCallCount, 1);
+    EXPECT_EQ (providerStateMutationCount, 4);
     EXPECT_TRUE (
         isIndeterminateTransport (
             visibleMutation.transportResult));
@@ -22161,9 +22172,10 @@ TEST_F (LfpDisplayNodeTests,
             expectedHelp,
             true);
     EXPECT_FALSE (alreadyVisible.toggleAttempted);
-    EXPECT_EQ (alreadyVisible.toggleCallCount, 0);
+    EXPECT_EQ (providerStateMutationCount, 4);
     EXPECT_EQ (alreadyVisible.transportResult, E_PENDING);
     EXPECT_TRUE (alreadyVisible.verified);
+    display->setStableIdentityLifecycleTestHook ({});
 
     display->setEnabledState (
         false,

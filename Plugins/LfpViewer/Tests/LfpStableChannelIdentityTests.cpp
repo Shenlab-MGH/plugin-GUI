@@ -1760,9 +1760,12 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     auto reverseHandler =
         createIdentityTestEnableButtonHandler (*firstButton);
     ASSERT_NE (reverseHandler, nullptr);
+    const auto stableId = firstButton->getComponentID();
+    ASSERT_FALSE (stableId.isEmpty());
 
     display->setChannelsReversed (true);
     EXPECT_FALSE (reverseHandler->isEnabled());
+    EXPECT_EQ (firstButton->getComponentID(), stableId);
     auto sortHandler =
         createIdentityTestEnableButtonHandler (*firstButton);
     ASSERT_NE (sortHandler, nullptr);
@@ -1770,6 +1773,7 @@ TEST_F (LfpStableChannelIdentityBindingTests,
 
     display->orderChannelsByDepth (true);
     EXPECT_FALSE (sortHandler->isEnabled());
+    EXPECT_EQ (firstButton->getComponentID(), stableId);
     auto* secondButton =
         getIdentityTestEnableButton (
             *display->channelInfo[1]);
@@ -1782,6 +1786,7 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     EXPECT_FALSE (skipHandler->isEnabled());
     EXPECT_TRUE (secondButton->getComponentID().isEmpty());
     display->setChannelDisplaySkipAmount (0);
+    EXPECT_EQ (firstButton->getComponentID(), stableId);
 
     auto focusHandler =
         createIdentityTestEnableButtonHandler (*secondButton);
@@ -1790,6 +1795,49 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     display->toggleSingleChannel (display->drawableChannels[0]);
     EXPECT_FALSE (focusHandler->isEnabled());
     display->toggleSingleChannel (display->drawableChannels[0]);
+    EXPECT_EQ (secondButton->getComponentID(),
+               "oe.processor."
+                   + String (processor->getNodeId())
+                   + ".lfp.display_1.stream_hex_327C46616B65536F757263654E6F646530.channel_identifier_hex_6964656E7469666965722E67302E73302E6331.waveform_visibility");
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityComponentReuseChangesStableKeyIdAndRejectsOldAction)
+{
+    auto canvas =
+        createIdentityCanvas (SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters = getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display = splitter->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    auto* reusedInfo = display->channelInfo[0];
+    auto* button = getIdentityTestEnableButton (*reusedInfo);
+    ASSERT_NE (button, nullptr);
+    const auto oldId = button->getComponentID();
+    auto oldHandler = createIdentityTestEnableButtonHandler (*button);
+    ASSERT_NE (oldHandler, nullptr);
+    const auto oldActions = oldHandler->getActions();
+    auto* buffer = splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+
+    buffer->channelMetadata.getReference (0).identifier = "replacement.id";
+    buffer->channelMetadata.getReference (0).uuid = Uuid();
+    ASSERT_TRUE (splitter->selectStreamByKey (buffer->streamKey));
+
+    EXPECT_EQ (display->channelInfo[0], reusedInfo);
+    EXPECT_EQ (
+        button->getComponentID(),
+        "oe.processor."
+            + String (processor->getNodeId())
+            + ".lfp.display_1.stream_hex_327C46616B65536F757263654E6F646530.channel_identifier_hex_7265706C6163656D656E742E6964.waveform_visibility");
+    EXPECT_NE (button->getComponentID(), oldId);
+    EXPECT_FALSE (oldHandler->isEnabled());
+    ASSERT_TRUE (oldActions.invoke (AccessibilityActionType::toggle));
+    EXPECT_TRUE (display->getStoredChannelVisibility (0));
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
@@ -1910,6 +1958,48 @@ TEST_F (LfpStableChannelIdentityBindingTests,
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityQueuedWorkerActionCannotMutateAfterCanvasDestruction)
+{
+    std::unique_ptr<LfpDisplayCanvas> canvas =
+        createIdentityCanvas (SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters = getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display = splitters[0]->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    auto* button = getIdentityTestEnableButton (*display->channelInfo[0]);
+    ASSERT_NE (button, nullptr);
+    auto retainedHandler = createIdentityTestEnableButtonHandler (*button);
+    ASSERT_NE (retainedHandler, nullptr);
+    const auto retainedActions = retainedHandler->getActions();
+    std::atomic<bool> workerStarted { false };
+    std::atomic<bool> workerFinished { false };
+    std::thread worker (
+        [&]
+        {
+            workerStarted.store (true);
+            retainedActions.invoke (AccessibilityActionType::toggle);
+            workerFinished.store (true);
+        });
+    for (int attempt = 0; attempt < 100 && ! workerStarted.load(); ++attempt)
+        Thread::sleep (1);
+    ASSERT_TRUE (workerStarted.load());
+    for (int attempt = 0; attempt < 100 && ! workerFinished.load(); ++attempt)
+        Thread::sleep (1);
+    ASSERT_FALSE (workerFinished.load());
+
+    canvas.reset();
+    for (int attempt = 0; attempt < 100 && ! workerFinished.load(); ++attempt)
+        MessageManager::getInstance()->runDispatchLoopUntil (10);
+    worker.join();
+
+    EXPECT_TRUE (workerFinished.load());
+    EXPECT_FALSE (retainedHandler->isEnabled());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
         WaveformVisibilityControlChangesDrawingWithoutDataRecordingFocusOrAudioEffects)
 {
     auto canvas =
@@ -1958,6 +2048,14 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         recorded.push_back (channel->isRecorded);
     }
 
+    AudioBuffer<float> samples (4, 16);
+    for (int channel = 0; channel < samples.getNumChannels(); ++channel)
+    {
+        for (int sample = 0; sample < samples.getNumSamples(); ++sample)
+            samples.setSample (channel, sample, float (channel * 100 + sample));
+    }
+    const auto writeIndex = buffer->displayBufferIndices[0];
+
     ASSERT_TRUE (
         actions.invoke (
             AccessibilityActionType::toggle));
@@ -1970,6 +2068,13 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     EXPECT_EQ (processor->isEnabled, processorEnabled);
     EXPECT_EQ (display->getSingleChannelState(), focused);
     EXPECT_EQ (display->isPaused(), paused);
+    const auto output = tester->processBlock (processor, samples);
+    for (int sample = 0; sample < samples.getNumSamples(); ++sample)
+    {
+        EXPECT_EQ (output.getSample (0, sample), samples.getSample (0, sample));
+        EXPECT_EQ (buffer->getSample (0, writeIndex + sample),
+                   samples.getSample (0, sample));
+    }
     const auto channelsAfter = stream->getContinuousChannels();
     ASSERT_EQ (
         channelsAfter.size(),
