@@ -36,6 +36,10 @@
 
 namespace LfpViewer
 {
+class LfpChannelActionAccessibilityState;
+enum class LfpChannelAction;
+enum class LfpChannelActionResult;
+
 #pragma mark - LfpDisplay -
 //==============================================================================
 /**
@@ -63,6 +67,9 @@ public:
 
     /** Draws the full channel image */
     void paint (Graphics& g) override;
+
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
 
     /** Updates the channel image from the screen buffer*/
     void refresh();
@@ -364,13 +371,28 @@ private:
     void refreshStableChannelIdentityAvailability();
     /** Refreshes the independent drawing-visibility accessibility generation. */
     void refreshWaveformVisibilityAccessibilityAvailability();
+    /** Refreshes stable per-channel action accessibility generations. */
+    void refreshChannelActionAccessibilityAvailability();
     /** Coalesces drawing-visibility availability refreshes during bulk changes. */
     void requestWaveformVisibilityAccessibilityAvailabilityRefresh();
     /** Retires every drawing-visibility accessibility generation. */
     void invalidateWaveformVisibilityAccessibility();
+    /** Retires every per-channel action accessibility generation. */
+    void invalidateChannelActionAccessibility();
     /** Revalidates one retained visibility provider against the live channel. */
     bool validateWaveformVisibilityAccessibility (
         const LfpChannelDisplayInfo& info) const;
+    LfpChannelActionResult
+    performChannelActionAccessibility (
+        LfpChannelDisplayInfo& info,
+        LfpChannelAction action);
+    bool validateChannelActionAccessibility (
+        const LfpChannelDisplayInfo& info) const;
+    void prepareChannelActionStateMutation (
+        int channelIndex);
+    void finishChannelActionStateMutation (
+        int channelIndex);
+    void requestChannelActionAccessibilityAvailabilityRefresh();
     /** Pre-revokes every current generation before a pane becomes unavailable. */
     void prepareStableChannelIdentityTargetUnavailable();
 
@@ -524,6 +546,8 @@ private:
     int stableChannelIdentityBulkMutationDepth = 0;
     bool stableChannelIdentityRefreshPending = false;
     bool waveformVisibilityAccessibilityRefreshPending = false;
+    bool channelActionAccessibilityRefreshPending = false;
+    bool channelActionAccessibilityAsyncRefreshPending = false;
 
 #if BUILD_TESTS
     void notifyStableIdentityLifecycleTestHook (

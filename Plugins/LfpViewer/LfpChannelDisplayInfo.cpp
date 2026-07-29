@@ -39,12 +39,96 @@
 #include <math.h>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 
 using namespace LfpViewer;
 
 namespace LfpViewer
 {
+namespace
+{
+constexpr auto channelActionDispatchTimeout =
+    std::chrono::milliseconds (100);
+
+class LfpChannelActionCompletion final
+{
+public:
+    bool tryBeginCallback() noexcept
+    {
+        const std::lock_guard<std::mutex>
+            lock (mutex);
+        if (cancelled
+            || callbackClaimed)
+        {
+            return false;
+        }
+        callbackClaimed = true;
+        return true;
+    }
+
+    void complete() noexcept
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (mutex);
+            if (cancelled
+                || ! callbackClaimed
+                || completed)
+            {
+                return;
+            }
+            completed = true;
+        }
+        completionChanged.notify_one();
+    }
+
+    void cancel() noexcept
+    {
+        const std::lock_guard<std::mutex>
+            lock (mutex);
+        cancelled = true;
+    }
+
+    void waitForMutationCompletion (
+        std::chrono::milliseconds timeout) noexcept
+    {
+        std::unique_lock<std::mutex>
+            lock (mutex);
+        if (completionChanged.wait_for (
+                lock,
+                timeout,
+                [this]
+                {
+                    return completed;
+                }))
+        {
+            return;
+        }
+        if (! callbackClaimed)
+        {
+            cancelled = true;
+            return;
+        }
+        completionChanged.wait (
+            lock,
+            [this]
+            {
+                return completed;
+            });
+    }
+
+private:
+    std::mutex mutex;
+    std::condition_variable completionChanged;
+    bool callbackClaimed = false;
+    bool cancelled = false;
+    bool completed = false;
+};
+} // namespace
+
 String encodeWaveformVisibilityUtf8Hex (
     StringRef text)
 {
@@ -497,6 +581,558 @@ private:
     std::weak_ptr<LfpWaveformVisibilityAccessibilityState>
         accessibilityState;
 };
+
+class LfpChannelActionAccessibilityState final
+    : public std::enable_shared_from_this<
+          LfpChannelActionAccessibilityState>
+{
+public:
+    LfpChannelActionAccessibilityState (
+        LfpChannelDisplayInfo& ownerToUse,
+        const LfpStableChannelIdentity& identity,
+        int nodeId,
+        LfpChannelAction actionToUse,
+        bool selectedToUse,
+        bool focusedToUse,
+        bool invertedToUse,
+        bool canInvertToUse)
+        : owner (&ownerToUse),
+          processorNodeId (nodeId),
+          paneIndex (identity.getPaneIndex()),
+          streamKey (identity.getStreamKey()),
+          runtimeUuid (identity.getRuntimeUuid()),
+          persistedIdentifier (
+              identity.getPersistedIdentifier()),
+          persistedSourceNodeId (
+              identity.getPersistedSourceNodeId()),
+          persistedLocalIndex (
+              identity.getPersistedLocalIndex()),
+          channelName (
+              identity.getPersistedChannelName()),
+          persistedChannelType (
+              identity.getPersistedChannelType()),
+          action (actionToUse),
+          selected (selectedToUse),
+          focused (focusedToUse),
+          inverted (invertedToUse),
+          canInvert (canInvertToUse)
+    {
+        const auto* key =
+            identity.getStableChannelKey();
+        if (key == nullptr)
+            return;
+
+        stableKeyKind = key->getKind();
+        stableIdentifier = key->getIdentifier();
+        stableSourceNodeId = key->getSourceNodeId();
+        stableLocalIndex = key->getLocalIndex();
+        const auto streamHex =
+            encodeWaveformVisibilityUtf8Hex (
+                streamKey);
+        if (streamHex.isEmpty())
+            return;
+
+        const auto oneBasedPane =
+            paneIndex + 1;
+        prefix =
+            "oe.processor."
+            + String (nodeId)
+            + ".lfp.display_"
+            + String (oneBasedPane)
+            + ".stream_hex_"
+            + streamHex;
+        if (stableKeyKind
+            == LfpStableChannelKey::Kind::identifier)
+        {
+            const auto identifierHex =
+                encodeWaveformVisibilityUtf8Hex (
+                    stableIdentifier);
+            if (identifierHex.isEmpty())
+                return;
+            prefix +=
+                ".channel_identifier_hex_"
+                + identifierHex;
+            stableKeyText =
+                "identifier \""
+                + stableIdentifier
+                + "\"";
+        }
+        else
+        {
+            if (stableSourceNodeId < 0
+                || stableLocalIndex < 0)
+            {
+                return;
+            }
+            prefix +=
+                ".channel_source_"
+                + String (stableSourceNodeId)
+                + "_local_"
+                + String (stableLocalIndex);
+            stableKeyText =
+                "source node "
+                + String (stableSourceNodeId)
+                + ", local channel index "
+                + String (stableLocalIndex);
+        }
+
+        const auto context =
+            "channel \""
+            + channelName
+            + "\" ("
+            + stableKeyText
+            + ") in stream \""
+            + streamKey
+            + "\" of LFP display "
+            + String (oneBasedPane);
+        switch (action)
+        {
+            case LfpChannelAction::select:
+                suffix = ".select";
+                actionTitle = "select";
+                description =
+                    "Channel selection for "
+                    + context + ".";
+                help =
+                    "Select "
+                    + context
+                    + " for the existing LFP channel operations. Selection also selects the pane; it does not change the focused XY readout, acquisition, buffering, hardware enablement, or recording selection.";
+                break;
+            case LfpChannelAction::toggleFocus:
+                suffix =
+                    ".single_channel_focus";
+                actionTitle =
+                    "single-channel focus";
+                description =
+                    "Single-channel focus for "
+                    + context + ".";
+                help =
+                    "Show only "
+                    + context
+                    + ", or restore the pane's prior drawable channels. This coordinate-free action leaves the focused XY readout unchanged and does not rewrite stored waveform visibility or change acquisition, buffering, hardware, or recording selection.";
+                break;
+            case LfpChannelAction::toggleInvert:
+                suffix = ".invert_signal";
+                actionTitle = "invert signal";
+                description =
+                    "Displayed signal polarity for "
+                    + context + ".";
+                help =
+                    "Invert or restore displayed signal polarity for "
+                    + context
+                    + ". If this channel cannot be inverted, the existing selection and redraw action still completes and polarity remains unchanged. This affects LFP display behavior only; it does not alter acquired samples, buffering, hardware, recording selection, or audio monitoring.";
+                break;
+            case LfpChannelAction::monitor:
+                suffix = ".monitor";
+                actionTitle = "monitor";
+                description =
+                    "One-shot audio monitor action for "
+                    + context + ".";
+                help =
+                    "Send the existing one-shot audio monitor selection for "
+                    + context
+                    + ". Each Invoke sends exactly one AUDIO SELECT command and exposes no persistent monitor state.";
+                break;
+        }
+
+        automationId = prefix + suffix;
+        title =
+            "LFP display "
+            + String (oneBasedPane)
+            + " stream \""
+            + streamKey
+            + "\" channel \""
+            + channelName
+            + "\" "
+            + actionTitle;
+        valid.store (
+            true,
+            std::memory_order_release);
+    }
+
+    bool isActive() const noexcept
+    {
+        return valid.load (
+                   std::memory_order_acquire)
+            && active.load (
+                std::memory_order_acquire);
+    }
+
+    void retire() noexcept
+    {
+        active.store (
+            false,
+            std::memory_order_release);
+    }
+
+    bool matchesIdentity (
+        const LfpStableChannelIdentity& identity,
+        int nodeId) const
+    {
+        const auto* key =
+            identity.getStableChannelKey();
+        if (! isActive()
+            || key == nullptr
+            || processorNodeId != nodeId
+            || paneIndex
+                   != identity.getPaneIndex()
+            || streamKey
+                   != identity.getStreamKey()
+            || runtimeUuid
+                   != identity.getRuntimeUuid()
+            || persistedIdentifier
+                   != identity.getPersistedIdentifier()
+            || persistedSourceNodeId
+                   != identity.getPersistedSourceNodeId()
+            || persistedLocalIndex
+                   != identity.getPersistedLocalIndex()
+            || channelName
+                   != identity.getPersistedChannelName()
+            || persistedChannelType
+                   != identity.getPersistedChannelType()
+            || stableKeyKind != key->getKind())
+        {
+            return false;
+        }
+        return stableKeyKind
+                   == LfpStableChannelKey::Kind::identifier
+                   ? stableIdentifier
+                         == key->getIdentifier()
+                   : stableSourceNodeId
+                             == key->getSourceNodeId()
+                         && stableLocalIndex
+                                == key->getLocalIndex();
+    }
+
+    bool matchesObservableState (
+        bool selectedToUse,
+        bool focusedToUse,
+        bool invertedToUse,
+        bool canInvertToUse) const noexcept
+    {
+        return selected == selectedToUse
+            && focused == focusedToUse
+            && inverted == invertedToUse
+            && canInvert == canInvertToUse;
+    }
+
+    void requestAction()
+    {
+        if (! isActive())
+            return;
+        const auto perform =
+            [weakState = weak_from_this()]
+            {
+                const auto state =
+                    weakState.lock();
+                if (state == nullptr
+                    || ! state->isActive())
+                {
+                    return false;
+                }
+                auto* info =
+                    state->owner.getComponent();
+                return info != nullptr
+                    && info
+                           ->performChannelActionAccessibility (
+                               state)
+                           != LfpChannelActionResult::rejected;
+            };
+        auto* manager =
+            MessageManager::getInstanceWithoutCreating();
+        if (manager == nullptr)
+            return;
+        if (manager->isThisTheMessageThread())
+        {
+            perform();
+            return;
+        }
+        auto completion =
+            std::make_shared<
+                LfpChannelActionCompletion>();
+        const auto posted =
+            MessageManager::callAsync (
+                [perform,
+                 completion]
+                {
+                    if (! completion
+                              ->tryBeginCallback())
+                    {
+                        return;
+                    }
+                    try
+                    {
+                        perform();
+                    }
+                    catch (...)
+                    {
+                    }
+                    completion->complete();
+                });
+        if (! posted)
+        {
+            completion->cancel();
+            return;
+        }
+        completion
+            ->waitForMutationCompletion (
+                channelActionDispatchTimeout);
+    }
+
+    const String& getAutomationId() const noexcept { return automationId; }
+    const String& getPrefix() const noexcept { return prefix; }
+    const String& getStableKeyText() const noexcept { return stableKeyText; }
+    const String& getTitle() const noexcept { return title; }
+    const String& getDescription() const noexcept { return description; }
+    const String& getHelp() const noexcept { return help; }
+    const String& getStreamKey() const noexcept { return streamKey; }
+    const String& getChannelName() const noexcept { return channelName; }
+    int getPaneIndex() const noexcept { return paneIndex; }
+    LfpChannelAction getAction() const noexcept { return action; }
+    bool isSelected() const noexcept { return selected; }
+    bool isFocused() const noexcept { return focused; }
+    bool isInverted() const noexcept { return inverted; }
+    bool canBeInverted() const noexcept { return canInvert; }
+
+private:
+    Component::SafePointer<LfpChannelDisplayInfo> owner;
+    const int processorNodeId;
+    const int paneIndex;
+    const String streamKey;
+    const Uuid runtimeUuid;
+    const String persistedIdentifier;
+    const int persistedSourceNodeId;
+    const int persistedLocalIndex;
+    const String channelName;
+    const ContinuousChannel::Type persistedChannelType;
+    const LfpChannelAction action;
+    const bool selected;
+    const bool focused;
+    const bool inverted;
+    const bool canInvert;
+    LfpStableChannelKey::Kind stableKeyKind =
+        LfpStableChannelKey::Kind::identifier;
+    String stableIdentifier;
+    int stableSourceNodeId = -1;
+    int stableLocalIndex = -1;
+    String prefix;
+    String suffix;
+    String stableKeyText;
+    String actionTitle;
+    String automationId;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> valid { false };
+    std::atomic<bool> active { true };
+};
+
+class LfpChannelActionAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit LfpChannelActionAccessibilityValue (
+        std::shared_ptr<LfpChannelActionAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (const String&) override {}
+
+    String getCurrentValueAsString() const override
+    {
+        switch (state->getAction())
+        {
+            case LfpChannelAction::select:
+                return state->isSelected()
+                    ? "Selected"
+                    : "Not selected";
+            case LfpChannelAction::toggleFocus:
+                return state->isFocused()
+                    ? "Focused"
+                    : "Not focused";
+            case LfpChannelAction::toggleInvert:
+            {
+                const auto polarity =
+                    state->isInverted()
+                        ? String ("Inverted")
+                        : String ("Normal");
+                return state->canBeInverted()
+                    ? polarity
+                    : polarity
+                        + "; inversion unavailable";
+            }
+            case LfpChannelAction::monitor:
+                break;
+        }
+        return {};
+    }
+
+private:
+    std::shared_ptr<LfpChannelActionAccessibilityState> state;
+};
+
+class LfpChannelActionAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    LfpChannelActionAccessibilityHandler (
+        Component& component,
+        std::shared_ptr<LfpChannelActionAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              component,
+              roleFor (*stateToUse),
+              actionsFor (stateToUse),
+              interfacesFor (stateToUse)),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto current =
+            AccessibleState().withFocusable();
+        if (state->getAction()
+                == LfpChannelAction::toggleFocus
+            || state->getAction()
+                   == LfpChannelAction::toggleInvert)
+        {
+            current = current.withCheckable();
+            const auto checked =
+                state->getAction()
+                        == LfpChannelAction::toggleFocus
+                    ? state->isFocused()
+                    : state->isInverted();
+            if (checked)
+                current = current.withChecked();
+        }
+        return current;
+    }
+
+    String getTitle() const override { return state->getTitle(); }
+    String getDescription() const override { return state->getDescription(); }
+    String getHelp() const override { return state->getHelp(); }
+    bool isEnabled() const override { return state->isActive(); }
+
+private:
+    static AccessibilityRole roleFor (
+        const LfpChannelActionAccessibilityState& state)
+    {
+        return state.getAction()
+                       == LfpChannelAction::toggleFocus
+                   || state.getAction()
+                          == LfpChannelAction::toggleInvert
+            ? AccessibilityRole::toggleButton
+            : AccessibilityRole::button;
+    }
+
+    static AccessibilityActions actionsFor (
+        const std::shared_ptr<LfpChannelActionAccessibilityState>& state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                state->getAction()
+                           == LfpChannelAction::toggleFocus
+                       || state->getAction()
+                              == LfpChannelAction::toggleInvert
+                    ? AccessibilityActionType::toggle
+                    : AccessibilityActionType::press,
+                [state]
+                {
+                    state->requestAction();
+                });
+    }
+
+    static AccessibilityHandler::Interfaces interfacesFor (
+        const std::shared_ptr<LfpChannelActionAccessibilityState>& state)
+    {
+        AccessibilityHandler::Interfaces result;
+        if (state->getAction()
+            != LfpChannelAction::monitor)
+        {
+            result.value =
+                std::make_unique<
+                    LfpChannelActionAccessibilityValue> (
+                    state);
+        }
+        return result;
+    }
+
+    std::shared_ptr<LfpChannelActionAccessibilityState> state;
+};
+
+class LfpChannelActionAccessibilityComponent final
+    : public Component
+{
+public:
+    explicit LfpChannelActionAccessibilityComponent (
+        LfpChannelDisplayInfo& ownerToUse)
+        : owner (&ownerToUse)
+    {
+        setInterceptsMouseClicks (
+            false,
+            false);
+        setWantsKeyboardFocus (false);
+    }
+
+    void setState (
+        std::shared_ptr<LfpChannelActionAccessibilityState>
+            stateToUse)
+    {
+        state = stateToUse;
+    }
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override
+    {
+        const auto current = state.lock();
+        return current != nullptr
+            && current->isActive()
+            ? std::make_unique<
+                  LfpChannelActionAccessibilityHandler> (
+                  *this,
+                  current)
+            : nullptr;
+    }
+
+    void visibilityChanged() override
+    {
+        Component::visibilityChanged();
+        notifyOwner();
+    }
+
+    void enablementChanged() override
+    {
+        Component::enablementChanged();
+        notifyOwner();
+    }
+
+    void parentHierarchyChanged() override
+    {
+        Component::parentHierarchyChanged();
+        notifyOwner();
+    }
+
+private:
+    void notifyOwner()
+    {
+        if (state.expired())
+            return;
+        if (auto* currentOwner =
+                owner.getComponent())
+        {
+            currentOwner
+                ->handleChannelActionAccessibilityLifecycleChange();
+        }
+    }
+
+    Component::SafePointer<LfpChannelDisplayInfo> owner;
+    std::weak_ptr<LfpChannelActionAccessibilityState> state;
+};
 } // namespace LfpViewer
 
 #pragma mark - LfpChannelDisplayInfo -
@@ -524,6 +1160,20 @@ LfpChannelDisplayInfo::LfpChannelDisplayInfo (LfpDisplaySplitter* canvas_, LfpDi
     enableButton->setAccessible (false);
 
     addAndMakeVisible (enableButton.get());
+    setFocusContainerType (
+        Component::FocusContainerType::
+            focusContainer);
+    for (auto& component :
+         channelActionAccessibilityComponents)
+    {
+        component =
+            std::make_unique<
+                LfpChannelActionAccessibilityComponent> (
+                *this);
+        component->setAccessible (false);
+        addAndMakeVisible (
+            component.get());
+    }
 
     String svgString = "M302.189 329.126H196.105l55.831 135.993c3.889 9.428-.555 19.999-9.444 23.999l-49.165 21.427c-9.165 \
                        4-19.443-.571-23.332-9.714l-53.053-129.136-86.664 89.138C18.729 472.71 0 463.554 0 447.977V18.299C0 \
@@ -534,24 +1184,38 @@ LfpChannelDisplayInfo::LfpChannelDisplayInfo (LfpDisplaySplitter* canvas_, LfpDi
 
 LfpChannelDisplayInfo::~LfpChannelDisplayInfo()
 {
+    revokeChannelActionAccessibility();
     revokeWaveformVisibilityAccessibility();
+}
+
+std::unique_ptr<AccessibilityHandler>
+LfpChannelDisplayInfo::
+    createAccessibilityHandler()
+{
+    return std::make_unique<
+        AccessibilityHandler> (
+        *this,
+        AccessibilityRole::group);
 }
 
 void LfpChannelDisplayInfo::visibilityChanged()
 {
     LfpChannelDisplay::visibilityChanged();
+    handleChannelActionAccessibilityLifecycleChange();
     handleWaveformVisibilityAccessibilityLifecycleChange();
 }
 
 void LfpChannelDisplayInfo::enablementChanged()
 {
     LfpChannelDisplay::enablementChanged();
+    handleChannelActionAccessibilityLifecycleChange();
     handleWaveformVisibilityAccessibilityLifecycleChange();
 }
 
 void LfpChannelDisplayInfo::parentHierarchyChanged()
 {
     Component::parentHierarchyChanged();
+    handleChannelActionAccessibilityLifecycleChange();
     handleWaveformVisibilityAccessibilityLifecycleChange();
 }
 
@@ -763,6 +1427,295 @@ void LfpChannelDisplayInfo::
     {
         display
             ->requestWaveformVisibilityAccessibilityAvailabilityRefresh();
+    }
+}
+
+void LfpChannelDisplayInfo::
+    refreshChannelActionAccessibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>& identity,
+        int nodeId,
+        bool structurallyAvailable)
+{
+    const auto available =
+        structurallyAvailable
+        && identity != nullptr
+        && identity->getStableChannelKey()
+               != nullptr
+        && identity->getPaneIndex() >= 0
+        && identity->getStreamKey()
+               .isNotEmpty()
+        && isShowing()
+        && Component::isEnabled();
+    if (! available)
+    {
+        revokeChannelActionAccessibility();
+        return;
+    }
+
+    const auto selected =
+        display != nullptr
+        && chan >= 0
+        && chan < display->channels.size()
+        && display->channels[chan] != nullptr
+        && display->channels[chan]
+               ->getSelected();
+    const auto focused =
+        display != nullptr
+        && display->getSingleChannelState()
+        && display->getSingleChannelShown()
+               == chan;
+    const auto inverted =
+        display != nullptr
+        && chan >= 0
+        && chan < display->channels.size()
+        && display->channels[chan] != nullptr
+        && display->channels[chan]
+               ->getInputInverted();
+    const auto invertible =
+        display != nullptr
+        && chan >= 0
+        && chan < display->channels.size()
+        && display->channels[chan] != nullptr
+        && display->channels[chan]
+               ->getCanBeInverted();
+
+    bool currentMatches = true;
+    for (const auto& state :
+         channelActionAccessibilityStates)
+    {
+        currentMatches =
+            currentMatches
+            && state != nullptr
+            && state->isActive()
+            && state->matchesIdentity (
+                *identity,
+                nodeId)
+            && state->matchesObservableState (
+                selected,
+                focused,
+                inverted,
+                invertible);
+    }
+    if (currentMatches)
+        return;
+
+    revokeChannelActionAccessibility();
+    constexpr std::array<
+        LfpChannelAction,
+        4>
+        actions {
+            LfpChannelAction::select,
+            LfpChannelAction::toggleFocus,
+            LfpChannelAction::toggleInvert,
+            LfpChannelAction::monitor
+        };
+    for (size_t index = 0;
+         index < actions.size();
+         ++index)
+    {
+        auto state = std::make_shared<
+            LfpChannelActionAccessibilityState> (
+            *this,
+            *identity,
+            nodeId,
+            actions[index],
+            selected,
+            focused,
+            inverted,
+            invertible);
+        if (! state->isActive())
+        {
+            state->retire();
+            revokeChannelActionAccessibility();
+            return;
+        }
+        channelActionAccessibilityStates[index] =
+            state;
+        auto* component =
+            dynamic_cast<
+                LfpChannelActionAccessibilityComponent*> (
+                channelActionAccessibilityComponents[
+                    index]
+                    .get());
+        if (component == nullptr)
+        {
+            revokeChannelActionAccessibility();
+            return;
+        }
+        component->setState (state);
+        component->setComponentID (
+            state->getAutomationId());
+        component->setTitle (
+            state->getTitle());
+        component->setDescription (
+            state->getDescription());
+        component->setHelpText (
+            state->getHelp());
+        component->setAccessible (true);
+        component
+            ->invalidateAccessibilityHandler();
+    }
+
+    const auto& state =
+        channelActionAccessibilityStates[0];
+    const auto oneBasedPane =
+        state->getPaneIndex() + 1;
+    setComponentID (
+        state->getPrefix()
+        + ".actions");
+    setTitle (
+        "LFP display "
+        + String (oneBasedPane)
+        + " stream \""
+        + state->getStreamKey()
+        + "\" channel \""
+        + state->getChannelName()
+        + "\" actions");
+    setDescription (
+        "Actions for channel \""
+        + state->getChannelName()
+        + "\" ("
+        + state->getStableKeyText()
+        + ") in stream \""
+        + state->getStreamKey()
+        + "\" of LFP display "
+        + String (oneBasedPane)
+        + ".");
+    setHelpText (
+        "Contains the stable select, single-channel focus, invert signal, and monitor controls for channel \""
+        + state->getChannelName()
+        + "\" ("
+        + state->getStableKeyText()
+        + ") in stream \""
+        + state->getStreamKey()
+        + "\" of LFP display "
+        + String (oneBasedPane)
+        + ". It also contains the existing waveform visibility control when that control is available.");
+    setAccessible (true);
+    invalidateAccessibilityHandler();
+    layoutChannelActionAccessibilityComponents();
+}
+
+void LfpChannelDisplayInfo::
+    revokeChannelActionAccessibility()
+{
+    for (auto& state :
+         channelActionAccessibilityStates)
+    {
+        if (state != nullptr)
+            state->retire();
+        state.reset();
+    }
+    for (auto& component :
+         channelActionAccessibilityComponents)
+    {
+        if (auto* actionComponent =
+                dynamic_cast<
+                    LfpChannelActionAccessibilityComponent*> (
+                    component.get()))
+        {
+            actionComponent->setState ({});
+        }
+        if (component != nullptr)
+        {
+            component->setAccessible (false);
+            component->setComponentID ({});
+            component->setTitle ({});
+            component->setDescription ({});
+            component->setHelpText ({});
+            component
+                ->invalidateAccessibilityHandler();
+        }
+    }
+    setAccessible (false);
+    setComponentID ({});
+    setTitle ({});
+    setDescription ({});
+    setHelpText ({});
+    invalidateAccessibilityHandler();
+}
+
+LfpChannelActionResult
+LfpChannelDisplayInfo::
+    performChannelActionAccessibility (
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state)
+{
+    jassert (
+        MessageManager::existsAndIsCurrentThread());
+    if (display == nullptr
+        || state == nullptr)
+    {
+        return LfpChannelActionResult::rejected;
+    }
+    const auto action =
+        state->getAction();
+    const auto actionIndex =
+        action
+                == LfpChannelAction::select
+            ? size_t (0)
+        : action
+                == LfpChannelAction::toggleFocus
+            ? size_t (1)
+        : action
+                == LfpChannelAction::toggleInvert
+            ? size_t (2)
+            : size_t (3);
+    if (! state->isActive()
+        || channelActionAccessibilityStates[
+               actionIndex]
+               != state)
+    {
+        return LfpChannelActionResult::rejected;
+    }
+    return display
+        ->performChannelActionAccessibility (
+            *this,
+            action);
+}
+
+bool LfpChannelDisplayInfo::
+    matchesChannelActionAccessibilityIdentity (
+        const LfpStableChannelIdentity& identity,
+        int nodeId) const
+{
+    for (const auto& state :
+         channelActionAccessibilityStates)
+    {
+        if (state == nullptr
+            || ! state->matchesIdentity (
+                identity,
+                nodeId))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void LfpChannelDisplayInfo::
+    handleChannelActionAccessibilityLifecycleChange()
+{
+    jassert (
+        MessageManager::existsAndIsCurrentThread());
+    revokeChannelActionAccessibility();
+    if (display != nullptr)
+    {
+        display
+            ->requestChannelActionAccessibilityAvailabilityRefresh();
+    }
+}
+
+void LfpChannelDisplayInfo::
+    layoutChannelActionAccessibilityComponents()
+{
+    for (auto& component :
+         channelActionAccessibilityComponents)
+    {
+        if (component != nullptr)
+            component->setBounds (
+                getLocalBounds());
     }
 }
 
@@ -980,6 +1933,7 @@ void LfpChannelDisplayInfo::updateMeanAndRMS()
 
 void LfpChannelDisplayInfo::resized()
 {
+    layoutChannelActionAccessibilityComponents();
     int center = getHeight() / 2 - (isSingleChannel ? (75) : (0));
     setEnabledButtonVisibility (getHeight() >= 16);
 

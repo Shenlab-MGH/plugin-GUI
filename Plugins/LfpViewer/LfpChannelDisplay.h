@@ -74,13 +74,13 @@ public:
     void pxPaintHistory (int playhead, int rightEdge, int maxScreenBufferIndex);
 
     /** Selects this channel*/
-    void select();
+    TESTABLE void select();
 
     /** Deselects this channel */
-    void deselect();
+    TESTABLE void deselect();
 
     /** Returns true if this channel is selected */
-    bool getSelected();
+    TESTABLE bool getSelected();
 
     /** Sets the channel name */
     void setName (String);
@@ -116,7 +116,7 @@ public:
     int getChannelOverlap();
 
     /** Return the assigned channel number */
-    int getChannelNumber();
+    TESTABLE int getChannelNumber();
 
     /** Return the assigned channel name */
     TESTABLE String getName();
@@ -162,6 +162,12 @@ public:
 
     /** Sets whether this channel display can be inverted */
     TESTABLE void setCanBeInverted (bool);
+
+    /** Returns whether this channel display can be inverted. */
+    TESTABLE bool getCanBeInverted() const noexcept
+    {
+        return canBeInverted;
+    }
 
     /** Switches between pixel-wise and histogram drawing methods */
     void setDrawMethod (bool);

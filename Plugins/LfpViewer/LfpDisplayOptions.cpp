@@ -3046,6 +3046,8 @@ void LfpDisplayOptions::buttonClicked (Button* b)
 
     if ((idx >= 0) && (b->getToggleState()))
     {
+        lfpDisplay
+            ->beginStableChannelIdentityBulkMutation();
         for (int i = 0; i < lfpDisplay->getNumChannels(); i++)
         {
             if (lfpDisplay->channels[i]->getSelected())
@@ -3056,6 +3058,8 @@ void LfpDisplayOptions::buttonClicked (Button* b)
         }
 
         setSelectedType ((ContinuousChannel::Type) idx, false);
+        lfpDisplay
+            ->endStableChannelIdentityBulkMutation();
     }
 }
 

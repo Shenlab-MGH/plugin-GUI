@@ -44,6 +44,7 @@ using namespace LfpViewer;
 LfpChannelDisplay::LfpChannelDisplay (LfpDisplaySplitter* c, LfpDisplay* d, LfpDisplayOptions* o, int channelNumber)
     : canvasSplit (c), display (d), options (o), isSelected (false), isRecorded (false), recordingIsActive (false), chan (channelNumber), name (""), drawableChan (channelNumber), channelOverlap (300), channelHeight (30), range (250.0f), isEnabled (true), inputInverted (false), canBeInverted (true), drawMethod (false), isHidden (false), ifrom (0), ito (0), ifrom_local (0), ito_local (0)
 {
+    setAccessible (false);
     name = String (channelNumber + 1); // default is to make the channelNumber the name
 
     channelHeightFloat = (float) channelHeight;
@@ -821,7 +822,15 @@ float LfpChannelDisplay::getRange()
 
 void LfpChannelDisplay::select()
 {
+    if (display != nullptr)
+        display
+            ->prepareChannelActionStateMutation (
+                chan);
     isSelected = true;
+    if (display != nullptr)
+        display
+            ->finishChannelActionStateMutation (
+                chan);
 
     // if (isSelected)
     //    std::cout << "Selected channel " << chan << std::endl;
@@ -829,7 +838,15 @@ void LfpChannelDisplay::select()
 
 void LfpChannelDisplay::deselect()
 {
+    if (display != nullptr)
+        display
+            ->prepareChannelActionStateMutation (
+                chan);
     isSelected = false;
+    if (display != nullptr)
+        display
+            ->finishChannelActionStateMutation (
+                chan);
 }
 
 bool LfpChannelDisplay::getSelected()
@@ -891,16 +908,32 @@ void LfpChannelDisplay::setDrawableChannelNumber (int channelId)
 
 void LfpChannelDisplay::setCanBeInverted (bool _canBeInverted)
 {
+    if (display != nullptr)
+        display
+            ->prepareChannelActionStateMutation (
+                chan);
     canBeInverted = _canBeInverted;
+    if (display != nullptr)
+        display
+            ->finishChannelActionStateMutation (
+                chan);
 }
 
 void LfpChannelDisplay::setInputInverted (bool isInverted)
 {
+    if (display != nullptr)
+        display
+            ->prepareChannelActionStateMutation (
+                chan);
     if (canBeInverted)
     {
         inputInverted = isInverted;
         setChannelHeight (channelHeight);
     }
+    if (display != nullptr)
+        display
+            ->finishChannelActionStateMutation (
+                chan);
 }
 
 bool LfpChannelDisplay::getInputInverted()

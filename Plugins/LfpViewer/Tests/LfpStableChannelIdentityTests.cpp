@@ -389,6 +389,26 @@ createIdentityTestEnableButtonHandler (
         ->createAccessibilityHandler();
 }
 
+Component* findIdentityTestChildByIdSuffix (
+    Component& parent,
+    StringRef suffix)
+{
+    for (int index = 0;
+         index < parent.getNumChildComponents();
+         ++index)
+    {
+        auto* child =
+            parent.getChildComponent (index);
+        if (child != nullptr
+            && child->getComponentID()
+                   .endsWith (suffix))
+        {
+            return child;
+        }
+    }
+    return nullptr;
+}
+
 String decodeIdentityTestUtf8Hex (
     StringRef text)
 {
@@ -996,6 +1016,537 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         handler->getValueInterface()
             ->getCurrentValueAsString(),
         "Visible");
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7PublishesNestedStableChannelActionSurface)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_FALSE (buffers.isEmpty());
+
+    buffers[0]->streamKey =
+        "task7/stream";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        String::fromUTF8 (
+            "probe/\xCE\xB1"),
+        17,
+        0,
+        String::fromUTF8 ("Probe α"),
+        ContinuousChannel::Type::
+            ELECTRODE);
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "task7/stream"));
+
+    auto* display =
+        splitters[0]->lfpDisplay.get();
+    auto* info =
+        display->channelInfo[0];
+    ASSERT_NE (display, nullptr);
+    ASSERT_NE (info, nullptr);
+    EXPECT_FALSE (
+        display->channels[0]
+            ->isAccessible());
+
+    auto* displayHandler =
+        display->getAccessibilityHandler();
+    auto* infoHandler =
+        info->getAccessibilityHandler();
+    ASSERT_NE (displayHandler, nullptr);
+    ASSERT_NE (infoHandler, nullptr);
+    EXPECT_EQ (
+        displayHandler->getRole(),
+        AccessibilityRole::group);
+    EXPECT_EQ (
+        infoHandler->getRole(),
+        AccessibilityRole::group);
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.stream_hex_7461736B372F73747265616D.channel_identifier_hex_70726F62652FCEB1";
+    const std::array<String, 4>
+        expectedIds {
+            prefix + ".select",
+            prefix + ".single_channel_focus",
+            prefix + ".invert_signal",
+            prefix + ".monitor"
+        };
+    std::array<Component*, 4> actions {};
+    StringArray observedChildIds;
+    for (int childIndex = 0;
+         childIndex
+         < info->getNumChildComponents();
+         ++childIndex)
+    {
+        auto* child =
+            info->getChildComponent (
+                childIndex);
+        observedChildIds.add (
+            child->getComponentID());
+        for (size_t action = 0;
+             action < expectedIds.size();
+             ++action)
+        {
+            if (child->getComponentID()
+                == expectedIds[action])
+            {
+                actions[action] = child;
+            }
+        }
+    }
+
+    for (size_t action = 0;
+         action < actions.size();
+         ++action)
+    {
+        ASSERT_NE (actions[action], nullptr)
+            << expectedIds[action]
+            << " observed="
+            << observedChildIds
+                   .joinIntoString ("|");
+        EXPECT_EQ (
+            actions[action]
+                ->getParentComponent(),
+            info);
+        EXPECT_TRUE (
+            actions[action]->isAccessible());
+    }
+    EXPECT_EQ (
+        info->getNumChildComponents(),
+        5);
+
+    auto* select =
+        actions[0]
+            ->getAccessibilityHandler();
+    auto* focus =
+        actions[1]
+            ->getAccessibilityHandler();
+    auto* invert =
+        actions[2]
+            ->getAccessibilityHandler();
+    auto* monitor =
+        actions[3]
+            ->getAccessibilityHandler();
+    ASSERT_NE (select, nullptr);
+    ASSERT_NE (focus, nullptr);
+    ASSERT_NE (invert, nullptr);
+    ASSERT_NE (monitor, nullptr);
+    EXPECT_EQ (
+        select->getRole(),
+        AccessibilityRole::button);
+    EXPECT_EQ (
+        focus->getRole(),
+        AccessibilityRole::toggleButton);
+    EXPECT_EQ (
+        invert->getRole(),
+        AccessibilityRole::toggleButton);
+    EXPECT_EQ (
+        monitor->getRole(),
+        AccessibilityRole::button);
+    EXPECT_TRUE (
+        select->getActions().contains (
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        focus->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        invert->getActions().contains (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        monitor->getActions().contains (
+            AccessibilityActionType::press));
+    ASSERT_NE (
+        select->getValueInterface(),
+        nullptr);
+    ASSERT_NE (
+        focus->getValueInterface(),
+        nullptr);
+    ASSERT_NE (
+        invert->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        select->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Not selected");
+    EXPECT_EQ (
+        focus->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Not focused");
+    EXPECT_EQ (
+        invert->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Normal");
+    EXPECT_EQ (
+        monitor->getValueInterface(),
+        nullptr);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7ActionsPreserveOfficialSelectionFocusInvertAndMonitorSemantics)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_GE (
+        display->drawableChannels.size(),
+        2);
+    auto* target =
+        display->drawableChannels[1].channel;
+    auto* info =
+        display->drawableChannels[1].channelInfo;
+    ASSERT_NE (target, nullptr);
+    ASSERT_NE (info, nullptr);
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    const auto invoke =
+        [] (Component& component,
+            AccessibilityActionType action)
+        {
+            auto* handler =
+                component
+                    .getAccessibilityHandler();
+            EXPECT_NE (handler, nullptr);
+            return handler != nullptr
+                && handler->getActions()
+                       .invoke (action);
+        };
+
+    auto* select =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".select");
+    ASSERT_NE (select, nullptr);
+    const auto staleSelectActions =
+        select->getAccessibilityHandler()
+            ->getActions();
+    ASSERT_TRUE (
+        invoke (
+            *select,
+            AccessibilityActionType::press));
+    EXPECT_TRUE (
+        target->getSelected());
+    for (const auto& drawable :
+         display->drawableChannels)
+    {
+        EXPECT_EQ (
+            drawable.channel
+                ->getSelected(),
+            drawable.channel == target);
+    }
+    auto* freshSelectHandler =
+        select->getAccessibilityHandler();
+    ASSERT_NE (
+        freshSelectHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        freshSelectHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Selected");
+
+    target->deselect();
+    EXPECT_TRUE (
+        staleSelectActions.invoke (
+            AccessibilityActionType::press));
+    EXPECT_FALSE (
+        target->getSelected());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (1);
+
+    auto* invert =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".invert_signal");
+    ASSERT_NE (invert, nullptr);
+    const auto invertedBefore =
+        target->getInputInverted();
+    ASSERT_TRUE (
+        invoke (
+            *invert,
+            AccessibilityActionType::toggle));
+    EXPECT_EQ (
+        target->getInputInverted(),
+        ! invertedBefore);
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    auto* monitor =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".monitor");
+    ASSERT_NE (monitor, nullptr);
+    ASSERT_TRUE (
+        invoke (
+            *monitor,
+            AccessibilityActionType::press));
+    const auto monitorMessages =
+        drainIdentityTestBroadcastMessages (
+            *messageCenter);
+    ASSERT_EQ (
+        monitorMessages.size(),
+        1);
+    EXPECT_EQ (
+        monitorMessages[0],
+        "AUDIO SELECT "
+            + String (
+                splitter
+                    ->selectedStreamId)
+            + " "
+            + String (
+                target
+                    ->getChannelNumber()
+                + 1)
+            + " ");
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    auto* focus =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".single_channel_focus");
+    ASSERT_NE (focus, nullptr);
+    ASSERT_TRUE (
+        invoke (
+            *focus,
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        display->getSingleChannelState());
+    EXPECT_EQ (
+        display->getSingleChannelShown(),
+        target->getChannelNumber());
+    ASSERT_EQ (
+        display->drawableChannels.size(),
+        1);
+    focus =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".single_channel_focus");
+    ASSERT_NE (focus, nullptr);
+    auto* focusedHandler =
+        focus->getAccessibilityHandler();
+    ASSERT_NE (
+        focusedHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        focusedHandler
+            ->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Focused");
+    ASSERT_TRUE (
+        focusedHandler->getActions()
+            .invoke (
+                AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        display->getSingleChannelState());
+    EXPECT_GT (
+        display->drawableChannels.size(),
+        1);
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7KeepsStoredHiddenAndNonInvertibleChannelsTruthfullyActionable)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (
+        display->drawableChannels.isEmpty());
+    auto* target =
+        display->drawableChannels[0].channel;
+    auto* info =
+        display->drawableChannels[0].channelInfo;
+    ASSERT_NE (target, nullptr);
+    ASSERT_NE (info, nullptr);
+
+    display->setEnabledState (
+        false,
+        target->getChannelNumber(),
+        true);
+    EXPECT_FALSE (
+        display->getStoredChannelVisibility (
+            target->getChannelNumber()));
+    auto* select =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".select");
+    ASSERT_NE (select, nullptr);
+    ASSERT_TRUE (
+        select->getAccessibilityHandler()
+            ->getActions()
+            .invoke (
+                AccessibilityActionType::press));
+    EXPECT_TRUE (
+        target->getSelected());
+    EXPECT_FALSE (
+        display->getStoredChannelVisibility (
+            target->getChannelNumber()));
+
+    target->setCanBeInverted (false);
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (1);
+    auto* invert =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".invert_signal");
+    ASSERT_NE (invert, nullptr);
+    auto* handler =
+        invert->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    ASSERT_TRUE (handler->isEnabled());
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Normal; inversion unavailable");
+    ASSERT_TRUE (
+        handler->getActions()
+            .invoke (
+                AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        target->getInputInverted());
+    EXPECT_TRUE (
+        target->getSelected());
+    EXPECT_FALSE (
+        display->getStoredChannelVisibility (
+            target->getChannelNumber()));
+    handler =
+        invert->getAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Normal; inversion unavailable");
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        Task7QueuedMonitorActionCannotBroadcastAfterOwnerDestruction)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (
+        display->drawableChannels.isEmpty());
+    auto* info =
+        display->drawableChannels[0]
+            .channelInfo;
+    ASSERT_NE (info, nullptr);
+    auto* monitor =
+        findIdentityTestChildByIdSuffix (
+            *info,
+            ".monitor");
+    ASSERT_NE (monitor, nullptr);
+    const auto retainedActions =
+        monitor->getAccessibilityHandler()
+            ->getActions();
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    std::atomic<bool> workerStarted {
+        false
+    };
+    std::atomic<bool> workerFinished {
+        false
+    };
+    std::thread worker (
+        [&]
+        {
+            workerStarted.store (true);
+            retainedActions.invoke (
+                AccessibilityActionType::press);
+            workerFinished.store (true);
+        });
+    while (! workerStarted.load())
+        Thread::yield();
+
+    canvas.reset();
+    auto* messageManager =
+        MessageManager::getInstance();
+    for (int dispatch = 0;
+         dispatch < 100
+         && ! workerFinished.load();
+         ++dispatch)
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                1);
+    }
+    ASSERT_TRUE (
+        workerFinished.load());
+    worker.join();
+    EXPECT_TRUE (
+        drainIdentityTestBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
 }
 
 TEST (LfpStableChannelIdentityTests,

@@ -473,6 +473,7 @@ void joinLfpWorkerOrAbort (
 #if JUCE_WINDOWS
 enum class LfpWindowsUiaAction
 {
+    queryOnly,
     invoke,
     queryInvoke,
     toggle,
@@ -498,6 +499,8 @@ struct LfpWindowsUiaInvokeResult
         E_PENDING;
     HRESULT selectionItemPatternResult =
         E_PENDING;
+    HRESULT selectionPatternResult =
+        E_PENDING;
     HRESULT expandCollapsePatternResult =
         E_PENDING;
     HRESULT valuePatternResult =
@@ -506,12 +509,15 @@ struct LfpWindowsUiaInvokeResult
     bool togglePatternAvailable = false;
     bool selectionItemPatternAvailable =
         false;
+    bool selectionPatternAvailable =
+        false;
     bool expandCollapsePatternAvailable =
         false;
     bool valuePatternAvailable = false;
     BOOL valueReadOnly = FALSE;
     CONTROLTYPEID controlType = 0;
     BOOL enabled = FALSE;
+    BOOL offscreen = TRUE;
     BOOL selected = FALSE;
     ToggleState toggleState =
         ToggleState_Indeterminate;
@@ -520,7 +526,10 @@ struct LfpWindowsUiaInvokeResult
     std::wstring name;
     std::wstring automationId;
     std::wstring help;
+    std::wstring fullDescription;
     std::wstring value;
+    std::wstring parentAutomationId;
+    std::wstring grandparentAutomationId;
     std::vector<int> runtimeId;
     int matchingElementCount = -1;
 };
@@ -1028,6 +1037,8 @@ invokeLfpWindowsUiaControl (
         &output.controlType);
     element->get_CurrentIsEnabled (
         &output.enabled);
+    element->get_CurrentIsOffscreen (
+        &output.offscreen);
     BSTR text = nullptr;
     if (SUCCEEDED (
             element->get_CurrentAutomationId (
@@ -1059,6 +1070,77 @@ invokeLfpWindowsUiaControl (
         output.help = text;
     }
     SysFreeString (text);
+
+    VARIANT fullDescription;
+    VariantInit (&fullDescription);
+    if (SUCCEEDED (
+            element->GetCurrentPropertyValue (
+                UIA_FullDescriptionPropertyId,
+                &fullDescription))
+        && fullDescription.vt == VT_BSTR
+        && fullDescription.bstrVal
+               != nullptr)
+    {
+        output.fullDescription =
+            fullDescription.bstrVal;
+    }
+    VariantClear (&fullDescription);
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationTreeWalker>
+        controlWalker;
+    if (SUCCEEDED (
+            automation->get_ControlViewWalker (
+                &controlWalker))
+        && controlWalker != nullptr)
+    {
+        Microsoft::WRL::ComPtr<
+            IUIAutomationElement>
+            parent;
+        if (SUCCEEDED (
+                controlWalker
+                    ->GetParentElement (
+                        element.Get(),
+                        &parent))
+            && parent != nullptr)
+        {
+            text = nullptr;
+            if (SUCCEEDED (
+                    parent
+                        ->get_CurrentAutomationId (
+                            &text))
+                && text != nullptr)
+            {
+                output.parentAutomationId =
+                    text;
+            }
+            SysFreeString (text);
+
+            Microsoft::WRL::ComPtr<
+                IUIAutomationElement>
+                grandparent;
+            if (SUCCEEDED (
+                    controlWalker
+                        ->GetParentElement (
+                            parent.Get(),
+                            &grandparent))
+                && grandparent != nullptr)
+            {
+                text = nullptr;
+                if (SUCCEEDED (
+                        grandparent
+                            ->get_CurrentAutomationId (
+                                &text))
+                    && text != nullptr)
+                {
+                    output
+                        .grandparentAutomationId =
+                        text;
+                }
+                SysFreeString (text);
+            }
+        }
+    }
 
     Microsoft::WRL::ComPtr<
         IUIAutomationInvokePattern>
@@ -1103,6 +1185,18 @@ invokeLfpWindowsUiaControl (
         selectionItemPattern != nullptr;
 
     Microsoft::WRL::ComPtr<
+        IUIAutomationSelectionPattern>
+        selectionPattern;
+    output.selectionPatternResult =
+        element
+            ->GetCurrentPatternAs (
+                UIA_SelectionPatternId,
+                IID_PPV_ARGS (
+                    &selectionPattern));
+    output.selectionPatternAvailable =
+        selectionPattern != nullptr;
+
+    Microsoft::WRL::ComPtr<
         IUIAutomationExpandCollapsePattern>
         expandCollapsePattern;
     output.expandCollapsePatternResult =
@@ -1140,6 +1234,13 @@ invokeLfpWindowsUiaControl (
             output.value = value;
         }
         SysFreeString (value);
+    }
+
+    if (action
+        == LfpWindowsUiaAction::
+               queryOnly)
+    {
+        return finish (S_OK);
     }
 
     if (action
@@ -22496,6 +22597,363 @@ TEST_F (LfpDisplayNodeTests,
         xmlRestoredHidden.toggleState,
         ToggleState_Off);
     EXPECT_EQ (xmlRestoredHidden.value, L"Hidden");
+}
+#endif
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaTask7ActionsUseNestedExactOneFreshQueryProtocol)
+{
+    auto canvas =
+        createAveragingCanvas (
+            LfpViewer::SplitLayouts::SINGLE);
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toFront (false);
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_FALSE (buffers.isEmpty());
+    auto* buffer = buffers[0];
+    const auto streamKey =
+        buffer->streamKey;
+    ASSERT_TRUE (
+        streamKey.isNotEmpty());
+    auto& metadata =
+        buffer->channelMetadata
+            .getReference (0);
+    metadata.identifier =
+        "task7/channel";
+    metadata.sourceNodeId = 411;
+    metadata.localIndex = 0;
+    metadata.name =
+        "Task 7 native";
+    metadata.type =
+        ContinuousChannel::Type::ELECTRODE;
+    canvas->updateSettings();
+    canvas->resized();
+    const auto splitters =
+        getDisplaySplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            streamKey));
+    auto* display =
+        splitter->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.stream_hex_"
+        + LfpViewer::
+              encodeWaveformVisibilityUtf8Hex (
+            streamKey);
+    const auto streamGroupId =
+        prefix + ".channels";
+    const auto channelPrefix =
+        prefix
+        + ".channel_identifier_hex_7461736B372F6368616E6E656C";
+    const auto channelGroupId =
+        channelPrefix + ".actions";
+    const auto selectId =
+        channelPrefix + ".select";
+    const auto focusId =
+        channelPrefix
+        + ".single_channel_focus";
+    const auto invertId =
+        channelPrefix
+        + ".invert_signal";
+    const auto monitorId =
+        channelPrefix + ".monitor";
+    const auto window =
+        static_cast<HWND> (
+            canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto streamGroup =
+        invokeWindowsUiaFromWorker (
+            window,
+            streamGroupId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (streamGroup.invokeResult, S_OK);
+    EXPECT_EQ (
+        streamGroup.matchingElementCount,
+        1);
+    EXPECT_EQ (
+        streamGroup.controlType,
+        UIA_GroupControlTypeId);
+    EXPECT_EQ (
+        streamGroup.name,
+        std::wstring (
+            ("LFP display 1 stream \""
+             + streamKey
+             + "\" channels")
+                .toWideCharPointer()));
+    EXPECT_FALSE (
+        streamGroup.invokePatternAvailable);
+    EXPECT_FALSE (
+        streamGroup.togglePatternAvailable);
+    EXPECT_FALSE (
+        streamGroup.selectionPatternAvailable);
+    EXPECT_FALSE (
+        streamGroup.selectionItemPatternAvailable);
+    EXPECT_FALSE (
+        streamGroup.valuePatternAvailable);
+
+    const auto channelGroup =
+        invokeWindowsUiaFromWorker (
+            window,
+            channelGroupId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (channelGroup.invokeResult, S_OK);
+    EXPECT_EQ (
+        channelGroup.matchingElementCount,
+        1);
+    EXPECT_EQ (
+        channelGroup.controlType,
+        UIA_GroupControlTypeId);
+    EXPECT_EQ (
+        channelGroup.name,
+        std::wstring (
+            ("LFP display 1 stream \""
+             + streamKey
+             + "\" channel \"Task 7 native\" actions")
+                .toWideCharPointer()));
+    EXPECT_EQ (
+        channelGroup.parentAutomationId,
+        std::wstring (
+            streamGroupId
+                .toWideCharPointer()));
+    EXPECT_FALSE (
+        channelGroup.invokePatternAvailable);
+    EXPECT_FALSE (
+        channelGroup.togglePatternAvailable);
+    EXPECT_FALSE (
+        channelGroup.selectionPatternAvailable);
+    EXPECT_FALSE (
+        channelGroup.selectionItemPatternAvailable);
+    EXPECT_FALSE (
+        channelGroup.valuePatternAvailable);
+
+    const auto selectBefore =
+        invokeWindowsUiaFromWorker (
+            window,
+            selectId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (selectBefore.invokeResult, S_OK);
+    EXPECT_EQ (
+        selectBefore.matchingElementCount,
+        1);
+    EXPECT_EQ (
+        selectBefore.controlType,
+        UIA_ButtonControlTypeId);
+    EXPECT_EQ (
+        selectBefore.name,
+        std::wstring (
+            ("LFP display 1 stream \""
+             + streamKey
+             + "\" channel \"Task 7 native\" select")
+                .toWideCharPointer()));
+    EXPECT_EQ (
+        selectBefore.fullDescription,
+        std::wstring (
+            ("Channel selection for channel \"Task 7 native\" (identifier \"task7/channel\") in stream \""
+             + streamKey
+             + "\" of LFP display 1.")
+                .toWideCharPointer()));
+    EXPECT_EQ (
+        selectBefore.help,
+        std::wstring (
+            ("Select channel \"Task 7 native\" (identifier \"task7/channel\") in stream \""
+             + streamKey
+             + "\" of LFP display 1 for the existing LFP channel operations. Selection also selects the pane; it does not change the focused XY readout, acquisition, buffering, hardware enablement, or recording selection.")
+                .toWideCharPointer()));
+    EXPECT_EQ (
+        selectBefore.parentAutomationId,
+        std::wstring (
+            channelGroupId
+                .toWideCharPointer()));
+    EXPECT_EQ (
+        selectBefore.grandparentAutomationId,
+        std::wstring (
+            streamGroupId
+                .toWideCharPointer()));
+    EXPECT_EQ (selectBefore.enabled, TRUE);
+    EXPECT_EQ (selectBefore.offscreen, FALSE);
+    EXPECT_TRUE (
+        selectBefore.invokePatternAvailable);
+    EXPECT_TRUE (
+        selectBefore.valuePatternAvailable);
+    EXPECT_EQ (
+        selectBefore.valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        selectBefore.value,
+        L"Not selected");
+    EXPECT_FALSE (
+        selectBefore.togglePatternAvailable);
+    EXPECT_FALSE (
+        selectBefore.selectionPatternAvailable);
+    EXPECT_FALSE (
+        selectBefore.selectionItemPatternAvailable);
+    EXPECT_FALSE (
+        selectBefore.expandCollapsePatternAvailable);
+    EXPECT_FALSE (
+        selectBefore.runtimeId.empty());
+
+    const auto selectTransport =
+        invokeWindowsUiaFromWorker (
+            window,
+            selectId,
+            LfpWindowsUiaAction::invoke);
+    EXPECT_TRUE (
+        selectTransport.invokeResult == S_OK
+        || selectTransport.invokeResult
+               == static_cast<HRESULT> (
+                      UIA_E_ELEMENTNOTAVAILABLE)
+        || selectTransport.invokeResult
+               == static_cast<HRESULT> (
+                      UIA_E_ELEMENTNOTENABLED));
+    const auto selectAfter =
+        invokeWindowsUiaFromWorker (
+            window,
+            selectId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (selectAfter.invokeResult, S_OK);
+    EXPECT_EQ (selectAfter.value, L"Selected");
+    EXPECT_NE (
+        selectBefore.runtimeId,
+        selectAfter.runtimeId);
+
+    const auto focusBefore =
+        invokeWindowsUiaFromWorker (
+            window,
+            focusId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (focusBefore.invokeResult, S_OK);
+    EXPECT_EQ (
+        focusBefore.controlType,
+        UIA_CheckBoxControlTypeId);
+    EXPECT_TRUE (
+        focusBefore.togglePatternAvailable);
+    EXPECT_TRUE (
+        focusBefore.valuePatternAvailable);
+    EXPECT_FALSE (
+        focusBefore.invokePatternAvailable);
+    EXPECT_EQ (
+        focusBefore.value,
+        L"Not focused");
+    invokeWindowsUiaFromWorker (
+        window,
+        focusId,
+        LfpWindowsUiaAction::toggleOnce);
+    const auto focusAfter =
+        invokeWindowsUiaFromWorker (
+            window,
+            focusId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (focusAfter.invokeResult, S_OK);
+    EXPECT_EQ (
+        focusAfter.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (focusAfter.value, L"Focused");
+    invokeWindowsUiaFromWorker (
+        window,
+        focusId,
+        LfpWindowsUiaAction::toggleOnce);
+    EXPECT_FALSE (
+        display->getSingleChannelState());
+
+    const auto invertBefore =
+        invokeWindowsUiaFromWorker (
+            window,
+            invertId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (invertBefore.invokeResult, S_OK);
+    EXPECT_EQ (
+        invertBefore.controlType,
+        UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (
+        invertBefore.toggleState,
+        ToggleState_Off);
+    EXPECT_EQ (
+        invertBefore.value,
+        L"Normal");
+    invokeWindowsUiaFromWorker (
+        window,
+        invertId,
+        LfpWindowsUiaAction::toggleOnce);
+    const auto invertAfter =
+        invokeWindowsUiaFromWorker (
+            window,
+            invertId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (invertAfter.invokeResult, S_OK);
+    EXPECT_EQ (
+        invertAfter.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (
+        invertAfter.value,
+        L"Inverted");
+
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    ASSERT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+    const auto monitorBefore =
+        invokeWindowsUiaFromWorker (
+            window,
+            monitorId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (monitorBefore.invokeResult, S_OK);
+    EXPECT_EQ (
+        monitorBefore.controlType,
+        UIA_ButtonControlTypeId);
+    EXPECT_TRUE (
+        monitorBefore.invokePatternAvailable);
+    EXPECT_FALSE (
+        monitorBefore.togglePatternAvailable);
+    EXPECT_FALSE (
+        monitorBefore.valuePatternAvailable);
+    const auto monitorTransport =
+        invokeWindowsUiaFromWorker (
+        window,
+        monitorId,
+        LfpWindowsUiaAction::invoke);
+    EXPECT_TRUE (
+        monitorTransport.invokeResult == S_OK
+        || monitorTransport.invokeResult
+               == static_cast<HRESULT> (
+                      UIA_E_ELEMENTNOTAVAILABLE)
+        || monitorTransport.invokeResult
+               == static_cast<HRESULT> (
+                      UIA_E_ELEMENTNOTENABLED));
+    const auto monitorAfter =
+        invokeWindowsUiaFromWorker (
+            window,
+            monitorId,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (monitorAfter.invokeResult, S_OK);
+    const auto messages =
+        drainLfpBroadcastMessages (
+            *messageCenter);
+    ASSERT_EQ (messages.size(), 1);
+    EXPECT_EQ (
+        messages[0],
+        "AUDIO SELECT "
+            + String (
+                splitter
+                    ->selectedStreamId)
+            + " 1 ");
+    EXPECT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
 }
 #endif
 

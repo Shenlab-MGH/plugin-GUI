@@ -71,6 +71,9 @@ LfpDisplay::LfpDisplay (LfpDisplaySplitter* c, Viewport* v)
       lastFillFrom (-1),
       totalPixelsFilled (0)
 {
+    setFocusContainerType (
+        Component::FocusContainerType::
+            focusContainer);
     perPixelPlotter = std::make_unique<PerPixelBitmapPlotter> (this);
     supersampledPlotter = std::make_unique<SupersampledBitmapPlotter> (this);
 
@@ -127,7 +130,17 @@ LfpDisplay::LfpDisplay (LfpDisplaySplitter* c, Viewport* v)
 
 LfpDisplay::~LfpDisplay()
 {
+    invalidateChannelActionAccessibility();
     invalidateStableChannelIdentities();
+}
+
+std::unique_ptr<AccessibilityHandler>
+LfpDisplay::createAccessibilityHandler()
+{
+    return std::make_unique<
+        AccessibilityHandler> (
+        *this,
+        AccessibilityRole::group);
 }
 
 int LfpDisplay::getNumChannels()
@@ -377,6 +390,7 @@ void LfpDisplay::setColours()
 void LfpDisplay::
     invalidateStableChannelIdentities()
 {
+    invalidateChannelActionAccessibility();
     invalidateWaveformVisibilityAccessibility();
     for (const auto& slot :
          stableChannelIdentityBindingSlots)
@@ -396,6 +410,8 @@ void LfpDisplay::
     stableChannelIdentityBlueprints
         .clear();
     stableChannelIdentityRefreshPending =
+        false;
+    channelActionAccessibilityRefreshPending =
         false;
 }
 
@@ -1879,6 +1895,7 @@ void LfpDisplay::
     }
 
     refreshWaveformVisibilityAccessibilityAvailability();
+    refreshChannelActionAccessibilityAvailability();
 }
 
 void LfpDisplay::
@@ -1969,6 +1986,144 @@ void LfpDisplay::
     }
 }
 
+void LfpDisplay::
+    refreshChannelActionAccessibilityAvailability()
+{
+    const auto count =
+        jmin (
+            channels.size(),
+            channelInfo.size(),
+            static_cast<int> (
+                stableChannelIdentityBlueprints.size()));
+    const bool paneAvailable =
+        canvasSplit != nullptr
+        && canvasSplit->isIdentityTargetAvailable()
+        && canvasSplit->processor != nullptr
+        && canvasSplit->displayBuffer != nullptr
+        && canvasSplit->isShowing()
+        && canvasSplit->Component::isEnabled()
+        && isShowing()
+        && Component::isEnabled();
+    const auto nodeId =
+        paneAvailable
+            ? canvasSplit->processor->getNodeId()
+            : -1;
+    const auto drawableMask =
+        createCurrentDrawableChannelMask();
+
+    if (paneAvailable)
+    {
+        const auto oneBasedPane =
+            canvasSplit->splitID + 1;
+        const auto stream =
+            canvasSplit->getStreamKey();
+        const auto streamHex =
+            encodeWaveformVisibilityUtf8Hex (
+                stream);
+        setComponentID (
+            "oe.processor."
+            + String (nodeId)
+            + ".lfp.display_"
+            + String (oneBasedPane)
+            + ".stream_hex_"
+            + streamHex
+            + ".channels");
+        setTitle (
+            "LFP display "
+            + String (oneBasedPane)
+            + " stream \""
+            + stream
+            + "\" channels");
+        setDescription (
+            "Channels in stream \""
+            + stream
+            + "\" of LFP display "
+            + String (oneBasedPane)
+            + ".");
+        setHelpText (
+            "Enumerate and operate current drawable channels in stream \""
+            + stream
+            + "\" of LFP display "
+            + String (oneBasedPane)
+            + ". Channel actions affect LFP display state or the existing one-shot audio monitor command only; they do not enable acquisition, buffering, hardware, or recording selection.");
+        setAccessible (true);
+        invalidateAccessibilityHandler();
+    }
+    else
+    {
+        setAccessible (false);
+        setComponentID ({});
+        setTitle ({});
+        setDescription ({});
+        setHelpText ({});
+        invalidateAccessibilityHandler();
+    }
+
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        auto* channel = channels[index];
+        auto* info = channelInfo[index];
+        const auto& identity =
+            stableChannelIdentityBlueprints[
+                static_cast<size_t> (
+                    index)];
+        const bool structurallyAvailable =
+            paneAvailable
+            && identity != nullptr
+            && canvasSplit->splitID
+                   == identity->getPaneIndex()
+            && canvasSplit->getStreamKey()
+                   == identity->getStreamKey()
+            && canvasSplit->displayBuffer->streamKey
+                   == identity->getStreamKey()
+            && drawableMask[
+                   static_cast<size_t> (
+                       index)]
+            && channel != nullptr
+            && info != nullptr
+            && channel->chan == index
+            && info->chan == index
+            && ! channel->getHidden()
+            && ! info->getHidden()
+            && channel->isShowing()
+            && info->isShowing()
+            && channel->Component::isEnabled()
+            && info->Component::isEnabled();
+        if (info != nullptr)
+        {
+            info->refreshChannelActionAccessibility (
+                identity,
+                nodeId,
+                structurallyAvailable);
+        }
+    }
+    for (int index = count;
+         index < channelInfo.size();
+         ++index)
+    {
+        if (auto* info = channelInfo[index])
+            info->revokeChannelActionAccessibility();
+    }
+}
+
+void LfpDisplay::
+    invalidateChannelActionAccessibility()
+{
+    for (auto* info : channelInfo)
+    {
+        if (info != nullptr)
+            info->revokeChannelActionAccessibility();
+    }
+    setAccessible (false);
+    setComponentID ({});
+    setTitle ({});
+    setDescription ({});
+    setHelpText ({});
+    invalidateAccessibilityHandler();
+}
+
 bool LfpDisplay::
     validateWaveformVisibilityAccessibility (
         const LfpChannelDisplayInfo& info) const
@@ -2032,6 +2187,300 @@ bool LfpDisplay::
     }
 
     return false;
+}
+
+bool LfpDisplay::
+    validateChannelActionAccessibility (
+        const LfpChannelDisplayInfo& info) const
+{
+    jassert (
+        MessageManager::existsAndIsCurrentThread());
+    const auto index = info.chan;
+    if (canvasSplit == nullptr
+        || canvasSplit->processor == nullptr
+        || canvasSplit->displayBuffer == nullptr
+        || ! canvasSplit->isIdentityTargetAvailable()
+        || ! canvasSplit->isShowing()
+        || ! canvasSplit->Component::isEnabled()
+        || ! isShowing()
+        || ! Component::isEnabled()
+        || index < 0
+        || index >= channels.size()
+        || index >= channelInfo.size()
+        || index >= static_cast<int> (
+            stableChannelIdentityBlueprints.size())
+        || channelInfo[index] != &info
+        || channels[index] == nullptr
+        || ! info.isShowing()
+        || ! info.Component::isEnabled()
+        || ! channels[index]->isShowing()
+        || ! channels[index]->Component::isEnabled()
+        || const_cast<LfpChannelDisplayInfo&> (
+               info)
+               .getHidden()
+        || channels[index]->getHidden())
+    {
+        return false;
+    }
+
+    const auto& identity =
+        stableChannelIdentityBlueprints[
+            static_cast<size_t> (
+                index)];
+    if (identity == nullptr
+        || identity->getStableChannelKey()
+               == nullptr
+        || canvasSplit->splitID
+               != identity->getPaneIndex()
+        || canvasSplit->getStreamKey()
+               != identity->getStreamKey()
+        || canvasSplit->displayBuffer->streamKey
+               != identity->getStreamKey()
+        || ! info
+                .matchesChannelActionAccessibilityIdentity (
+                    *identity,
+                    canvasSplit->processor
+                        ->getNodeId()))
+    {
+        return false;
+    }
+
+    int matches = 0;
+    for (const auto& drawable :
+         drawableChannels)
+    {
+        if (drawable.channel
+                == channels[index]
+            && drawable.channelInfo
+                   == &info)
+        {
+            ++matches;
+        }
+    }
+    return matches == 1;
+}
+
+LfpChannelActionResult
+LfpDisplay::
+    performChannelActionAccessibility (
+        LfpChannelDisplayInfo& info,
+        LfpChannelAction action)
+{
+    jassert (
+        MessageManager::existsAndIsCurrentThread());
+    const auto actionIndex =
+        action
+                == LfpChannelAction::select
+            ? size_t (0)
+        : action
+                == LfpChannelAction::toggleFocus
+            ? size_t (1)
+        : action
+                == LfpChannelAction::toggleInvert
+            ? size_t (2)
+            : size_t (3);
+    if (actionIndex
+               >= info
+                      .channelActionAccessibilityStates
+                      .size()
+        || ! validateChannelActionAccessibility (
+            info))
+    {
+        return LfpChannelActionResult::rejected;
+    }
+
+    const auto index = info.chan;
+    auto* target = channels[index];
+    auto targetTrack =
+        LfpChannelTrack {
+            target,
+            &info
+        };
+
+    if (action
+        == LfpChannelAction::monitor)
+    {
+        auto* stream =
+            canvasSplit->processor
+                ->getDataStream (
+                    canvasSplit
+                        ->selectedStreamId);
+        if (stream == nullptr
+            || stream->getKey()
+                   != canvasSplit
+                          ->getStreamKey())
+        {
+            return LfpChannelActionResult::rejected;
+        }
+        const auto streamChannels =
+            stream->getContinuousChannels();
+        const auto& identity =
+            stableChannelIdentityBlueprints[
+                static_cast<size_t> (
+                    index)];
+        if (index < 0
+            || index >= streamChannels.size()
+            || index
+                   >= canvasSplit
+                          ->displayBuffer
+                          ->channelMetadata
+                          .size()
+            || streamChannels[index]
+                   == nullptr
+            || identity == nullptr)
+        {
+            return LfpChannelActionResult::rejected;
+        }
+        const auto& metadata =
+            canvasSplit
+                ->displayBuffer
+                ->channelMetadata[
+                    index];
+        if (streamChannels[index]
+                    ->getStreamId()
+                != canvasSplit
+                       ->selectedStreamId
+            || streamChannels[index]
+                       ->getLocalIndex()
+                   != metadata.localIndex
+            || streamChannels[index]
+                       ->getUniqueId()
+                   != metadata.uuid
+            || identity->getRuntimeUuid()
+                   != metadata.uuid)
+        {
+            return LfpChannelActionResult::rejected;
+        }
+        const auto globalIndex =
+            streamChannels[index]
+                ->getGlobalIndex();
+        if (globalIndex < 0
+            || canvasSplit
+                       ->processor
+                       ->getContinuousChannel (
+                           globalIndex)
+                   != streamChannels[index])
+        {
+            return LfpChannelActionResult::rejected;
+        }
+    }
+
+    beginStableChannelIdentityBulkMutation();
+    invalidateChannelActionAccessibility();
+    for (const auto& drawable :
+         drawableChannels)
+    {
+        if (drawable.channel != nullptr)
+            drawable.channel->deselect();
+    }
+    target->select();
+    options->setSelectedType (
+        target->getType());
+
+    auto result =
+        LfpChannelActionResult::completed;
+    switch (action)
+    {
+        case LfpChannelAction::select:
+            break;
+        case LfpChannelAction::toggleFocus:
+            toggleSingleChannel (
+                targetTrack);
+            break;
+        case LfpChannelAction::toggleInvert:
+        {
+            const auto before =
+                target->getInputInverted();
+            target->setInputInverted (
+                ! before);
+            if (target->getInputInverted()
+                == before)
+            {
+                result =
+                    LfpChannelActionResult::
+                        completedNoChange;
+            }
+            break;
+        }
+        case LfpChannelAction::monitor:
+            canvasSplit->monitorChannel (
+                index);
+            break;
+    }
+
+    canvasSplit->select();
+    canvasSplit->fullredraw = true;
+    refresh();
+    channelActionAccessibilityRefreshPending =
+        true;
+    endStableChannelIdentityBulkMutation();
+    return result;
+}
+
+void LfpDisplay::
+    prepareChannelActionStateMutation (
+        int channelIndex)
+{
+    if (channelIndex < 0
+        || channelIndex
+               >= channelInfo.size())
+    {
+        return;
+    }
+    if (auto* info = channelInfo[channelIndex])
+        info->revokeChannelActionAccessibility();
+}
+
+void LfpDisplay::
+    finishChannelActionStateMutation (
+        int)
+{
+    requestChannelActionAccessibilityAvailabilityRefresh();
+}
+
+void LfpDisplay::
+    requestChannelActionAccessibilityAvailabilityRefresh()
+{
+    channelActionAccessibilityRefreshPending =
+        true;
+    if (stableChannelIdentityBulkMutationDepth
+            > 0
+        || channelActionAccessibilityAsyncRefreshPending)
+    {
+        return;
+    }
+
+    channelActionAccessibilityAsyncRefreshPending =
+        true;
+    const auto safeThis =
+        Component::SafePointer<LfpDisplay> (
+            this);
+    MessageManager::callAsync (
+        [safeThis]
+        {
+            auto* current =
+                safeThis.getComponent();
+            if (current == nullptr)
+                return;
+            current
+                ->channelActionAccessibilityAsyncRefreshPending =
+                false;
+            if (current
+                    ->stableChannelIdentityBulkMutationDepth
+                > 0)
+            {
+                return;
+            }
+            if (current
+                    ->channelActionAccessibilityRefreshPending)
+            {
+                current
+                    ->channelActionAccessibilityRefreshPending =
+                    false;
+                current
+                    ->refreshChannelActionAccessibilityAvailability();
+            }
+        });
 }
 
 bool LfpDisplay::
@@ -2337,8 +2786,11 @@ void LfpDisplay::
         stableChannelIdentityRefreshPending;
     const bool refreshWaveformVisibility =
         waveformVisibilityAccessibilityRefreshPending;
+    const bool refreshChannelActions =
+        channelActionAccessibilityRefreshPending;
     stableChannelIdentityRefreshPending = false;
     waveformVisibilityAccessibilityRefreshPending = false;
+    channelActionAccessibilityRefreshPending = false;
     if (refreshStableIdentity)
     {
         refreshStableChannelIdentityAvailability();
@@ -2347,6 +2799,10 @@ void LfpDisplay::
     if (refreshWaveformVisibility)
     {
         refreshWaveformVisibilityAccessibilityAvailability();
+    }
+    if (refreshChannelActions)
+    {
+        refreshChannelActionAccessibilityAvailability();
     }
 }
 
@@ -3234,6 +3690,9 @@ void LfpDisplay::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w
 void LfpDisplay::toggleSingleChannel (LfpChannelTrack drawableChannel)
 {
     beginStableChannelIdentityBulkMutation();
+    invalidateChannelActionAccessibility();
+    channelActionAccessibilityRefreshPending =
+        true;
     if (! getSingleChannelState())
     {
         singleChan = drawableChannel.channel->getChannelNumber();
@@ -3270,6 +3729,9 @@ void LfpDisplay::reactivateChannels()
 void LfpDisplay::rebuildDrawableChannelsList()
 {
     beginStableChannelIdentityBulkMutation();
+    invalidateChannelActionAccessibility();
+    channelActionAccessibilityRefreshPending =
+        true;
     const auto desiredDrawableMask =
         createDesiredDrawableChannelMask();
     revokeOutgoingStableChannelIdentities (

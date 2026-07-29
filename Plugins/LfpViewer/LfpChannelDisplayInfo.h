@@ -38,8 +38,25 @@ namespace LfpViewer
 {
 class LfpWaveformVisibilityAccessibilityState;
 class LfpWaveformVisibilityButton;
+class LfpChannelActionAccessibilityState;
+class LfpChannelActionAccessibilityComponent;
 
 TESTABLE String encodeWaveformVisibilityUtf8Hex (StringRef text);
+
+enum class LfpChannelAction
+{
+    select,
+    toggleFocus,
+    toggleInvert,
+    monitor
+};
+
+enum class LfpChannelActionResult
+{
+    rejected,
+    completed,
+    completedNoChange
+};
 
 /**
     Displays meta data pertaining to an associated channel, such as channel number.
@@ -54,6 +71,8 @@ class LfpChannelDisplayInfo : public LfpChannelDisplay,
     friend class LfpDisplay;
     friend class LfpWaveformVisibilityAccessibilityState;
     friend class LfpWaveformVisibilityButton;
+    friend class LfpChannelActionAccessibilityState;
+    friend class LfpChannelActionAccessibilityComponent;
 
 public:
     /** Constructor */
@@ -103,6 +122,8 @@ public:
     virtual void mouseUp (const MouseEvent& event) override;
 
 protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override;
     void visibilityChanged() override;
     void enablementChanged() override;
     void parentHierarchyChanged() override;
@@ -120,6 +141,14 @@ private:
     std::unique_ptr<UtilityButton> enableButton;
     std::shared_ptr<LfpWaveformVisibilityAccessibilityState>
         waveformVisibilityAccessibilityState;
+    std::array<
+        std::unique_ptr<Component>,
+        4>
+        channelActionAccessibilityComponents;
+    std::array<
+        std::shared_ptr<LfpChannelActionAccessibilityState>,
+        4>
+        channelActionAccessibilityStates;
 
     bool channelTypeStringIsVisible;
     bool channelNumberHidden;
@@ -153,6 +182,22 @@ private:
         int nodeId) const;
     bool isWaveformVisibilityAccessibilityControlAvailable () const;
     void handleWaveformVisibilityAccessibilityLifecycleChange ();
+
+    void refreshChannelActionAccessibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>& identity,
+        int nodeId,
+        bool structurallyAvailable);
+    void revokeChannelActionAccessibility ();
+    LfpChannelActionResult
+    performChannelActionAccessibility (
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state);
+    bool matchesChannelActionAccessibilityIdentity (
+        const LfpStableChannelIdentity& identity,
+        int nodeId) const;
+    void handleChannelActionAccessibilityLifecycleChange ();
+    void layoutChannelActionAccessibilityComponents ();
 
     String getTooltip() override;
 };
