@@ -99,6 +99,13 @@ public:
             int)> hook);
     TESTABLE void resetStableIdentityAvailabilityWorkForTests();
     TESTABLE uint64 getStableIdentityAvailabilityWorkForTests() const noexcept;
+    TESTABLE static bool
+    isPersistedChannelTypeValueAcceptedForTests (
+        int value) noexcept;
+    TESTABLE void
+    resetWaveformVisibilityResolutionWorkForTests();
+    TESTABLE uint64
+    getWaveformVisibilityResolutionWorkForTests() const noexcept;
 #endif
 
     /** Returns the number of display channels*/
@@ -418,9 +425,13 @@ private:
             availableStreams) const;
     void stageWaveformVisibilityState (
         const XmlElement& paneNode);
+    void stageInvalidWaveformVisibilityState();
     void commitStagedWaveformVisibilityState (
         const Array<DisplayBuffer*>&
             availableStreams);
+    static bool
+    isPersistedChannelTypeValueAccepted (
+        int value) noexcept;
 
     struct StagedWaveformVisibilityRecord
     {
@@ -488,6 +499,9 @@ private:
         StagedWaveformVisibilityRecord>
         stagedWaveformVisibilityRecords;
     String stagedLegacyChannelDisplayState;
+    String stagedLegacyStreamKey;
+    bool stagedLegacyStreamKeyPresent =
+        false;
     StagedWaveformVisibilityKind
         stagedWaveformVisibilityKind =
             StagedWaveformVisibilityKind::
@@ -514,6 +528,7 @@ private:
         int)>
         stableIdentityLifecycleTestHook;
     mutable uint64 stableIdentityAvailabilityWorkForTests = 0;
+    uint64 waveformVisibilityResolutionWorkForTests = 0;
 #endif
 
     String colourGrouping;

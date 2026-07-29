@@ -3760,9 +3760,38 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
 {
     canvasSplit->isLoading = true;
 
+    const auto paneTag =
+        "LFPDISPLAY"
+        + String (
+            canvasSplit->splitID);
+    int matchingPaneCount = 0;
+    for (const auto* child :
+         xml->getChildIterator())
+    {
+        if (child->hasTagName (
+                paneTag))
+        {
+            ++matchingPaneCount;
+        }
+    }
+    if (matchingPaneCount > 1)
+    {
+        lfpDisplay
+            ->stageInvalidWaveformVisibilityState();
+        lfpDisplay
+            ->commitStagedWaveformVisibilityState (
+                canvasSplit
+                    ->processor
+                    ->getDisplayBuffers());
+        lfpDisplay
+            ->applyStoredChannelVisibilityAfterBind();
+        return;
+    }
+
     for (auto* xmlNode : xml->getChildIterator())
     {
-        if (xmlNode->hasTagName ("LFPDISPLAY" + String (canvasSplit->splitID)))
+        if (xmlNode->hasTagName (
+                paneTag))
         {
             //uint32 id = xmlNode->getIntAttribute("SubprocessorID");
 

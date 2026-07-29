@@ -1039,6 +1039,9 @@ void LfpDisplay::
         .clear();
     stagedLegacyChannelDisplayState
         .clear();
+    stagedLegacyStreamKey.clear();
+    stagedLegacyStreamKeyPresent =
+        false;
     stagedWaveformVisibilityKind =
         StagedWaveformVisibilityKind::
             none;
@@ -1068,6 +1071,13 @@ void LfpDisplay::
             paneNode
                 .getStringAttribute (
                     "ChannelDisplayState");
+        stagedLegacyStreamKeyPresent =
+            paneNode.hasAttribute (
+                "stream_key");
+        stagedLegacyStreamKey =
+            paneNode
+                .getStringAttribute (
+                    "stream_key");
         return;
     }
 
@@ -1211,17 +1221,50 @@ void LfpDisplay::
                 && localIndexIsValid
                 && record.sourceNodeId >= 0
                 && record.localIndex >= 0);
+        const bool identifierAuxiliaryValuesAreValid =
+            record.stableKeyKind
+                    != LfpStableChannelKey::
+                           Kind::identifier
+            || (sourceNodeIdIsValid
+                && localIndexIsValid
+                && record.sourceNodeId >= -1
+                && record.localIndex >= -1);
         const bool channelTypeIsValid =
-            channelType
-                >= static_cast<int> (
-                    ContinuousChannel::Type::
-                        ELECTRODE)
-            && channelType
-                   <= static_cast<int> (
-                       ContinuousChannel::Type::
-                           ADC);
+            isPersistedChannelTypeValueAccepted (
+                channelType);
+        bool hasOnlyCanonicalAttributes =
+            true;
+        for (int attribute = 0;
+             attribute
+             < child->getNumAttributes();
+             ++attribute)
+        {
+            const auto attributeName =
+                child->getAttributeName (
+                    attribute);
+            if (attributeName
+                        != "stream_key"
+                && attributeName
+                       != "stable_key_kind"
+                && attributeName
+                       != "identifier"
+                && attributeName
+                       != "source_node_id"
+                && attributeName
+                       != "local_index"
+                && attributeName
+                       != "channel_name"
+                && attributeName
+                       != "channel_type")
+            {
+                hasOnlyCanonicalAttributes =
+                    false;
+                break;
+            }
+        }
         record.stableKeyWellFormed =
             record.streamKey
+                .trim()
                 .isNotEmpty()
             && identifierIsValid
             && sourceLocalIsValid;
@@ -1230,6 +1273,8 @@ void LfpDisplay::
             && child->hasAttribute (
                 "channel_name")
             && integersAreValid
+            && identifierAuxiliaryValuesAreValid
+            && hasOnlyCanonicalAttributes
             && channelTypeIsValid;
         if (channelTypeIsValid)
         {
@@ -1246,12 +1291,68 @@ void LfpDisplay::
 }
 
 void LfpDisplay::
+    stageInvalidWaveformVisibilityState()
+{
+    stagedWaveformVisibilityRecords
+        .clear();
+    stagedLegacyChannelDisplayState
+        .clear();
+    stagedLegacyStreamKey.clear();
+    stagedLegacyStreamKeyPresent =
+        false;
+    stagedWaveformVisibilityKind =
+        StagedWaveformVisibilityKind::
+            version2;
+    stagedWaveformVisibilityPending =
+        true;
+}
+
+bool LfpDisplay::
+    isPersistedChannelTypeValueAccepted (
+        int value) noexcept
+{
+    return value
+               == static_cast<int> (
+                   ContinuousChannel::Type::
+                       ELECTRODE)
+        || value
+               == static_cast<int> (
+                   ContinuousChannel::Type::
+                       AUX)
+        || value
+               == static_cast<int> (
+                   ContinuousChannel::Type::
+                       ADC)
+        || value
+               == static_cast<int> (
+                   ContinuousChannel::Type::
+                       INVALID);
+}
+
+void LfpDisplay::
     commitStagedWaveformVisibilityState (
         const Array<DisplayBuffer*>&
             availableStreams)
 {
     if (! stagedWaveformVisibilityPending)
         return;
+
+    if (availableStreams.isEmpty())
+        return;
+
+    for (const auto* stream :
+         availableStreams)
+    {
+        if (stream == nullptr
+            || stream->numChannels < 0
+            || stream
+                       ->channelMetadata
+                       .size()
+                   != stream->numChannels)
+        {
+            return;
+        }
+    }
 
     std::unordered_set<
         StableChannelVisibilityKey,
@@ -1264,19 +1365,114 @@ void LfpDisplay::
     {
         struct CurrentIdentity
         {
-            std::shared_ptr<
-                const LfpStableChannelIdentity>
-                identity;
             StableChannelVisibilityKey
                 visibilityKey;
+            String identifier;
+            int sourceNodeId;
+            int localIndex;
+            String channelName;
+            ContinuousChannel::Type
+                channelType;
+        };
+        struct IdentifierIndexKey
+        {
+            std::string streamKey;
+            std::string identifier;
+
+            bool operator== (
+                const IdentifierIndexKey&
+                    other) const noexcept
+            {
+                return streamKey
+                           == other.streamKey
+                    && identifier
+                           == other.identifier;
+            }
+        };
+        struct IdentifierIndexKeyHash
+        {
+            size_t operator() (
+                const IdentifierIndexKey&
+                    key) const noexcept
+            {
+                const auto first =
+                    std::hash<std::string> {} (
+                        key.streamKey);
+                const auto second =
+                    std::hash<std::string> {} (
+                        key.identifier);
+                return first
+                    ^ (second
+                       + static_cast<size_t> (
+                           0x9e3779b9)
+                       + (first << 6)
+                       + (first >> 2));
+            }
+        };
+        struct SourceLocalIndexKey
+        {
+            std::string streamKey;
+            int sourceNodeId;
+            int localIndex;
+
+            bool operator== (
+                const SourceLocalIndexKey&
+                    other) const noexcept
+            {
+                return streamKey
+                           == other.streamKey
+                    && sourceNodeId
+                           == other.sourceNodeId
+                    && localIndex
+                           == other.localIndex;
+            }
+        };
+        struct SourceLocalIndexKeyHash
+        {
+            size_t operator() (
+                const SourceLocalIndexKey&
+                    key) const noexcept
+            {
+                auto result =
+                    std::hash<std::string> {} (
+                        key.streamKey);
+                const auto sourceHash =
+                    std::hash<int> {} (
+                        key.sourceNodeId);
+                const auto localHash =
+                    std::hash<int> {} (
+                        key.localIndex);
+                result ^= sourceHash
+                    + static_cast<size_t> (
+                        0x9e3779b9)
+                    + (result << 6)
+                    + (result >> 2);
+                result ^= localHash
+                    + static_cast<size_t> (
+                        0x9e3779b9)
+                    + (result << 6)
+                    + (result >> 2);
+                return result;
+            }
         };
         std::vector<CurrentIdentity>
             currentIdentities;
+        size_t currentIdentityCapacity =
+            0;
         for (const auto* stream :
              availableStreams)
         {
-            if (stream == nullptr)
-                continue;
+            currentIdentityCapacity +=
+                static_cast<size_t> (
+                    stream
+                        ->channelMetadata
+                        .size());
+        }
+        currentIdentities.reserve (
+            currentIdentityCapacity);
+        for (const auto* stream :
+             availableStreams)
+        {
             const auto identities =
                 resolveStableChannelIdentities (
                     canvasSplit != nullptr
@@ -1299,13 +1495,75 @@ void LfpDisplay::
                 }
                 currentIdentities
                     .push_back (
-                        { identity,
-                          StableChannelVisibilityKey (
+                        { StableChannelVisibilityKey (
                               identity
                                   ->getPaneIndex(),
                               identity
                                   ->getStreamKey(),
-                              *stableKey) });
+                              *stableKey),
+                          identity
+                              ->getPersistedIdentifier(),
+                          identity
+                              ->getPersistedSourceNodeId(),
+                          identity
+                              ->getPersistedLocalIndex(),
+                          identity
+                              ->getPersistedChannelName(),
+                          identity
+                              ->getPersistedChannelType() });
+#if BUILD_TESTS
+                ++waveformVisibilityResolutionWorkForTests;
+#endif
+            }
+        }
+
+        std::unordered_map<
+            IdentifierIndexKey,
+            std::vector<size_t>,
+            IdentifierIndexKeyHash>
+            identifierIndex;
+        std::unordered_map<
+            SourceLocalIndexKey,
+            std::vector<size_t>,
+            SourceLocalIndexKeyHash>
+            sourceLocalIndex;
+        identifierIndex.reserve (
+            currentIdentities.size());
+        sourceLocalIndex.reserve (
+            currentIdentities.size());
+        for (size_t index = 0;
+             index
+             < currentIdentities.size();
+             ++index)
+        {
+            const auto& current =
+                currentIdentities[index];
+            if (current.identifier
+                    .trim()
+                    .isNotEmpty())
+            {
+                identifierIndex[
+                    { current
+                          .visibilityKey
+                          .streamKey
+                          .toStdString(),
+                      current.identifier
+                          .toStdString() }]
+                    .push_back (
+                        index);
+            }
+            if (current.sourceNodeId >= 0
+                && current.localIndex >= 0)
+            {
+                sourceLocalIndex[
+                    { current
+                          .visibilityKey
+                          .streamKey
+                          .toStdString(),
+                      current.sourceNodeId,
+                      current.localIndex }]
+                    .push_back (
+                        index);
             }
         }
 
@@ -1322,70 +1580,69 @@ void LfpDisplay::
         for (const auto& record :
              stagedWaveformVisibilityRecords)
         {
+#if BUILD_TESTS
+            ++waveformVisibilityResolutionWorkForTests;
+#endif
             if (! record
                       .stableKeyWellFormed)
                 continue;
 
-            const CurrentIdentity*
-                uniqueMatch = nullptr;
-            int stableKeyMatchCount = 0;
-            bool uniqueSignatureMatches =
-                false;
-            for (const auto& current :
-                 currentIdentities)
+            const std::vector<size_t>*
+                matches = nullptr;
+            if (record.stableKeyKind
+                == LfpStableChannelKey::
+                       Kind::identifier)
             {
-                const auto* stableKey =
-                    current.identity
-                        ->getStableChannelKey();
-                if (stableKey == nullptr
-                    || current.identity
-                               ->getStreamKey()
-                           != record.streamKey
-                    || stableKey->getKind()
-                           != record.stableKeyKind)
+                const auto match =
+                    identifierIndex.find (
+                        { record
+                              .streamKey
+                              .toStdString(),
+                          record.identifier
+                              .toStdString() });
+                if (match
+                    != identifierIndex.end())
                 {
-                    continue;
+                    matches =
+                        &match->second;
                 }
-
-                const bool stableKeyMatches =
-                    record.stableKeyKind
-                            == LfpStableChannelKey::
-                                   Kind::identifier
-                    ? stableKey
-                              ->getIdentifier()
-                          == record.identifier
-                    : stableKey
-                                  ->getSourceNodeId()
-                              == record.sourceNodeId
-                        && stableKey
-                                   ->getLocalIndex()
-                               == record.localIndex;
-                if (stableKeyMatches)
+            }
+            else
+            {
+                const auto match =
+                    sourceLocalIndex.find (
+                        { record
+                              .streamKey
+                              .toStdString(),
+                          record.sourceNodeId,
+                          record.localIndex });
+                if (match
+                    != sourceLocalIndex.end())
                 {
-                    ++stableKeyMatchCount;
-                    uniqueMatch =
-                        &current;
-                    uniqueSignatureMatches =
-                        record.wellFormed
-                        && current.identity
-                                    ->getPersistedChannelName()
-                                == record.channelName
-                        && current.identity
-                                   ->getPersistedChannelType()
-                               == record.channelType;
+                    matches =
+                        &match->second;
                 }
             }
 
-            if (stableKeyMatchCount == 1
-                && uniqueMatch != nullptr)
+            if (matches == nullptr
+                || matches->size() != 1)
             {
-                auto& count = resolutionCounts[
-                    uniqueMatch->visibilityKey];
-                ++count.recordsForStableKey;
-                if (uniqueSignatureMatches)
-                {
-                    ++count.matchingSignatures;
-                }
+                continue;
+            }
+
+            const auto& uniqueMatch =
+                currentIdentities[
+                    matches->front()];
+            auto& count = resolutionCounts[
+                uniqueMatch.visibilityKey];
+            ++count.recordsForStableKey;
+            if (record.wellFormed
+                && uniqueMatch.channelName
+                       == record.channelName
+                && uniqueMatch.channelType
+                       == record.channelType)
+            {
+                ++count.matchingSignatures;
             }
         }
 
@@ -1408,55 +1665,79 @@ void LfpDisplay::
     else if (
         stagedWaveformVisibilityKind
             == StagedWaveformVisibilityKind::
-                   legacy
-        && availableStreams.size() == 1
-        && availableStreams[0] != nullptr)
+                   legacy)
     {
-        const auto* stream =
-            availableStreams[0];
-        const auto identities =
-            resolveStableChannelIdentities (
-                canvasSplit != nullptr
-                    ? canvasSplit->splitID
-                    : -1,
-                *stream,
-                availableStreams);
-        const auto migratedCount =
-            jmin (
-                static_cast<int> (
-                    identities.size()),
-                stagedLegacyChannelDisplayState
-                    .length());
-        for (int channel = 0;
-             channel < migratedCount;
-             ++channel)
+        const DisplayBuffer* stream =
+            nullptr;
+        if (stagedLegacyStreamKeyPresent)
         {
-            if (stagedLegacyChannelDisplayState[
-                    channel]
-                != '0')
+            int matchingStreams = 0;
+            for (const auto* candidate :
+                 availableStreams)
             {
-                continue;
+                if (candidate->streamKey
+                    == stagedLegacyStreamKey)
+                {
+                    ++matchingStreams;
+                    stream = candidate;
+                }
             }
-            const auto& identity =
-                identities[
-                    static_cast<size_t> (
-                        channel)];
-            const auto* stableKey =
-                identity != nullptr
-                    ? identity
-                          ->getStableChannelKey()
-                    : nullptr;
-            if (identity != nullptr
-                && stableKey != nullptr)
+            if (matchingStreams != 1)
+                stream = nullptr;
+        }
+        else if (availableStreams.size()
+                 == 1)
+        {
+            stream =
+                availableStreams[0];
+        }
+
+        if (stream != nullptr)
+        {
+            const auto identities =
+                resolveStableChannelIdentities (
+                    canvasSplit != nullptr
+                        ? canvasSplit->splitID
+                        : -1,
+                    *stream,
+                    availableStreams);
+            const auto migratedCount =
+                jmin (
+                    static_cast<int> (
+                        identities.size()),
+                    stagedLegacyChannelDisplayState
+                        .length());
+            for (int channel = 0;
+                 channel < migratedCount;
+                 ++channel)
             {
-                resolvedHiddenChannels
-                    .insert (
-                        StableChannelVisibilityKey (
-                            identity
-                                ->getPaneIndex(),
-                            identity
-                                ->getStreamKey(),
-                            *stableKey));
+                if (stagedLegacyChannelDisplayState[
+                        channel]
+                    != '0')
+                {
+                    continue;
+                }
+                const auto& identity =
+                    identities[
+                        static_cast<size_t> (
+                            channel)];
+                const auto* stableKey =
+                    identity != nullptr
+                        ? identity
+                              ->getStableChannelKey()
+                        : nullptr;
+                if (identity != nullptr
+                    && stableKey != nullptr)
+                {
+                    resolvedHiddenChannels
+                        .insert (
+                            StableChannelVisibilityKey (
+                                identity
+                                    ->getPaneIndex(),
+                                identity
+                                    ->getStreamKey(),
+                                *stableKey));
+                }
             }
         }
     }
@@ -1468,6 +1749,9 @@ void LfpDisplay::
         .clear();
     stagedLegacyChannelDisplayState
         .clear();
+    stagedLegacyStreamKey.clear();
+    stagedLegacyStreamKeyPresent =
+        false;
     stagedWaveformVisibilityKind =
         StagedWaveformVisibilityKind::
             none;
@@ -2024,6 +2308,27 @@ uint64 LfpDisplay::
     getStableIdentityAvailabilityWorkForTests() const noexcept
 {
     return stableIdentityAvailabilityWorkForTests;
+}
+
+bool LfpDisplay::
+    isPersistedChannelTypeValueAcceptedForTests (
+        int value) noexcept
+{
+    return isPersistedChannelTypeValueAccepted (
+        value);
+}
+
+void LfpDisplay::
+    resetWaveformVisibilityResolutionWorkForTests()
+{
+    waveformVisibilityResolutionWorkForTests =
+        0;
+}
+
+uint64 LfpDisplay::
+    getWaveformVisibilityResolutionWorkForTests() const noexcept
+{
+    return waveformVisibilityResolutionWorkForTests;
 }
 
 void LfpDisplay::
