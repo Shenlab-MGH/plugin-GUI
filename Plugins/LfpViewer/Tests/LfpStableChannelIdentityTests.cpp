@@ -26,7 +26,9 @@
 #include <TestFixtures.h>
 #include <algorithm>
 #include <atomic>
+#include <exception>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -245,6 +247,35 @@ static_assert (
         std::shared_ptr<
             const LfpStableChannelIdentity>>::value,
     "Stable channel requests must not expose a raw component constructor");
+
+class ScopedStableChannelDiagnosticTestSeam final
+{
+public:
+    ScopedStableChannelDiagnosticTestSeam (
+        LfpStableChannelDiagnosticDispatcherForTests
+            dispatcher,
+        std::function<void()> validationHook)
+    {
+        setStableChannelDiagnosticDispatcherForTests (
+            std::move (
+                dispatcher));
+        setStableChannelDiagnosticValidationHookForTests (
+            std::move (
+                validationHook));
+    }
+
+    ~ScopedStableChannelDiagnosticTestSeam()
+    {
+        setStableChannelDiagnosticValidationHookForTests (
+            {});
+        setStableChannelDiagnosticDispatcherForTests (
+            {});
+    }
+
+private:
+    JUCE_DECLARE_NON_COPYABLE (
+        ScopedStableChannelDiagnosticTestSeam)
+};
 
 DisplayBuffer::ChannelMetadata makeIdentityMetadata (
     String identifier,
@@ -1797,6 +1828,276 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         returnedWithoutDispatch);
     EXPECT_FALSE (
         workerResult);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WorkerDiagnosticFailsClosedWithoutExceptionWhenAcceptedCallbackIsDropped)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto request =
+        splitters[0]
+            ->lfpDisplay
+            ->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+    ASSERT_TRUE (
+        request
+            ->validateCurrentAndAvailable());
+
+    std::atomic<int> dispatchCount {
+        0
+    };
+    std::atomic<int> validationCount {
+        0
+    };
+    std::exception_ptr workerException;
+    bool workerResult = true;
+    {
+        ScopedStableChannelDiagnosticTestSeam seam (
+            [&] (
+                std::function<void()>)
+            {
+                dispatchCount.fetch_add (1);
+                return true;
+            },
+            [&]
+            {
+                validationCount.fetch_add (1);
+            });
+        std::thread worker (
+            [&]
+            {
+                try
+                {
+                    workerResult =
+                        request
+                            ->validateCurrentAndAvailable();
+                }
+                catch (...)
+                {
+                    workerException =
+                        std::current_exception();
+                }
+            });
+        worker.join();
+    }
+
+    EXPECT_FALSE (
+        static_cast<bool> (
+            workerException));
+    EXPECT_FALSE (workerResult);
+    EXPECT_EQ (dispatchCount.load(), 1);
+    EXPECT_EQ (validationCount.load(), 0);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        TimedOutWorkerDiagnosticDoesNotRunLiveValidationWhenAcceptedCallbackRunsLate)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto request =
+        splitters[0]
+            ->lfpDisplay
+            ->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+    ASSERT_TRUE (
+        request
+            ->validateCurrentAndAvailable());
+
+    std::mutex callbackMutex;
+    std::function<void()> acceptedCallback;
+    std::atomic<int> dispatchCount {
+        0
+    };
+    std::atomic<int> validationCount {
+        0
+    };
+    std::exception_ptr workerException;
+    bool workerResult = true;
+    {
+        ScopedStableChannelDiagnosticTestSeam seam (
+            [&] (
+                std::function<void()> callback)
+            {
+                {
+                    const std::lock_guard<std::mutex>
+                        lock (
+                            callbackMutex);
+                    acceptedCallback =
+                        std::move (
+                            callback);
+                }
+                dispatchCount.fetch_add (1);
+                return true;
+            },
+            [&]
+            {
+                validationCount.fetch_add (1);
+            });
+        std::thread worker (
+            [&]
+            {
+                try
+                {
+                    workerResult =
+                        request
+                            ->validateCurrentAndAvailable();
+                }
+                catch (...)
+                {
+                    workerException =
+                        std::current_exception();
+                }
+            });
+        worker.join();
+
+        std::function<void()> lateCallback;
+        {
+            const std::lock_guard<std::mutex>
+                lock (
+                    callbackMutex);
+            lateCallback =
+                std::move (
+                    acceptedCallback);
+        }
+        ASSERT_TRUE (
+            static_cast<bool> (
+                lateCallback));
+        EXPECT_NO_THROW (
+            lateCallback());
+    }
+
+    EXPECT_FALSE (
+        static_cast<bool> (
+            workerException));
+    EXPECT_FALSE (workerResult);
+    EXPECT_EQ (dispatchCount.load(), 1);
+    EXPECT_EQ (validationCount.load(), 0);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        AcceptedWorkerDiagnosticCompletesNormallyExactlyOnce)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto request =
+        splitters[0]
+            ->lfpDisplay
+            ->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+    ASSERT_TRUE (
+        request
+            ->validateCurrentAndAvailable());
+
+    std::mutex callbackMutex;
+    WaitableEvent callbackAccepted;
+    std::function<void()> acceptedCallback;
+    std::atomic<int> dispatchCount {
+        0
+    };
+    std::atomic<int> validationCount {
+        0
+    };
+    std::exception_ptr workerException;
+    bool workerResult = false;
+    bool callbackWasAccepted = false;
+    {
+        ScopedStableChannelDiagnosticTestSeam seam (
+            [&] (
+                std::function<void()> callback)
+            {
+                {
+                    const std::lock_guard<std::mutex>
+                        lock (
+                            callbackMutex);
+                    acceptedCallback =
+                        std::move (
+                            callback);
+                }
+                dispatchCount.fetch_add (1);
+                callbackAccepted.signal();
+                return true;
+            },
+            [&]
+            {
+                validationCount.fetch_add (1);
+            });
+        std::thread worker (
+            [&]
+            {
+                try
+                {
+                    workerResult =
+                        request
+                            ->validateCurrentAndAvailable();
+                }
+                catch (...)
+                {
+                    workerException =
+                        std::current_exception();
+                }
+            });
+        callbackWasAccepted =
+            callbackAccepted.wait (
+                1000);
+
+        std::function<void()> callback;
+        {
+            const std::lock_guard<std::mutex>
+                lock (
+                    callbackMutex);
+            callback =
+                std::move (
+                    acceptedCallback);
+        }
+        if (callback)
+            callback();
+        worker.join();
+    }
+
+    EXPECT_TRUE (callbackWasAccepted);
+    EXPECT_FALSE (
+        static_cast<bool> (
+            workerException));
+    EXPECT_TRUE (workerResult);
+    EXPECT_EQ (dispatchCount.load(), 1);
+    EXPECT_EQ (validationCount.load(), 1);
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,

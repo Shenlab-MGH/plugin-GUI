@@ -31,6 +31,20 @@ class LfpStableChannelActionRequest;
 class LfpStableChannelActionOwnerState;
 class LfpStableChannelIdentityBindingSlot;
 
+#if BUILD_TESTS
+using LfpStableChannelDiagnosticDispatcherForTests =
+    std::function<bool (
+        std::function<void()>)>;
+
+TESTABLE void
+setStableChannelDiagnosticDispatcherForTests (
+    LfpStableChannelDiagnosticDispatcherForTests
+        dispatcher);
+TESTABLE void
+setStableChannelDiagnosticValidationHookForTests (
+    std::function<void()> hook);
+#endif
+
 /**
     Resolves copied channel snapshots against the complete current stream set.
 

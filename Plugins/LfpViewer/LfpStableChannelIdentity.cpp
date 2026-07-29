@@ -19,7 +19,8 @@
 #include "LfpDisplayCanvas.h"
 
 #include <chrono>
-#include <future>
+#include <condition_variable>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -32,7 +33,153 @@ std::atomic<uint64> nextIdentityGeneration {
 };
 constexpr auto stableChannelDiagnosticTimeout =
     std::chrono::milliseconds (100);
+
+class StableChannelDiagnosticCompletion final
+{
+public:
+    bool tryBeginCallback() noexcept
+    {
+        const std::lock_guard<std::mutex>
+            lock (mutex);
+        if (cancelled
+            || callbackClaimed)
+        {
+            return false;
+        }
+
+        callbackClaimed = true;
+        return true;
+    }
+
+    void complete (bool value) noexcept
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (mutex);
+            if (cancelled
+                || ! callbackClaimed
+                || completed)
+            {
+                return;
+            }
+
+            result = value;
+            completed = true;
+        }
+        completionChanged.notify_one();
+    }
+
+    void cancel() noexcept
+    {
+        const std::lock_guard<std::mutex>
+            lock (mutex);
+        cancelled = true;
+    }
+
+    bool waitForResult (
+        std::chrono::milliseconds timeout) noexcept
+    {
+        std::unique_lock<std::mutex>
+            lock (mutex);
+        if (! completionChanged.wait_for (
+                lock,
+                timeout,
+                [this]
+                {
+                    return completed;
+                }))
+        {
+            cancelled = true;
+            return false;
+        }
+
+        return result;
+    }
+
+private:
+    std::mutex mutex;
+    std::condition_variable completionChanged;
+    bool callbackClaimed = false;
+    bool cancelled = false;
+    bool completed = false;
+    bool result = false;
+};
+
+#if BUILD_TESTS
+std::mutex stableChannelDiagnosticTestMutex;
+LfpStableChannelDiagnosticDispatcherForTests
+    stableChannelDiagnosticDispatcherForTests;
+std::function<void()>
+    stableChannelDiagnosticValidationHookForTests;
+#endif
+
+bool dispatchStableChannelDiagnostic (
+    std::function<void()> callback)
+{
+#if BUILD_TESTS
+    LfpStableChannelDiagnosticDispatcherForTests
+        testDispatcher;
+    {
+        const std::lock_guard<std::mutex>
+            lock (
+                stableChannelDiagnosticTestMutex);
+        testDispatcher =
+            stableChannelDiagnosticDispatcherForTests;
+    }
+    if (testDispatcher)
+    {
+        return testDispatcher (
+            std::move (
+                callback));
+    }
+#endif
+
+    return MessageManager::callAsync (
+        std::move (
+            callback));
 }
+
+void notifyStableChannelDiagnosticValidationForTests()
+{
+#if BUILD_TESTS
+    std::function<void()> testHook;
+    {
+        const std::lock_guard<std::mutex>
+            lock (
+                stableChannelDiagnosticTestMutex);
+        testHook =
+            stableChannelDiagnosticValidationHookForTests;
+    }
+    if (testHook)
+        testHook();
+#endif
+}
+}
+
+#if BUILD_TESTS
+void setStableChannelDiagnosticDispatcherForTests (
+    LfpStableChannelDiagnosticDispatcherForTests
+        dispatcher)
+{
+    const std::lock_guard<std::mutex>
+        lock (
+            stableChannelDiagnosticTestMutex);
+    stableChannelDiagnosticDispatcherForTests =
+        std::move (
+            dispatcher);
+}
+
+void setStableChannelDiagnosticValidationHookForTests (
+    std::function<void()> hook)
+{
+    const std::lock_guard<std::mutex>
+        lock (
+            stableChannelDiagnosticTestMutex);
+    stableChannelDiagnosticValidationHookForTests =
+        std::move (
+            hook);
+}
+#endif
 
 LfpStableChannelKey::LfpStableChannelKey (
     String exactIdentifier)
@@ -222,6 +369,7 @@ bool LfpStableChannelActionRequest::
                 return false;
             }
 
+            notifyStableChannelDiagnosticValidationForTests();
             return liveOwnerState
                 ->owner
                 ->validateStableChannelAction (
@@ -240,29 +388,31 @@ bool LfpStableChannelActionRequest::
         return validateOnOwnerThread();
     }
 
-    auto resultPromise =
+    auto completion =
         std::make_shared<
-            std::promise<bool>>();
-    auto resultFuture =
-        resultPromise->get_future();
+            StableChannelDiagnosticCompletion>();
     const auto posted =
-        MessageManager::callAsync (
+        dispatchStableChannelDiagnostic (
             [validateOnOwnerThread,
-             resultPromise]
+             completion]
             {
-                resultPromise
-                    ->set_value (
-                        validateOnOwnerThread());
+                if (! completion
+                          ->tryBeginCallback())
+                {
+                    return;
+                }
+
+                completion->complete (
+                    validateOnOwnerThread());
             });
-    if (! posted
-        || resultFuture.wait_for (
-               stableChannelDiagnosticTimeout)
-               != std::future_status::ready)
+    if (! posted)
     {
+        completion->cancel();
         return false;
     }
 
-    return resultFuture.get();
+    return completion->waitForResult (
+        stableChannelDiagnosticTimeout);
 }
 
 struct LfpStableChannelIdentityBindingSlot::
