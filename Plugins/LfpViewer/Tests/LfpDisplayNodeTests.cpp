@@ -11948,6 +11948,56 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExcludesLegacyUnlaidOutOverlapFromAccessibilityForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::LfpDisplayCanvas> (
+            processor,
+            LfpViewer::SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (600, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+
+    const auto splitters =
+        getDisplaySplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3);
+
+    for (const auto* splitter :
+         splitters)
+    {
+        std::vector<ComboBox*> comboBoxes;
+        collectLfpDescendants (
+            *splitter->options,
+            comboBoxes);
+        const auto overlap =
+            std::find_if (
+                comboBoxes.begin(),
+                comboBoxes.end(),
+                [] (const ComboBox* comboBox)
+                {
+                    return comboBox->getName()
+                           == "Overlap";
+                });
+
+        ASSERT_NE (overlap, comboBoxes.end());
+        EXPECT_TRUE (
+            (*overlap)->getBounds().isEmpty());
+        EXPECT_FALSE (
+            (*overlap)->isAccessible());
+        EXPECT_EQ (
+            (*overlap)
+                ->getAccessibilityHandler(),
+            nullptr);
+        EXPECT_FLOAT_EQ (
+            splitter->channelOverlapFactor,
+            2.0f);
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
         SaturationWarningWorkerValueTracksRenderingAndSurvivesTeardown)
 {
     auto canvas =

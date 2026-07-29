@@ -2453,6 +2453,7 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     overlapSelection->setSelectedId (selectedOverlap, sendNotification);
     overlapSelection->addListener (this);
     overlapSelection->setEditableText (true);
+    overlapSelection->setAccessible (false);
     addAndMakeVisible (overlapSelection.get());
 
     //Ranges for neural data
