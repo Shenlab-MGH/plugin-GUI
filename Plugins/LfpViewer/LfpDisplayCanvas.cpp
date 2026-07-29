@@ -903,11 +903,11 @@ void LfpDisplaySplitter::beginAnimation()
 
         syncDisplay();
 
-        numTrials = -1;
-        trialResetPending = false;
-
         eventState = 0;
     }
+
+    numTrials = -1;
+    trialResetPending = false;
 
     startTimer (20);
 

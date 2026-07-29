@@ -932,6 +932,101 @@ protected:
         return inputBuffer;
     }
 
+    std::unique_ptr<LfpViewer::LfpDisplayCanvas>
+    createAveragingCanvas (LfpViewer::SplitLayouts layout = LfpViewer::SplitLayouts::SINGLE)
+    {
+        auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+            processor, layout, false);
+        canvas->updateSettings();
+        canvas->setSize (900, 600);
+        canvas->resized();
+        canvas->setVisible (true);
+        return canvas;
+    }
+
+    std::vector<LfpViewer::LfpDisplaySplitter*>
+    getDisplaySplitters (LfpViewer::LfpDisplayCanvas& canvas)
+    {
+        std::vector<LfpViewer::LfpDisplaySplitter*> splitters;
+        collectLfpDescendants (canvas, splitters);
+        std::sort (
+            splitters.begin(), splitters.end(),
+            [] (const auto* lhs, const auto* rhs)
+            {
+                return lhs->splitID < rhs->splitID;
+            });
+        return splitters;
+    }
+
+    UtilityButton* getResetTrialsButton (LfpViewer::LfpDisplaySplitter& splitter)
+    {
+        std::vector<UtilityButton*> buttons;
+        collectLfpDescendants (*splitter.options, buttons);
+        const auto reset = std::find_if (
+            buttons.begin(), buttons.end(), [] (UtilityButton* candidate)
+            {
+                return candidate->getLabel() == "RESET";
+            });
+        return reset == buttons.end() ? nullptr : *reset;
+    }
+
+    void processConstantBlock (float value, int numSamples = 400)
+    {
+        auto block = createBuffer (value, 0.0f, numChannels, numSamples);
+        tester->processBlock (processor, block);
+        currentSampleIndex += numSamples;
+    }
+
+    void processTriggeredBlock (
+        float value, int numSamples = 400, int triggerOffset = 200)
+    {
+        const auto streamId = processor->getDataStreams()[0]->getStreamId();
+        const auto* sourceStream = tester->getSourceNodeDataStream (streamId);
+        ASSERT_NE (sourceStream, nullptr);
+        const auto eventChannels = sourceStream->getEventChannels();
+        ASSERT_GT (eventChannels.size(), 0);
+        auto event = TTLEvent::createTTLEvent (
+            eventChannels[0],
+            currentSampleIndex + triggerOffset,
+            uint8 (0),
+            true);
+        auto block = createBuffer (value, 0.0f, numChannels, numSamples);
+        tester->processBlock (processor, block, event.get());
+        currentSampleIndex += numSamples;
+    }
+
+    void finishTriggeredView (
+        LfpViewer::LfpDisplayCanvas& canvas, float value)
+    {
+        for (int block = 0; block < 10; ++block)
+        {
+            processConstantBlock (value);
+            canvas.refreshState();
+        }
+    }
+
+    void beginTriggeredAveraging (
+        LfpViewer::LfpDisplayCanvas& canvas,
+        const std::vector<LfpViewer::LfpDisplaySplitter*>& splitters)
+    {
+        for (auto* split : splitters)
+        {
+            split->options->setTriggerSourceSelection (2);
+            split->options->setAveraging (true);
+        }
+        processor->startAcquisition();
+        canvas.beginAnimation();
+        canvas.endAnimation();
+    }
+
+    void startTrial (
+        LfpViewer::LfpDisplayCanvas& canvas, float value)
+    {
+        processConstantBlock (value, 1024);
+        processTriggeredBlock (value);
+        canvas.refreshState();
+    }
+
     /*Creates a new AudioBuffer filled with sinusoidal waves*/
     AudioBuffer<float> createBufferSinusoidal (int cycles, int numChannels, int numSamples, int amplitude)
     {
@@ -8244,275 +8339,191 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
-        ResetTrialsRequestsCoalesceAndApplyAtNextTrigger)
+        BeginAnimationResetsTrialAveragingWithoutDisplayBuffer)
 {
-    auto canvas =
-        std::make_unique<
-            LfpViewer::
-                LfpDisplayCanvas> (
-            processor,
-            LfpViewer::
-                SplitLayouts::SINGLE,
-            false);
-    canvas->updateSettings();
-    canvas->setSize (900, 600);
-    canvas->resized();
-    canvas->setVisible (true);
-
-    auto* split =
-        findLfpDescendant<
-            LfpViewer::
-                LfpDisplaySplitter> (
-            *canvas);
+    auto canvas = createAveragingCanvas();
+    const auto splitters = getDisplaySplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3);
+    auto* split = splitters[0];
     ASSERT_NE (split, nullptr);
-    ASSERT_NE (split->options, nullptr);
-    std::vector<
-        UtilityButton*>
-        utilityButtons;
-    collectLfpDescendants (
-        *split->options,
-        utilityButtons);
-    const auto resetIterator =
-        std::find_if (
-            utilityButtons.begin(),
-            utilityButtons.end(),
-            [] (UtilityButton* candidate)
-            {
-                return candidate->getLabel()
-                       == "RESET";
-            });
-    ASSERT_NE (
-        resetIterator,
-        utilityButtons.end());
-    auto* reset = *resetIterator;
+    auto* reset = getResetTrialsButton (*split);
     ASSERT_NE (reset, nullptr);
 
-    const auto streamId =
-        processor
-            ->getDataStreams()[0]
-            ->getStreamId();
-    const auto* sourceStream =
-        tester
-            ->getSourceNodeDataStream (
-                streamId);
-    ASSERT_NE (sourceStream, nullptr);
-    const auto eventChannels =
-        sourceStream
-            ->getEventChannels();
-    ASSERT_GE (
-        eventChannels.size(),
-        1);
-    int64 nextSampleNumber = 0;
-    const auto processConstant =
-        [&] (
-            float value,
-            int numSamples)
-    {
-        auto block =
-            createBuffer (
-                value,
-                0.0f,
-                numChannels,
-                numSamples);
-        tester->processBlock (
-            processor,
-            block);
-        nextSampleNumber +=
-            numSamples;
-    };
-    const auto processTriggeredConstant =
-        [&] (
-            float value,
-            int numSamples,
-            int triggerOffset)
-    {
-        auto block =
-            createBuffer (
-                value,
-                0.0f,
-                numChannels,
-                numSamples);
-        auto event =
-            TTLEvent::
-                createTTLEvent (
-                    eventChannels[0],
-                    nextSampleNumber
-                        + triggerOffset,
-                    uint8 (0),
-                    true);
-        tester->processBlock (
-            processor,
-            block,
-            event.get());
-        nextSampleNumber +=
-            numSamples;
-    };
+    beginTriggeredAveraging (*canvas, { split });
 
-    split->options
-        ->setTriggerSourceSelection (
-            2);
-    split->options
-        ->setAveraging (
-            true);
-    processor->startAcquisition();
+    startTrial (*canvas, 10.0f);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 10.0f, 0.001f);
+    finishTriggeredView (*canvas, 10.0f);
+
+    startTrial (*canvas, 20.0f);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 15.0f, 0.001f);
+    finishTriggeredView (*canvas, 20.0f);
+
+    auto* displayBuffer = split->displayBuffer;
+    ASSERT_NE (displayBuffer, nullptr);
+    canvas->removeBufferForDisplay (0);
     canvas->beginAnimation();
     canvas->endAnimation();
+    split->displayBuffer = displayBuffer;
 
-    processConstant (
-        10.0f,
-        1024);
-    processTriggeredConstant (
-        10.0f,
-        400,
-        200);
-    ASSERT_EQ (
-        split->getTriggerChannel(),
-        0);
-    ASSERT_EQ (
-        split->selectedStreamId,
-        streamId);
-    ASSERT_GT (
-        processor
-            ->getLatestTriggerTime (
-                split->splitID),
-        0);
+    processConstantBlock (40.0f, 1024);
+    processTriggeredBlock (40.0f);
+    const auto indexBeforeRestart = split->screenBufferIndex[0];
     canvas->refreshState();
-    ASSERT_GT (
-        split->screenBufferIndex[0],
-        0);
+    ASSERT_GT (indexBeforeRestart, split->screenBufferIndex[0]);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 40.0f, 0.001f);
+    finishTriggeredView (*canvas, 40.0f);
+
+    startTrial (*canvas, 60.0f);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 50.0f, 0.001f);
+    finishTriggeredView (*canvas, 60.0f);
+
+    canvas->removeBufferForDisplay (0);
+    split->options->buttonClicked (reset);
+    canvas->beginAnimation();
+    canvas->endAnimation();
+    split->displayBuffer = displayBuffer;
+
+    startTrial (*canvas, 80.0f);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 80.0f, 0.001f);
+    finishTriggeredView (*canvas, 80.0f);
+
+    startTrial (*canvas, 100.0f);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 90.0f, 0.001f);
+
+    processor->stopAcquisition();
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ResetTrialsPreservesCurrentTrialWeightUntilNextTrigger)
+{
+    auto canvas = createAveragingCanvas();
+    const auto splitters = getDisplaySplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3);
+    auto* split = splitters[0];
+    ASSERT_NE (split, nullptr);
+    auto* reset = getResetTrialsButton (*split);
+    ASSERT_NE (reset, nullptr);
+    beginTriggeredAveraging (*canvas, { split });
+
+    startTrial (*canvas, 10.0f);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 10.0f, 0.001f);
+    finishTriggeredView (*canvas, 10.0f);
+    startTrial (*canvas, 20.0f);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 15.0f, 0.001f);
+    finishTriggeredView (*canvas, 20.0f);
+
+    startTrial (*canvas, 40.0f);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
     EXPECT_NEAR (
-        split->getYCoordMean (
-            0,
-            100),
-        10.0f,
+        split->getYCoordMean (0, 100),
+        (10.0f + 20.0f + 40.0f) / 3.0f,
         0.001f);
-    const auto indexBeforeReset =
-        split->screenBufferIndex[0];
+    const auto indexBeforeReset = split->screenBufferIndex[0];
+    split->options->buttonClicked (reset);
+    split->options->buttonClicked (reset);
+    EXPECT_EQ (split->screenBufferIndex[0], indexBeforeReset);
 
-    split->options
-        ->buttonClicked (
-            reset);
-    split->options
-        ->buttonClicked (
-            reset);
-    ASSERT_EQ (
-        split->screenBufferIndex[0],
-        indexBeforeReset);
-
-    processConstant (
-        20.0f,
-        400);
+    processConstantBlock (40.0f);
     canvas->refreshState();
-
-    ASSERT_GT (
-        split->screenBufferIndex[0],
-        0);
-    for (int sample = 0;
-         sample
-         < split
-               ->screenBufferIndex[0];
-         ++sample)
-    {
-        EXPECT_TRUE (
-            std::isfinite (
-                split
-                    ->getYCoordMean (
-                        0,
-                        sample)))
-            << "non-finite triggered average at screen sample "
-            << sample;
-    }
-
-    for (int block = 0;
-         block < 10;
-         ++block)
-    {
-        processConstant (
-            20.0f,
-            400);
-        canvas->refreshState();
-    }
-
-    processConstant (
-        40.0f,
-        1024);
-    processTriggeredConstant (
-        40.0f,
-        400,
-        200);
-    ASSERT_GT (
-        processor
-            ->getLatestTriggerTime (
-                split->splitID),
-        0);
-    const auto indexBeforeNextTrigger =
-        split->screenBufferIndex[0];
-    canvas->refreshState();
-
-    ASSERT_GT (
-        split->screenBufferIndex[0],
-        100);
-    EXPECT_LT (
-        split->screenBufferIndex[0],
-        indexBeforeNextTrigger);
+    ASSERT_GT (split->screenBufferIndex[0], indexBeforeReset);
+    const auto continuationSample = indexBeforeReset + 10;
+    ASSERT_LT (continuationSample, split->screenBufferIndex[0]);
+    EXPECT_TRUE (std::isfinite (
+        split->getYCoordMean (0, continuationSample)));
     EXPECT_NEAR (
-        split->getYCoordMean (
-            0,
-            100),
-        40.0f,
+        split->getYCoordMean (0, continuationSample),
+        (10.0f + 20.0f + 40.0f) / 3.0f,
         0.001f);
 
-    for (int block = 0;
-         block < 10;
-         ++block)
-    {
-        processConstant (
-            40.0f,
-            400);
-        canvas->refreshState();
-    }
+    finishTriggeredView (*canvas, 40.0f);
+    processConstantBlock (70.0f, 1024);
+    processTriggeredBlock (70.0f);
+    const auto completedViewIndex = split->screenBufferIndex[0];
+    canvas->refreshState();
+    ASSERT_GT (completedViewIndex, split->screenBufferIndex[0]);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 70.0f, 0.001f);
 
-    split->options
-        ->setTriggerSourceSelection (
-            1);
-    ASSERT_EQ (
-        split->getTriggerChannel(),
-        -1);
-    split->options
-        ->buttonClicked (
-            reset);
-    split->options
-        ->buttonClicked (
-            reset);
+    processor->stopAcquisition();
+}
 
-    processConstant (
-        60.0f,
-        1024);
-    split->options
-        ->setTriggerSourceSelection (
-            2);
+TEST_F (LfpDisplayNodeTests,
+        ResetTrialsPendingSurvivesContinuousMode)
+{
+    auto canvas = createAveragingCanvas();
+    const auto splitters = getDisplaySplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3);
+    auto* split = splitters[0];
+    auto* reset = getResetTrialsButton (*split);
+    ASSERT_NE (reset, nullptr);
+    beginTriggeredAveraging (*canvas, { split });
 
-    processTriggeredConstant (
-        60.0f,
-        400,
-        200);
-    ASSERT_GT (
-        processor
-            ->getLatestTriggerTime (
-                split->splitID),
-        0);
+    startTrial (*canvas, 20.0f);
+    finishTriggeredView (*canvas, 20.0f);
+    split->options->setTriggerSourceSelection (1);
+    ASSERT_EQ (split->getTriggerChannel(), -1);
+    split->options->buttonClicked (reset);
+    split->options->buttonClicked (reset);
+    processConstantBlock (60.0f, 1024);
+    split->options->setTriggerSourceSelection (2);
+    processTriggeredBlock (60.0f);
     canvas->refreshState();
 
-    ASSERT_GT (
-        split->screenBufferIndex[0],
-        100);
-    EXPECT_NEAR (
-        split->getYCoordMean (
-            0,
-            100),
-        60.0f,
-        0.001f);
+    ASSERT_GT (split->screenBufferIndex[0], 100);
+    EXPECT_NEAR (split->getYCoordMean (0, 100), 60.0f, 0.001f);
+    processor->stopAcquisition();
+}
 
+TEST_F (LfpDisplayNodeTests,
+        ResetTrialsIsPaneLocal)
+{
+    auto canvas = createAveragingCanvas (LfpViewer::SplitLayouts::THREE_HORZ);
+    const auto splitters = getDisplaySplitters (*canvas);
+    ASSERT_EQ (splitters.size(), 3);
+    auto* reset = getResetTrialsButton (*splitters[0]);
+    ASSERT_NE (reset, nullptr);
+    beginTriggeredAveraging (*canvas, splitters);
+
+    startTrial (*canvas, 10.0f);
+    finishTriggeredView (*canvas, 10.0f);
+    startTrial (*canvas, 20.0f);
+    finishTriggeredView (*canvas, 20.0f);
+    startTrial (*canvas, 40.0f);
+    for (auto* split : splitters)
+    {
+        ASSERT_GT (split->screenBufferIndex[0], 100);
+        EXPECT_NEAR (
+            split->getYCoordMean (0, 100),
+            (10.0f + 20.0f + 40.0f) / 3.0f,
+            0.001f);
+    }
+    splitters[0]->options->buttonClicked (reset);
+    splitters[0]->options->buttonClicked (reset);
+    finishTriggeredView (*canvas, 40.0f);
+
+    processConstantBlock (70.0f, 1024);
+    processTriggeredBlock (70.0f);
+    splitters[0]->setVisible (false);
+    canvas->refreshState();
+    splitters[0]->setVisible (true);
+    canvas->refreshState();
+
+    EXPECT_NEAR (splitters[0]->getYCoordMean (0, 100), 70.0f, 0.001f);
+    for (int pane = 1; pane < 3; ++pane)
+    {
+        ASSERT_GT (splitters[pane]->screenBufferIndex[0], 100);
+        EXPECT_NEAR (
+            splitters[pane]->getYCoordMean (0, 100),
+            (10.0f + 20.0f + 40.0f + 70.0f) / 4.0f,
+            0.001f);
+    }
     processor->stopAcquisition();
 }
 
