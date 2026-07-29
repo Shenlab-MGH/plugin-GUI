@@ -9423,18 +9423,33 @@ TEST_F (LfpDisplayNodeTests,
         drainLfpBroadcastMessages (
             *messageCenter)
             .isEmpty());
+    EXPECT_FALSE (
+        channel->getInputInverted());
 
     channel->changeParameter (1);
 
     EXPECT_TRUE (
         channel->getInputInverted());
-    const auto messages =
+    const auto firstMessages =
         drainLfpBroadcastMessages (
             *messageCenter);
-    EXPECT_EQ (messages.size(), 0)
-        << (messages.isEmpty()
+    EXPECT_EQ (firstMessages.size(), 0)
+        << (firstMessages.isEmpty()
                 ? std::string()
-                : messages[0]
+                : firstMessages[0]
+                      .toStdString());
+
+    channel->changeParameter (1);
+
+    EXPECT_FALSE (
+        channel->getInputInverted());
+    const auto secondMessages =
+        drainLfpBroadcastMessages (
+            *messageCenter);
+    EXPECT_EQ (secondMessages.size(), 0)
+        << (secondMessages.isEmpty()
+                ? std::string()
+                : secondMessages[0]
                       .toStdString());
 }
 
@@ -9451,6 +9466,11 @@ TEST_F (LfpDisplayNodeTests,
     ASSERT_FALSE (display->channels.isEmpty());
     auto* channel = display->channels[0];
     ASSERT_NE (channel, nullptr);
+    auto* splitter =
+        findLfpAncestor<
+            LfpViewer::LfpDisplaySplitter> (
+            *channel);
+    ASSERT_NE (splitter, nullptr);
     auto* messageCenter =
         tester->processorGraph
             ->getMessageCenter();
@@ -9459,6 +9479,18 @@ TEST_F (LfpDisplayNodeTests,
         drainLfpBroadcastMessages (
             *messageCenter)
             .isEmpty());
+    const auto expectedMessage =
+        "AUDIO SELECT "
+        + String (
+            int (splitter
+                     ->selectedStreamId))
+        + " "
+        + String (
+            display->channels
+                .indexOf (
+                    channel)
+            + 1)
+        + " ";
 
     channel->changeParameter (2);
 
@@ -9468,9 +9500,9 @@ TEST_F (LfpDisplayNodeTests,
         drainLfpBroadcastMessages (
             *messageCenter);
     ASSERT_EQ (messages.size(), 1);
-    EXPECT_TRUE (
-        messages[0].startsWith (
-            "AUDIO SELECT "));
+    EXPECT_EQ (
+        messages[0],
+        expectedMessage);
 }
 
 TEST_F (LfpDisplayNodeTests,
