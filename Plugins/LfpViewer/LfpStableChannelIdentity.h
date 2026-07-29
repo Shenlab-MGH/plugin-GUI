@@ -18,7 +18,6 @@
 
 #include <ProcessorHeaders.h>
 #include <atomic>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -29,6 +28,7 @@ class DisplayBuffer;
 class LfpDisplayCanvas;
 class LfpStableChannelIdentity;
 class LfpStableChannelActionRequest;
+class LfpStableChannelActionOwnerState;
 class LfpStableChannelIdentityBindingSlot;
 
 /**
@@ -104,7 +104,8 @@ public:
 
         This is a necessary precondition only. It is never sufficient
         authorization for an agent mutation; live component availability must
-        also be revalidated by LfpStableChannelActionRequest.
+        also be revalidated by the owner of a published
+        LfpStableChannelActionRequest.
      */
     bool isAgentActionable() const noexcept;
 
@@ -162,34 +163,58 @@ private:
 };
 
 /**
-    A retained, owner-controlled request for one future channel command.
+    An immutable, owner-published diagnostic for one channel generation.
 
-    It retains no raw component, channel, or buffer pointer. Agent-facing code
-    must use performIfCurrentAndAvailable rather than treating the immutable
-    generation token as complete authorization.
+    This object never accepts a callback or target pointer and does not
+    authorize mutation. Future action APIs must pass a narrow descriptor and
+    value payload to the owner, which must re-resolve, revalidate, and directly
+    dispatch the action in one message-thread handler.
  */
 class LfpStableChannelActionRequest final
 {
 public:
-    TESTABLE bool validate() const;
-    TESTABLE bool performIfCurrentAndAvailable (
-        const std::function<void()>&
-            command) const;
+    /**
+        Reports whether the owner still considers this exact generation
+        current and available.
+
+        This is diagnostic only and must never be used as mutation
+        authorization.
+     */
+    TESTABLE bool validateCurrentAndAvailable() const;
 
 private:
     friend class LfpDisplayCanvas;
+    friend class LfpStableChannelIdentityBindingSlot;
 
-    struct State;
+    static std::shared_ptr<
+        LfpStableChannelActionOwnerState>
+    createOwnerState (
+        LfpDisplayCanvas* owner);
+    static void retireOwnerState (
+        std::shared_ptr<
+            LfpStableChannelActionOwnerState>&
+            ownerState) noexcept;
 
     LfpStableChannelActionRequest (
-        Component* owner,
+        std::weak_ptr<
+            const LfpStableChannelActionOwnerState>
+            ownerState,
+        std::weak_ptr<
+            const LfpStableChannelIdentityBindingSlot>
+            ownerPublication,
         std::shared_ptr<
             const LfpStableChannelIdentity>
             retainedIdentity);
 
-    std::shared_ptr<
-        const State>
-        state;
+    const std::weak_ptr<
+        const LfpStableChannelActionOwnerState>
+        ownerState;
+    const std::weak_ptr<
+        const LfpStableChannelIdentityBindingSlot>
+        ownerPublication;
+    const std::shared_ptr<
+        const LfpStableChannelIdentity>
+        retainedIdentity;
 };
 
 /**
@@ -198,23 +223,38 @@ private:
     Mutation is restricted to LfpDisplay; providers can only load snapshots.
  */
 class LfpStableChannelIdentityBindingSlot final
+    : public std::enable_shared_from_this<
+          LfpStableChannelIdentityBindingSlot>
 {
 public:
     std::shared_ptr<
         const LfpStableChannelIdentity>
     get() const noexcept;
+    std::shared_ptr<
+        const LfpStableChannelActionRequest>
+    getActionRequest() const noexcept;
 
 private:
     friend class LfpDisplay;
+    friend class LfpStableChannelActionRequest;
 
     void revoke() noexcept;
     void publishSuccessor (
         const std::shared_ptr<
             const LfpStableChannelIdentity>&
-            blueprint);
+            blueprint,
+        std::weak_ptr<
+            const LfpStableChannelActionOwnerState>
+            ownerState);
+    bool isCurrentAndAvailable (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity) const noexcept;
+
+    struct Publication;
 
     std::shared_ptr<
-        const LfpStableChannelIdentity>
+        const Publication>
         current;
 };
 

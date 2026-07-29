@@ -125,6 +125,127 @@ static_assert (
         LfpDisplay>::value,
     "Providers must not activate identity generations through LfpDisplay");
 
+template <typename Canvas,
+          typename = void>
+struct CanCreateStableChannelActionRequest
+    : std::false_type
+{
+};
+
+template <typename Canvas>
+struct CanCreateStableChannelActionRequest<
+    Canvas,
+    std::void_t<decltype (
+        std::declval<Canvas&>()
+            .createStableChannelActionRequest (
+                std::declval<std::shared_ptr<
+                    const LfpStableChannelIdentity>>()))>>
+    : std::true_type
+{
+};
+
+template <typename Request,
+          typename = void>
+struct CanPerformArbitraryStableChannelCallback
+    : std::false_type
+{
+};
+
+template <typename Request>
+struct CanPerformArbitraryStableChannelCallback<
+    Request,
+    std::void_t<decltype (
+        std::declval<const Request&>()
+            .performIfCurrentAndAvailable (
+                std::declval<
+                    const std::function<void()>&>()))>>
+    : std::true_type
+{
+};
+
+template <typename Request,
+          typename = void>
+struct CanCallLegacyStableChannelValidate
+    : std::false_type
+{
+};
+
+template <typename Request>
+struct CanCallLegacyStableChannelValidate<
+    Request,
+    std::void_t<decltype (
+        std::declval<const Request&>()
+            .validate())>>
+    : std::true_type
+{
+};
+
+template <typename Request,
+          typename = void>
+struct CanValidateCurrentStableChannelAvailability
+    : std::false_type
+{
+};
+
+template <typename Request>
+struct CanValidateCurrentStableChannelAvailability<
+    Request,
+    std::void_t<decltype (
+        std::declval<const Request&>()
+            .validateCurrentAndAvailable())>>
+    : std::true_type
+{
+};
+
+template <typename Provider,
+          typename = void>
+struct CanCopyPublishedStableChannelActionRequest
+    : std::false_type
+{
+};
+
+template <typename Provider>
+struct CanCopyPublishedStableChannelActionRequest<
+    Provider,
+    std::void_t<decltype (
+        std::declval<const Provider&>()
+            .getStableChannelActionRequest())>>
+    : std::true_type
+{
+};
+
+static_assert (
+    ! CanCreateStableChannelActionRequest<
+        LfpDisplayCanvas>::value,
+    "Workers and providers must not create stable channel requests");
+static_assert (
+    ! CanPerformArbitraryStableChannelCallback<
+        LfpStableChannelActionRequest>::value,
+    "Stable channel requests must not accept arbitrary callbacks");
+static_assert (
+    ! CanCallLegacyStableChannelValidate<
+        LfpStableChannelActionRequest>::value,
+    "Diagnostic validation must not be presented as mutation authorization");
+static_assert (
+    CanValidateCurrentStableChannelAvailability<
+        LfpStableChannelActionRequest>::value,
+    "Published requests must expose read-only current-availability diagnostics");
+static_assert (
+    CanCopyPublishedStableChannelActionRequest<
+        LfpChannelDisplay>::value,
+    "Providers must only copy requests already published by the owner");
+static_assert (
+    ! std::is_default_constructible<
+        LfpStableChannelActionRequest>::value,
+    "Workers must not default-construct stable channel requests");
+static_assert (
+    ! std::is_constructible<
+        LfpStableChannelActionRequest,
+        Component*,
+        std::shared_ptr<
+            const LfpStableChannelIdentity>>::value,
+    "Stable channel requests must not expose a raw component constructor");
+
 DisplayBuffer::ChannelMetadata makeIdentityMetadata (
     String identifier,
     int sourceNodeId,
@@ -1170,10 +1291,15 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                         third->lfpDisplay
                             ->channels[0]
                             ->getStableChannelIdentity();
+                    const auto request =
+                        third->lfpDisplay
+                            ->channels[0]
+                            ->getStableChannelActionRequest();
                     publishedActiveWhileHidden =
                         identity != nullptr
                         && identity
-                               ->isAgentActionable();
+                               ->isAgentActionable()
+                        || request != nullptr;
                 }
             });
 
@@ -1187,6 +1313,11 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         third->lfpDisplay
             ->channels[0]
             ->getStableChannelIdentity(),
+        nullptr);
+    EXPECT_EQ (
+        third->lfpDisplay
+            ->channels[0]
+            ->getStableChannelActionRequest(),
         nullptr);
 }
 
@@ -1237,6 +1368,12 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                     std::shared_ptr<
                         const LfpStableChannelIdentity>
                         infoSnapshot;
+                    std::shared_ptr<
+                        const LfpStableChannelActionRequest>
+                        channelRequest;
+                    std::shared_ptr<
+                        const LfpStableChannelActionRequest>
+                        infoRequest;
                     std::thread worker (
                         [&]
                         {
@@ -1246,11 +1383,19 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                             infoSnapshot =
                                 display->channelInfo[0]
                                     ->getStableChannelIdentity();
+                            channelRequest =
+                                display->channels[0]
+                                    ->getStableChannelActionRequest();
+                            infoRequest =
+                                display->channelInfo[0]
+                                    ->getStableChannelActionRequest();
                         });
                     worker.join();
                     pairWasConsistent =
                         channelSnapshot
-                        == infoSnapshot;
+                            == infoSnapshot
+                        && channelRequest
+                               == infoRequest;
                 }
             });
     buffer->channelMetadata
@@ -1270,6 +1415,11 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             ->getStableChannelIdentity(),
         display->channelInfo[0]
             ->getStableChannelIdentity());
+    EXPECT_EQ (
+        display->channels[0]
+            ->getStableChannelActionRequest(),
+        display->channelInfo[0]
+            ->getStableChannelActionRequest());
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
@@ -1474,7 +1624,7 @@ TEST_F (LfpStableChannelIdentityBindingTests,
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
-        LiveGateAllowsOneCurrentVisibleCommandAndRejectsSameStreamRebind)
+        PublishedDiagnosticAllowsCurrentVisibleRequestAndRejectsSameStreamRebind)
 {
     auto canvas = std::make_unique<LfpDisplayCanvas> (
         processor,
@@ -1518,31 +1668,24 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         display->channelInfo[0]
             ->Component::isEnabled());
     const auto request =
-        canvas
-            ->createStableChannelActionRequest (
-                retained);
+        display->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
 
-    int commandCount = 0;
-    bool ranOnMessageThread = false;
     EXPECT_TRUE (
-        request.validate());
+        request
+            ->validateCurrentAndAvailable());
     std::atomic<bool> workerFinished {
         false
     };
     bool workerResult = false;
     std::thread worker (
-        [&]
+        [&,
+         workerRequest = request]
         {
             workerResult =
-                request
-                    .performIfCurrentAndAvailable (
-                        [&]
-                        {
-                            ++commandCount;
-                            ranOnMessageThread =
-                                MessageManager::
-                                    existsAndIsCurrentThread();
-                        });
+                workerRequest
+                    ->validateCurrentAndAvailable();
             workerFinished.store (
                 true);
         });
@@ -1566,27 +1709,94 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     worker.join();
     EXPECT_TRUE (
         workerResult);
-    EXPECT_EQ (
-        commandCount,
-        1);
-    EXPECT_TRUE (
-        ranOnMessageThread);
 
     ASSERT_TRUE (
         splitter->selectStreamByKey (
             buffer->streamKey));
     EXPECT_FALSE (
-        request.validate());
-    EXPECT_FALSE (
         request
-            .performIfCurrentAndAvailable (
-                [&]
-                {
-                    ++commandCount;
-                }));
-    EXPECT_EQ (
-        commandCount,
-        1);
+            ->validateCurrentAndAvailable());
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WorkerDiagnosticFailsClosedWhenMessageThreadDoesNotDispatch)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto request =
+        splitters[0]
+            ->lfpDisplay
+            ->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
+    ASSERT_TRUE (
+        request
+            ->validateCurrentAndAvailable());
+
+    std::atomic<bool> workerStarted {
+        false
+    };
+    std::atomic<bool> workerFinished {
+        false
+    };
+    bool workerResult = true;
+    std::thread worker (
+        [&,
+         workerRequest = request]
+        {
+            workerStarted.store (true);
+            workerResult =
+                workerRequest
+                    ->validateCurrentAndAvailable();
+            workerFinished.store (true);
+        });
+    while (! workerStarted.load())
+        std::this_thread::yield();
+
+    for (int wait = 0;
+         wait < 500
+         && ! workerFinished.load();
+         ++wait)
+    {
+        Thread::sleep (1);
+    }
+    const bool returnedWithoutDispatch =
+        workerFinished.load();
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    ASSERT_NE (
+        messageManager,
+        nullptr);
+    for (int dispatch = 0;
+         dispatch < 1000
+         && ! workerFinished.load();
+         ++dispatch)
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                1);
+    }
+    ASSERT_TRUE (
+        workerFinished.load());
+    worker.join();
+
+    EXPECT_TRUE (
+        returnedWithoutDispatch);
+    EXPECT_FALSE (
+        workerResult);
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
@@ -1648,17 +1858,17 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                 ->getStableChannelIdentity();
         ASSERT_NE (retained, nullptr);
         const auto request =
-            canvas
-                ->createStableChannelActionRequest (
-                    retained);
+            display->channels[0]
+                ->getStableChannelActionRequest();
+        ASSERT_NE (request, nullptr);
         ASSERT_TRUE (
             testCase.component
                 ->isShowing());
         ASSERT_TRUE (
-            request.validate());
+            request
+                ->validateCurrentAndAvailable());
         bool observedEntry = false;
         bool gateAcceptedAtEntry = false;
-        int commandCount = 0;
         display
             ->setStableIdentityLifecycleTestHook (
                 [&] (
@@ -1676,11 +1886,7 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                         observedEntry = true;
                         gateAcceptedAtEntry =
                             request
-                                .performIfCurrentAndAvailable (
-                                    [&]
-                                    {
-                                        ++commandCount;
-                                    });
+                                ->validateCurrentAndAvailable();
                     }
                 });
 
@@ -1692,9 +1898,6 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             observedEntry);
         EXPECT_FALSE (
             gateAcceptedAtEntry);
-        EXPECT_EQ (
-            commandCount,
-            0);
 
         display
             ->setStableIdentityLifecycleTestHook (
@@ -1768,9 +1971,9 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                 ->getStableChannelIdentity();
         ASSERT_NE (retained, nullptr);
         const auto request =
-            canvas
-                ->createStableChannelActionRequest (
-                    retained);
+            display->channels[0]
+                ->getStableChannelActionRequest();
+        ASSERT_NE (request, nullptr);
         ASSERT_TRUE (
             testCase.component
                 ->isShowing());
@@ -1778,10 +1981,10 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             testCase.component
                 ->isEnabled());
         ASSERT_TRUE (
-            request.validate());
+            request
+                ->validateCurrentAndAvailable());
         bool observedEntry = false;
         bool gateAcceptedAtEntry = false;
-        int commandCount = 0;
         display
             ->setStableIdentityLifecycleTestHook (
                 [&] (
@@ -1799,11 +2002,7 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                         observedEntry = true;
                         gateAcceptedAtEntry =
                             request
-                                .performIfCurrentAndAvailable (
-                                    [&]
-                                    {
-                                        ++commandCount;
-                                    });
+                                ->validateCurrentAndAvailable();
                     }
                 });
 
@@ -1815,9 +2014,6 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             observedEntry);
         EXPECT_FALSE (
             gateAcceptedAtEntry);
-        EXPECT_EQ (
-            commandCount,
-            0);
 
         display
             ->setStableIdentityLifecycleTestHook (
@@ -1856,13 +2052,14 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             ->getStableChannelIdentity();
     ASSERT_NE (retained, nullptr);
     const auto request =
-        canvas
-            ->createStableChannelActionRequest (
-                retained);
+        display->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
     ASSERT_TRUE (
         splitter->isShowing());
     ASSERT_TRUE (
-        request.validate());
+        request
+            ->validateCurrentAndAvailable());
 
     std::atomic<bool> workerStarted {
         false
@@ -1871,7 +2068,6 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         false
     };
     bool workerResult = true;
-    int commandCount = 0;
     std::thread worker;
     display
         ->setStableIdentityLifecycleTestHook (
@@ -1896,11 +2092,7 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                                 true);
                             workerResult =
                                 request
-                                    .performIfCurrentAndAvailable (
-                                        [&]
-                                        {
-                                            ++commandCount;
-                                        });
+                                    ->validateCurrentAndAvailable();
                             workerFinished.store (
                                 true);
                         });
@@ -1934,9 +2126,6 @@ TEST_F (LfpStableChannelIdentityBindingTests,
 
     EXPECT_FALSE (
         workerResult);
-    EXPECT_EQ (
-        commandCount,
-        0);
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,
@@ -1962,27 +2151,20 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             ->getStableChannelIdentity();
     ASSERT_NE (retained, nullptr);
     const auto request =
-        canvas
-            ->createStableChannelActionRequest (
-                retained);
+        splitters[0]
+            ->lfpDisplay
+            ->channels[0]
+            ->getStableChannelActionRequest();
+    ASSERT_NE (request, nullptr);
     ASSERT_TRUE (
-        request.validate());
+        request
+            ->validateCurrentAndAvailable());
 
     canvas.reset();
 
-    int commandCount = 0;
-    EXPECT_FALSE (
-        request.validate());
     EXPECT_FALSE (
         request
-            .performIfCurrentAndAvailable (
-                [&]
-                {
-                    ++commandCount;
-                }));
-    EXPECT_EQ (
-        commandCount,
-        0);
+            ->validateCurrentAndAvailable());
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,

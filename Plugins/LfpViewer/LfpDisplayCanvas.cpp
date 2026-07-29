@@ -144,6 +144,10 @@ LfpDisplayCanvas::LfpDisplayCanvas (LfpDisplayNode* processor_, SplitLayouts sl,
 {
     LOGD ("Creating LfpDisplayCanvas");
 
+    stableChannelActionOwnerState =
+        LfpStableChannelActionRequest::
+            createOwnerState (this);
+
     int64 start = Time::getHighResolutionTicks();
     if (! processor->getHeadlessMode())
     {
@@ -191,6 +195,10 @@ LfpDisplayCanvas::LfpDisplayCanvas (LfpDisplayNode* processor_, SplitLayouts sl,
 
 LfpDisplayCanvas::~LfpDisplayCanvas()
 {
+    LfpStableChannelActionRequest::
+        retireOwnerState (
+            stableChannelActionOwnerState);
+
     for (auto* split :
          displaySplits)
     {
@@ -556,20 +564,6 @@ bool LfpDisplayCanvas::isPaneActive (
     return splitID < visiblePaneCount
            && displaySplits[splitID]
                   ->getSelectedState();
-}
-
-LfpStableChannelActionRequest
-LfpDisplayCanvas::
-    createStableChannelActionRequest (
-        std::shared_ptr<
-            const LfpStableChannelIdentity>
-            retainedIdentity)
-{
-    return {
-        this,
-        std::move (
-            retainedIdentity)
-    };
 }
 
 bool LfpDisplayCanvas::

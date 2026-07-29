@@ -99,16 +99,6 @@ public:
     /** Returns whether a split display is the active visible pane. */
     bool isPaneActive (int splitID) const noexcept;
 
-    /**
-        Creates the retained live-authorization request used by future agent
-        commands. This does not itself perform a GUI mutation.
-     */
-    LfpStableChannelActionRequest
-    createStableChannelActionRequest (
-        std::shared_ptr<
-            const LfpStableChannelIdentity>
-            retainedIdentity);
-
     /** Selects a particular split display */
     void select (LfpDisplaySplitter*);
 
@@ -164,16 +154,26 @@ public:
     bool optionsDrawerIsOpen;
 
 private:
+    friend class LfpDisplay;
     friend class LfpStableChannelActionRequest;
 
     void setDisplaySplitVisible (
         int splitIndex,
         bool shouldBeVisible);
+    std::weak_ptr<
+        const LfpStableChannelActionOwnerState>
+    getStableChannelActionOwnerState() const noexcept
+    {
+        return stableChannelActionOwnerState;
+    }
     bool validateStableChannelAction (
         const std::shared_ptr<
             const LfpStableChannelIdentity>&
             retainedIdentity) const;
 
+    std::shared_ptr<
+        LfpStableChannelActionOwnerState>
+        stableChannelActionOwnerState;
     LfpDisplayNode* processor;
 
     OwnedArray<LfpDisplaySplitter> displaySplits;

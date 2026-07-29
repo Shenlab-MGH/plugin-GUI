@@ -116,6 +116,20 @@ LfpChannelDisplay::
         : nullptr;
 }
 
+std::shared_ptr<
+    const LfpStableChannelActionRequest>
+LfpChannelDisplay::
+    getStableChannelActionRequest() const noexcept
+{
+    const auto slot =
+        std::atomic_load_explicit (
+            &stableChannelIdentityBindingSlot,
+            std::memory_order_acquire);
+    return slot != nullptr
+        ? slot->getActionRequest()
+        : nullptr;
+}
+
 void LfpChannelDisplay::setEnabledState (bool state)
 {
     /*if (state)

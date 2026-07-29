@@ -132,6 +132,14 @@ public:
         const LfpStableChannelIdentity>
     getStableChannelIdentity() const noexcept;
 
+    /**
+        Copies the immutable diagnostic request already published by the
+        message-thread owner. Returns null when this component is unavailable.
+     */
+    TESTABLE std::shared_ptr<
+        const LfpStableChannelActionRequest>
+    getStableChannelActionRequest() const noexcept;
+
     /** Returns the assigned channel number for this display, relative
         to the subset of channels being drawn to the canvas */
     int getDrawableChannelNumber();

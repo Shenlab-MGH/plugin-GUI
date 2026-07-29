@@ -18,6 +18,8 @@
 #include "DisplayBuffer.h"
 #include "LfpDisplayCanvas.h"
 
+#include <chrono>
+#include <future>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -28,6 +30,8 @@ namespace
 std::atomic<uint64> nextIdentityGeneration {
     1
 };
+constexpr auto stableChannelDiagnosticTimeout =
+    std::chrono::milliseconds (100);
 }
 
 LfpStableChannelKey::LfpStableChannelKey (
@@ -112,82 +116,116 @@ LfpStableChannelIdentity::
             runtimeUuid));
 }
 
-struct LfpStableChannelActionRequest::
-    State
+class LfpStableChannelActionOwnerState final
 {
-    State (
-        Component* owner_,
-        std::shared_ptr<
-            const LfpStableChannelIdentity>
-            retainedIdentity_)
-        : owner (owner_),
-          retainedIdentity (
-              std::move (
-                  retainedIdentity_))
+public:
+    explicit LfpStableChannelActionOwnerState (
+        LfpDisplayCanvas* owner_)
+        : owner (owner_)
     {
     }
 
-    Component::SafePointer<Component>
-        owner;
-    const std::shared_ptr<
-        const LfpStableChannelIdentity>
-        retainedIdentity;
+private:
+    friend class LfpStableChannelActionRequest;
+
+    LfpDisplayCanvas* owner;
 };
+
+std::shared_ptr<
+    LfpStableChannelActionOwnerState>
+LfpStableChannelActionRequest::
+    createOwnerState (
+        LfpDisplayCanvas* owner)
+{
+    jassert (
+        MessageManager::
+            existsAndIsCurrentThread());
+    if (owner == nullptr
+        || ! MessageManager::
+                 existsAndIsCurrentThread())
+    {
+        return {};
+    }
+
+    return std::make_shared<
+        LfpStableChannelActionOwnerState> (
+        owner);
+}
+
+void LfpStableChannelActionRequest::
+    retireOwnerState (
+        std::shared_ptr<
+            LfpStableChannelActionOwnerState>&
+            ownerState) noexcept
+{
+    jassert (
+        MessageManager::
+            existsAndIsCurrentThread());
+    if (ownerState != nullptr)
+        ownerState->owner = nullptr;
+    ownerState.reset();
+}
 
 LfpStableChannelActionRequest::
     LfpStableChannelActionRequest (
-        Component* owner_,
+        std::weak_ptr<
+            const LfpStableChannelActionOwnerState>
+            ownerState_,
+        std::weak_ptr<
+            const LfpStableChannelIdentityBindingSlot>
+            ownerPublication_,
         std::shared_ptr<
             const LfpStableChannelIdentity>
             retainedIdentity_)
-    : state (
-          std::make_shared<State> (
-              owner_,
-              std::move (
-                  retainedIdentity_)))
+    : ownerState (
+          std::move (
+              ownerState_)),
+      ownerPublication (
+          std::move (
+              ownerPublication_)),
+      retainedIdentity (
+          std::move (
+              retainedIdentity_))
 {
 }
 
 bool LfpStableChannelActionRequest::
-    validate() const
+    validateCurrentAndAvailable() const
 {
-    return performIfCurrentAndAvailable (
-        [] {});
-}
-
-bool LfpStableChannelActionRequest::
-    performIfCurrentAndAvailable (
-        const std::function<void()>&
-            command) const
-{
-    if (! command)
-        return false;
-
-    const auto retainedState =
-        state;
-    const auto perform =
-        [retainedState,
-         command]
+    const auto retainedOwnerState =
+        ownerState;
+    const auto retainedOwnerPublication =
+        ownerPublication;
+    const auto retained =
+        retainedIdentity;
+    const auto validateOnOwnerThread =
+        [retainedOwnerState,
+         retainedOwnerPublication,
+         retained]
         {
-            auto* ownerComponent =
-                retainedState
-                    ->owner
-                    .getComponent();
-            auto* canvas =
-                dynamic_cast<
-                    LfpDisplayCanvas*> (
-                    ownerComponent);
-            if (canvas == nullptr
-                || ! canvas
-                        ->validateStableChannelAction (
-                            retainedState
-                                ->retainedIdentity))
+            jassert (
+                MessageManager::
+                    existsAndIsCurrentThread());
+            const auto liveOwnerState =
+                retainedOwnerState.lock();
+            const auto liveOwnerPublication =
+                retainedOwnerPublication.lock();
+            if (liveOwnerState == nullptr
+                || liveOwnerPublication
+                       == nullptr
+                || liveOwnerState->owner
+                       == nullptr
+                || ! liveOwnerPublication
+                        ->isCurrentAndAvailable (
+                            retained))
             {
                 return false;
             }
 
-            command();
-            return true;
+            return liveOwnerState
+                ->owner
+                ->validateStableChannelAction (
+                    retained);
         };
 
     auto* messageManager =
@@ -199,38 +237,126 @@ bool LfpStableChannelActionRequest::
     if (messageManager
             ->isThisTheMessageThread())
     {
-        return perform();
+        return validateOnOwnerThread();
     }
 
-    return MessageManager::callSync (
-               perform)
-        .value_or (
-            false);
+    auto resultPromise =
+        std::make_shared<
+            std::promise<bool>>();
+    auto resultFuture =
+        resultPromise->get_future();
+    const auto posted =
+        MessageManager::callAsync (
+            [validateOnOwnerThread,
+             resultPromise]
+            {
+                resultPromise
+                    ->set_value (
+                        validateOnOwnerThread());
+            });
+    if (! posted
+        || resultFuture.wait_for (
+               stableChannelDiagnosticTimeout)
+               != std::future_status::ready)
+    {
+        return false;
+    }
+
+    return resultFuture.get();
 }
+
+struct LfpStableChannelIdentityBindingSlot::
+    Publication final
+{
+    Publication (
+        std::shared_ptr<
+            const LfpStableChannelIdentity>
+            identity_,
+        std::shared_ptr<
+            const LfpStableChannelActionRequest>
+            actionRequest_)
+        : identity (
+              std::move (
+                  identity_)),
+          actionRequest (
+              std::move (
+                  actionRequest_))
+    {
+    }
+
+    const std::shared_ptr<
+        const LfpStableChannelIdentity>
+        identity;
+    const std::shared_ptr<
+        const LfpStableChannelActionRequest>
+        actionRequest;
+};
 
 std::shared_ptr<
     const LfpStableChannelIdentity>
 LfpStableChannelIdentityBindingSlot::
     get() const noexcept
 {
-    return std::atomic_load_explicit (
+    const auto publication =
+        std::atomic_load_explicit (
+            &current,
+            std::memory_order_acquire);
+    return publication != nullptr
+        ? publication->identity
+        : nullptr;
+}
+
+std::shared_ptr<
+    const LfpStableChannelActionRequest>
+LfpStableChannelIdentityBindingSlot::
+    getActionRequest() const noexcept
+{
+    const auto publication =
+        std::atomic_load_explicit (
+            &current,
+            std::memory_order_acquire);
+    return publication != nullptr
+        ? publication->actionRequest
+        : nullptr;
+}
+
+bool LfpStableChannelIdentityBindingSlot::
+    isCurrentAndAvailable (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity) const noexcept
+{
+    const auto publication =
+        std::atomic_load_explicit (
         &current,
         std::memory_order_acquire);
+    return publication != nullptr
+        && publication->identity
+               == retainedIdentity
+        && retainedIdentity != nullptr
+        && retainedIdentity
+               ->isAgentActionable();
 }
 
 void LfpStableChannelIdentityBindingSlot::
     revoke() noexcept
 {
-    const auto snapshot = get();
-    if (snapshot != nullptr)
+    const auto publication =
+        std::atomic_load_explicit (
+            &current,
+            std::memory_order_acquire);
+    if (publication != nullptr
+        && publication->identity
+               != nullptr)
     {
-        snapshot
+        publication
+            ->identity
             ->revokeAgentActionability();
     }
     std::atomic_store_explicit (
         &current,
         std::shared_ptr<
-            const LfpStableChannelIdentity>(),
+            const Publication>(),
         std::memory_order_release);
 }
 
@@ -238,15 +364,45 @@ void LfpStableChannelIdentityBindingSlot::
     publishSuccessor (
         const std::shared_ptr<
             const LfpStableChannelIdentity>&
-            blueprint)
+            blueprint,
+        std::weak_ptr<
+            const LfpStableChannelActionOwnerState>
+            ownerState)
 {
     revoke();
+    jassert (
+        MessageManager::
+            existsAndIsCurrentThread());
+    const auto self =
+        weak_from_this();
+    if (blueprint == nullptr
+        || ownerState.expired()
+        || self.expired()
+        || ! MessageManager::
+                 existsAndIsCurrentThread())
+    {
+        return;
+    }
+
     const auto successor =
         blueprint
             ->createSuccessorGeneration();
+    const auto request =
+        std::shared_ptr<
+            const LfpStableChannelActionRequest> (
+            new LfpStableChannelActionRequest (
+                std::move (
+                    ownerState),
+                self,
+                successor));
+    const auto publication =
+        std::make_shared<
+            const Publication> (
+            successor,
+            request);
     std::atomic_store_explicit (
         &current,
-        successor,
+        publication,
         std::memory_order_release);
 }
 

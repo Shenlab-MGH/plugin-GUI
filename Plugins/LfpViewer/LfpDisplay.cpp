@@ -429,6 +429,18 @@ void LfpDisplay::
         canvasSplit != nullptr
         && canvasSplit
                ->isIdentityTargetAvailable();
+    auto* actionOwner =
+        canvasSplit != nullptr
+            ? canvasSplit
+                  ->findParentComponentOfClass<
+                      LfpDisplayCanvas>()
+            : nullptr;
+    const auto actionOwnerState =
+        actionOwner != nullptr
+            ? actionOwner
+                  ->getStableChannelActionOwnerState()
+            : std::weak_ptr<
+                  const LfpStableChannelActionOwnerState>();
     for (int index = 0;
          index < count;
          ++index)
@@ -470,7 +482,8 @@ void LfpDisplay::
                 static_cast<size_t> (
                     index)]
                 ->publishSuccessor (
-                    blueprint);
+                    blueprint,
+                    actionOwnerState);
         }
 #if BUILD_TESTS
         notifyStableIdentityLifecycleTestHook (
@@ -498,6 +511,18 @@ void LfpDisplay::
         canvasSplit != nullptr
         && canvasSplit
                ->isIdentityTargetAvailable();
+    auto* actionOwner =
+        canvasSplit != nullptr
+            ? canvasSplit
+                  ->findParentComponentOfClass<
+                      LfpDisplayCanvas>()
+            : nullptr;
+    const auto actionOwnerState =
+        actionOwner != nullptr
+            ? actionOwner
+                  ->getStableChannelActionOwnerState()
+            : std::weak_ptr<
+                  const LfpStableChannelActionOwnerState>();
     const auto drawableMask =
         createCurrentDrawableChannelMask();
 
@@ -545,7 +570,8 @@ void LfpDisplay::
         slot->publishSuccessor (
             stableChannelIdentityBlueprints[
                 static_cast<size_t> (
-                    index)]);
+                    index)],
+            actionOwnerState);
     }
 }
 
