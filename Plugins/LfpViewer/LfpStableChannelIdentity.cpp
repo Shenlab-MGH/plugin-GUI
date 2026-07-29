@@ -17,8 +17,18 @@
 #include "LfpStableChannelIdentity.h"
 #include "DisplayBuffer.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 namespace LfpViewer
 {
+namespace
+{
+std::atomic<uint64> nextIdentityGeneration {
+    1
+};
+}
+
 LfpStableChannelKey::LfpStableChannelKey (
     String exactIdentifier)
     : kind (Kind::identifier),
@@ -68,8 +78,37 @@ LfpStableChannelIdentity::
               stableChannelKey_)),
       runtimeUuid (
           std::move (
-              runtimeUuid_))
+              runtimeUuid_)),
+      generationState (
+          std::make_shared<
+              GenerationState> (
+              nextIdentityGeneration
+                  .fetch_add (
+                      1,
+                      std::memory_order_relaxed)))
 {
+}
+
+void LfpStableChannelIdentity::
+    revokeAgentActionability() const noexcept
+{
+    generationState->active.store (
+        false,
+        std::memory_order_release);
+}
+
+std::shared_ptr<
+    const LfpStableChannelIdentity>
+LfpStableChannelIdentity::
+    createSuccessorGeneration() const
+{
+    return std::shared_ptr<
+        const LfpStableChannelIdentity> (
+        new LfpStableChannelIdentity (
+            paneIndex,
+            streamKey,
+            stableChannelKey,
+            runtimeUuid));
 }
 
 const LfpStableChannelKey*
@@ -90,7 +129,9 @@ bool hasValidStreamSet (
         currentStreams)
 {
     int selectedPointerCount = 0;
-    StringArray streamKeys;
+    std::unordered_set<
+        std::string>
+        streamKeys;
     for (const auto* stream :
          currentStreams)
     {
@@ -101,81 +142,32 @@ bool hasValidStreamSet (
         {
             ++selectedPointerCount;
         }
-        if (stream
-                ->streamKey
-                .isEmpty()
-            || streamKeys.contains (
-                stream
-                    ->streamKey))
+        const auto streamKey =
+            stream->streamKey
+                .toStdString();
+        if (streamKey.empty()
+            || ! streamKeys
+                     .insert (
+                         streamKey)
+                     .second)
         {
             return false;
         }
-        streamKeys.add (
-            stream
-                ->streamKey);
     }
 
     return selectedPointerCount == 1;
 }
 
-int countExactIdentifier (
-    StringRef identifier,
-    const Array<
-        DisplayBuffer::
-            ChannelMetadata>& metadata)
-{
-    int count = 0;
-    for (const auto& candidate :
-         metadata)
-    {
-        if (candidate.identifier
-            == identifier)
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-int countSourceLocalPair (
+uint64 makeSourceLocalKey (
     int sourceNodeId,
-    int localIndex,
-    const Array<
-        DisplayBuffer::
-            ChannelMetadata>& metadata)
+    int localIndex) noexcept
 {
-    int count = 0;
-    for (const auto& candidate :
-         metadata)
-    {
-        if (candidate.sourceNodeId
-                == sourceNodeId
-            && candidate.localIndex
-                == localIndex)
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-int countRuntimeUuid (
-    const Uuid& uuid,
-    const Array<
-        DisplayBuffer::
-            ChannelMetadata>& metadata)
-{
-    int count = 0;
-    for (const auto& candidate :
-         metadata)
-    {
-        if (candidate.uuid
-            == uuid)
-        {
-            ++count;
-        }
-    }
-    return count;
+    return (static_cast<uint64> (
+                static_cast<uint32> (
+                    sourceNodeId))
+            << 32)
+        | static_cast<uint32> (
+            localIndex);
 }
 } // namespace
 
@@ -202,6 +194,47 @@ resolveStableChannelIdentities (
         hasValidStreamSet (
             selectedStream,
             currentStreams);
+
+    std::unordered_map<
+        std::string,
+        int>
+        identifierCounts;
+    std::unordered_map<
+        std::string,
+        int>
+        runtimeUuidCounts;
+    std::unordered_map<
+        uint64,
+        int>
+        sourceLocalCounts;
+    const auto metadataCount =
+        static_cast<size_t> (
+            selectedStream
+                .channelMetadata
+                .size());
+    identifierCounts.reserve (
+        metadataCount);
+    runtimeUuidCounts.reserve (
+        metadataCount);
+    sourceLocalCounts.reserve (
+        metadataCount);
+    for (const auto& metadata :
+         selectedStream
+             .channelMetadata)
+    {
+        ++identifierCounts[
+            metadata.identifier
+                .toStdString()];
+        ++runtimeUuidCounts[
+            metadata.uuid
+                .toString()
+                .toStdString()];
+        ++sourceLocalCounts[
+            makeSourceLocalKey (
+                metadata.sourceNodeId,
+                metadata.localIndex)];
+    }
+
     for (const auto& metadata :
          selectedStream
              .channelMetadata)
@@ -213,10 +246,10 @@ resolveStableChannelIdentities (
         if (streamIsValid
             && metadata.uuid
                    != Uuid::null()
-            && countRuntimeUuid (
-                   metadata.uuid,
-                   selectedStream
-                       .channelMetadata)
+            && runtimeUuidCounts[
+                   metadata.uuid
+                       .toString()
+                       .toStdString()]
                    == 1)
         {
             const bool identifierIsPresent =
@@ -225,10 +258,9 @@ resolveStableChannelIdentities (
                     .trim()
                     .isNotEmpty();
             if (identifierIsPresent
-                && countExactIdentifier (
-                       metadata.identifier,
-                       selectedStream
-                           .channelMetadata)
+                && identifierCounts[
+                       metadata.identifier
+                           .toStdString()]
                        == 1)
             {
                 stableKey =
@@ -241,13 +273,10 @@ resolveStableChannelIdentities (
                     >= 0
                 && metadata.localIndex
                        >= 0
-                && countSourceLocalPair (
-                       metadata
-                           .sourceNodeId,
-                       metadata
-                           .localIndex,
-                       selectedStream
-                           .channelMetadata)
+                && sourceLocalCounts[
+                       makeSourceLocalKey (
+                           metadata.sourceNodeId,
+                           metadata.localIndex)]
                        == 1)
             {
                 stableKey =

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <ProcessorHeaders.h>
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -93,11 +94,15 @@ public:
     getStableChannelKey() const noexcept;
     const Uuid& getRuntimeUuid() const noexcept { return runtimeUuid; }
 
-    bool isAgentActionable() const noexcept
-    {
-        return stableChannelKey.has_value()
-            && runtimeUuid != Uuid::null();
-    }
+    bool isAgentActionable() const noexcept;
+
+    /** Permanently revokes this component generation. */
+    void revokeAgentActionability() const noexcept;
+
+    /** Copies the stable values into a fresh component generation. */
+    std::shared_ptr<
+        const LfpStableChannelIdentity>
+    createSuccessorGeneration() const;
 
 private:
     friend TESTABLE std::vector<
@@ -115,12 +120,39 @@ private:
             stableChannelKey,
         Uuid runtimeUuid);
 
+    struct GenerationState
+    {
+        explicit GenerationState (
+            uint64 generation_) noexcept
+            : generation (
+                  generation_)
+        {
+        }
+
+        std::atomic<bool> active {
+            true
+        };
+        const uint64 generation;
+    };
+
     const int paneIndex;
     const String streamKey;
     const std::optional<
         LfpStableChannelKey>
         stableChannelKey;
     const Uuid runtimeUuid;
+    const std::shared_ptr<
+        GenerationState>
+        generationState;
 };
+
+inline bool LfpStableChannelIdentity::
+    isAgentActionable() const noexcept
+{
+    return stableChannelKey.has_value()
+        && runtimeUuid != Uuid::null()
+        && generationState->active.load (
+            std::memory_order_acquire);
+}
 
 } // namespace LfpViewer

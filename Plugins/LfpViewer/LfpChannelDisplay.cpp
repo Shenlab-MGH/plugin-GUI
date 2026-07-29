@@ -58,6 +58,7 @@ LfpChannelDisplay::LfpChannelDisplay (LfpDisplaySplitter* c, LfpDisplay* d, LfpD
 
 LfpChannelDisplay::~LfpChannelDisplay()
 {
+    invalidateStableChannelIdentity();
 }
 
 void LfpChannelDisplay::resized()
@@ -105,6 +106,13 @@ void LfpChannelDisplay::
 void LfpChannelDisplay::
     invalidateStableChannelIdentity()
 {
+    const auto identity =
+        getStableChannelIdentity();
+    if (identity != nullptr)
+    {
+        identity
+            ->revokeAgentActionability();
+    }
     std::atomic_store_explicit (
         &stableChannelIdentity,
         std::shared_ptr<
@@ -129,12 +137,48 @@ void LfpChannelDisplay::setEnabledState (bool state)
     else
         std::cout << "DISABLING CHANNEL " << chan << std::endl;*/
 
+    if (isEnabled == state)
+        return;
+
     isEnabled = state;
+    if (display != nullptr)
+    {
+        display
+            ->refreshStableChannelIdentityAvailability();
+    }
 }
 
 void LfpChannelDisplay::setHidden (bool isHidden_)
 {
+    if (isHidden == isHidden_)
+        return;
+
     isHidden = isHidden_;
+    if (display != nullptr)
+    {
+        display
+            ->refreshStableChannelIdentityAvailability();
+    }
+}
+
+void LfpChannelDisplay::visibilityChanged()
+{
+    Component::visibilityChanged();
+    if (display != nullptr)
+    {
+        display
+            ->refreshStableChannelIdentityAvailability();
+    }
+}
+
+void LfpChannelDisplay::enablementChanged()
+{
+    Component::enablementChanged();
+    if (display != nullptr)
+    {
+        display
+            ->refreshStableChannelIdentityAvailability();
+    }
 }
 
 void LfpChannelDisplay::pxPaint()

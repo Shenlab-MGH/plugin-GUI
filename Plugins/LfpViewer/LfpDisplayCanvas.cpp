@@ -191,9 +191,38 @@ LfpDisplayCanvas::LfpDisplayCanvas (LfpDisplayNode* processor_, SplitLayouts sl,
 
 LfpDisplayCanvas::~LfpDisplayCanvas()
 {
+    for (auto* split :
+         displaySplits)
+    {
+        split->lfpDisplay
+            ->invalidateStableChannelIdentities();
+    }
+
     if (! processor->getHeadlessMode())
     {
         juce::TopLevelWindow::getTopLevelWindow (0)->removeKeyListener (this);
+    }
+}
+
+void LfpDisplayCanvas::visibilityChanged()
+{
+    Visualizer::visibilityChanged();
+    for (auto* split :
+         displaySplits)
+    {
+        split->lfpDisplay
+            ->refreshStableChannelIdentityAvailability();
+    }
+}
+
+void LfpDisplayCanvas::enablementChanged()
+{
+    Visualizer::enablementChanged();
+    for (auto* split :
+         displaySplits)
+    {
+        split->lfpDisplay
+            ->refreshStableChannelIdentityAvailability();
     }
 }
 
@@ -1039,6 +1068,45 @@ LfpDisplaySplitter::LfpDisplaySplitter (LfpDisplayNode* node,
     isUpdating = false;
 
     displayBuffer = nullptr;
+}
+
+LfpDisplaySplitter::~LfpDisplaySplitter()
+{
+    if (lfpDisplay != nullptr)
+    {
+        lfpDisplay
+            ->invalidateStableChannelIdentities();
+    }
+}
+
+bool LfpDisplaySplitter::
+    isIdentityTargetAvailable() const noexcept
+{
+    return isVisible()
+        && isEnabled()
+        && canvas != nullptr
+        && canvas->isVisible()
+        && canvas->isEnabled();
+}
+
+void LfpDisplaySplitter::visibilityChanged()
+{
+    Component::visibilityChanged();
+    if (lfpDisplay != nullptr)
+    {
+        lfpDisplay
+            ->refreshStableChannelIdentityAvailability();
+    }
+}
+
+void LfpDisplaySplitter::enablementChanged()
+{
+    Component::enablementChanged();
+    if (lfpDisplay != nullptr)
+    {
+        lfpDisplay
+            ->refreshStableChannelIdentityAvailability();
+    }
 }
 
 String LfpDisplaySplitter::getStreamKey() const

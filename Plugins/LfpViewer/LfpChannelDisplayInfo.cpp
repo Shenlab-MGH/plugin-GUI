@@ -85,6 +85,8 @@ void LfpChannelDisplayInfo::buttonClicked (Button* button)
 
 void LfpChannelDisplayInfo::setEnabledState (bool state)
 {
+    LfpChannelDisplay::setEnabledState (
+        state);
     enableButton->setToggleState (state, dontSendNotification);
 }
 

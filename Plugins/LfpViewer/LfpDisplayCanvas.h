@@ -83,6 +83,10 @@ public:
     /* Called when the component changes size*/
     void resized() override;
 
+    /** Revokes identities when the whole canvas is hidden or disabled. */
+    void visibilityChanged() override;
+    void enablementChanged() override;
+
     /** Sets one of 5 different split layout options*/
     void setLayout (SplitLayouts);
 
@@ -186,7 +190,7 @@ public:
     LfpDisplaySplitter (LfpDisplayNode* node, LfpDisplayCanvas* canvas, DisplayBuffer* displayBuffer, int id);
 
     /** Destructor */
-    ~LfpDisplaySplitter() {}
+    ~LfpDisplaySplitter();
 
     /** Fills background and draws border */
     void paint (Graphics& g);
@@ -241,6 +245,12 @@ public:
     {
         return canvas->isPaneActive (splitID);
     }
+
+    /** Whether this pane can currently expose agent mutation targets. */
+    bool isIdentityTargetAvailable() const noexcept;
+
+    void visibilityChanged() override;
+    void enablementChanged() override;
 
     /** Toggles pause button for this split display */
     void handleSpaceKeyPauseEvent();

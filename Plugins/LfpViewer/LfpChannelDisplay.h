@@ -208,6 +208,9 @@ public:
     bool fullredraw; // used to indicate that a full redraw is required. is set false after each full redraw
 
 protected:
+    void visibilityChanged() override;
+    void enablementChanged() override;
+
     void drawEventOverlay (const int rawEventState, int x, int yfrom, int yto, Graphics& g);
 
     LfpDisplaySplitter* canvasSplit;

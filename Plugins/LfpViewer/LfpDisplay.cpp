@@ -127,6 +127,7 @@ LfpDisplay::LfpDisplay (LfpDisplaySplitter* c, Viewport* v)
 
 LfpDisplay::~LfpDisplay()
 {
+    invalidateStableChannelIdentities();
 }
 
 int LfpDisplay::getNumChannels()
@@ -354,6 +355,8 @@ void LfpDisplay::
         info
             ->invalidateStableChannelIdentity();
     }
+    stableChannelIdentityBlueprints
+        .clear();
 }
 
 void LfpDisplay::
@@ -364,6 +367,8 @@ void LfpDisplay::
             identities)
 {
     invalidateStableChannelIdentities();
+    stableChannelIdentityBlueprints =
+        identities;
     const auto count =
         jmin (
             channels.size(),
@@ -384,6 +389,91 @@ void LfpDisplay::
                 identities[
                     static_cast<size_t> (
                         index)]);
+    }
+    refreshStableChannelIdentityAvailability();
+}
+
+void LfpDisplay::
+    refreshStableChannelIdentityAvailability()
+{
+    const auto count =
+        jmin (
+            channels.size(),
+            channelInfo.size(),
+            static_cast<int> (
+                stableChannelIdentityBlueprints
+                    .size()));
+    const bool paneIsAvailable =
+        canvasSplit != nullptr
+        && canvasSplit
+               ->isIdentityTargetAvailable();
+
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        auto* channel = channels[index];
+        auto* info = channelInfo[index];
+        bool isDrawable = false;
+        for (const auto& track :
+             drawableChannels)
+        {
+            if (track.channel == channel
+                && track.channelInfo == info)
+            {
+                isDrawable = true;
+                break;
+            }
+        }
+
+        const bool pairIsAvailable =
+            paneIsAvailable
+            && isDrawable
+            && channel->getEnabledState()
+            && info->getEnabledState()
+            && ! channel->getHidden()
+            && ! info->getHidden()
+            && channel->isVisible()
+            && info->isVisible()
+            && channel->Component::isEnabled()
+            && info->Component::isEnabled();
+        if (! pairIsAvailable)
+        {
+            channel
+                ->invalidateStableChannelIdentity();
+            info
+                ->invalidateStableChannelIdentity();
+            continue;
+        }
+
+        const auto channelIdentity =
+            channel
+                ->getStableChannelIdentity();
+        const auto infoIdentity =
+            info
+                ->getStableChannelIdentity();
+        if (channelIdentity != nullptr
+            && channelIdentity
+                   == infoIdentity)
+        {
+            continue;
+        }
+
+        const auto successor =
+            stableChannelIdentityBlueprints[
+                static_cast<size_t> (
+                    index)]
+                ->createSuccessorGeneration();
+        stableChannelIdentityBlueprints[
+            static_cast<size_t> (
+                index)] =
+            successor;
+        channel
+            ->bindStableChannelIdentity (
+                successor);
+        info
+            ->bindStableChannelIdentity (
+                successor);
     }
 }
 
@@ -1111,6 +1201,7 @@ void LfpDisplay::rebuildDrawableChannelsList()
                 }
             }
 
+            refreshStableChannelIdentityAvailability();
             return;
         }
         else
@@ -1274,6 +1365,7 @@ void LfpDisplay::rebuildDrawableChannelsList()
     setColours();
 
     resized();
+    refreshStableChannelIdentityAvailability();
 
     //LOGD("Finished standard channel rebuild.");
 }

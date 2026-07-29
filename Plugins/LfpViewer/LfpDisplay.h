@@ -82,6 +82,9 @@ public:
                 const LfpStableChannelIdentity>>&
             identities);
 
+    /** Revokes hidden/disabled targets and rebinds newly available targets. */
+    void refreshStableChannelIdentityAvailability();
+
     /** Returns the number of display channels*/
     TESTABLE int getNumChannels();
 
@@ -340,6 +343,11 @@ private:
     int scrollY;
 
     int totalHeight;
+
+    std::vector<
+        std::shared_ptr<
+            const LfpStableChannelIdentity>>
+        stableChannelIdentityBlueprints;
 
     String colourGrouping;
 
