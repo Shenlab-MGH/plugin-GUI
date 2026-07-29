@@ -38,7 +38,428 @@
 
 #include <math.h>
 
+#include <atomic>
+#include <memory>
+
 using namespace LfpViewer;
+
+namespace LfpViewer
+{
+String encodeWaveformVisibilityUtf8Hex (
+    StringRef text)
+{
+    const String value (text);
+    if (value.isEmpty())
+        return {};
+
+    const auto utf8 = value.toUTF8();
+    const auto* bytes = reinterpret_cast<const uint8*> (
+        utf8.getAddress());
+    constexpr char hex[] = "0123456789ABCDEF";
+    String result;
+
+    for (int index = 0;
+         index < value.getNumBytesAsUTF8();
+         ++index)
+    {
+        const auto byte = bytes[index];
+        result += hex[(byte >> 4) & 0x0f];
+        result += hex[byte & 0x0f];
+    }
+
+    return result;
+}
+
+class LfpWaveformVisibilityAccessibilityState final
+    : public std::enable_shared_from_this<
+          LfpWaveformVisibilityAccessibilityState>
+{
+public:
+    LfpWaveformVisibilityAccessibilityState (
+        LfpChannelDisplayInfo& ownerToUse,
+        const LfpStableChannelIdentity& identity,
+        int nodeId,
+        bool visible)
+        : owner (&ownerToUse),
+          paneIndex (identity.getPaneIndex()),
+          streamKey (identity.getStreamKey()),
+          runtimeUuid (identity.getRuntimeUuid()),
+          persistedIdentifier (
+              identity.getPersistedIdentifier()),
+          persistedSourceNodeId (
+              identity.getPersistedSourceNodeId()),
+          persistedLocalIndex (
+              identity.getPersistedLocalIndex()),
+          persistedChannelName (
+              identity.getPersistedChannelName()),
+          persistedChannelType (
+              identity.getPersistedChannelType()),
+          waveformVisible (visible)
+    {
+        const auto* key = identity.getStableChannelKey();
+        jassert (key != nullptr);
+        if (key == nullptr)
+            return;
+
+        stableKeyKind = key->getKind();
+        stableIdentifier = key->getIdentifier();
+        stableSourceNodeId = key->getSourceNodeId();
+        stableLocalIndex = key->getLocalIndex();
+
+        const auto streamHex =
+            encodeWaveformVisibilityUtf8Hex (
+                streamKey);
+        if (streamHex.isEmpty())
+            return;
+
+        const auto oneBasedPane = paneIndex + 1;
+        if (stableKeyKind
+            == LfpStableChannelKey::Kind::
+                   identifier)
+        {
+            const auto identifierHex =
+                encodeWaveformVisibilityUtf8Hex (
+                    stableIdentifier);
+            if (identifierHex.isEmpty())
+                return;
+            automationId =
+                "oe.processor."
+                + String (nodeId)
+                + ".lfp.display_"
+                + String (oneBasedPane)
+                + ".stream_hex_"
+                + streamHex
+                + ".channel_identifier_hex_"
+                + identifierHex
+                + ".waveform_visibility";
+            stableKeyText =
+                "identifier \""
+                + stableIdentifier
+                + "\"";
+        }
+        else if (stableSourceNodeId >= 0
+                 && stableLocalIndex >= 0)
+        {
+            automationId =
+                "oe.processor."
+                + String (nodeId)
+                + ".lfp.display_"
+                + String (oneBasedPane)
+                + ".stream_hex_"
+                + streamHex
+                + ".channel_source_"
+                + String (stableSourceNodeId)
+                + "_local_"
+                + String (stableLocalIndex)
+                + ".waveform_visibility";
+            stableKeyText =
+                "source node "
+                + String (stableSourceNodeId)
+                + ", local channel index "
+                + String (stableLocalIndex);
+        }
+
+        if (automationId.isEmpty())
+            return;
+
+        title =
+            "LFP display "
+            + String (oneBasedPane)
+            + " stream \""
+            + streamKey
+            + "\" channel \""
+            + persistedChannelName
+            + "\" waveform visibility";
+        description =
+            "Waveform visibility for channel \""
+            + persistedChannelName
+            + "\" ("
+            + stableKeyText
+            + ") in stream \""
+            + streamKey
+            + "\" of LFP display "
+            + String (oneBasedPane)
+            + ".";
+        help =
+            "Show or hide drawing for channel \""
+            + persistedChannelName
+            + "\" ("
+            + stableKeyText
+            + ") in stream \""
+            + streamKey
+            + "\" of LFP display "
+            + String (oneBasedPane)
+            + ". Hiding stops waveform drawing only; it does not disable acquisition, buffering, hardware, or recording selection.";
+        valid.store (true, std::memory_order_release);
+    }
+
+    bool isActive() const noexcept
+    {
+        return valid.load (std::memory_order_acquire)
+            && active.load (std::memory_order_acquire);
+    }
+
+    void retire() noexcept
+    {
+        active.store (false, std::memory_order_release);
+    }
+
+    bool isVisible() const noexcept
+    {
+        return waveformVisible;
+    }
+
+    bool matchesIdentity (
+        const LfpStableChannelIdentity& identity) const
+    {
+        const auto* key = identity.getStableChannelKey();
+        if (! isActive()
+            || key == nullptr
+            || paneIndex != identity.getPaneIndex()
+            || streamKey != identity.getStreamKey()
+            || runtimeUuid != identity.getRuntimeUuid()
+            || persistedIdentifier
+                   != identity.getPersistedIdentifier()
+            || persistedSourceNodeId
+                   != identity.getPersistedSourceNodeId()
+            || persistedLocalIndex
+                   != identity.getPersistedLocalIndex()
+            || persistedChannelName
+                   != identity.getPersistedChannelName()
+            || persistedChannelType
+                   != identity.getPersistedChannelType()
+            || stableKeyKind != key->getKind())
+        {
+            return false;
+        }
+
+        return stableKeyKind
+                   == LfpStableChannelKey::Kind::
+                          identifier
+                   ? stableIdentifier
+                         == key->getIdentifier()
+                   : stableSourceNodeId
+                             == key->getSourceNodeId()
+                         && stableLocalIndex
+                                == key->getLocalIndex();
+    }
+
+    const String& getAutomationId() const noexcept
+    {
+        return automationId;
+    }
+
+    const String& getTitle() const noexcept
+    {
+        return title;
+    }
+
+    const String& getDescription() const noexcept
+    {
+        return description;
+    }
+
+    const String& getHelp() const noexcept
+    {
+        return help;
+    }
+
+    void requestToggle()
+    {
+        if (! isActive())
+            return;
+
+        const auto perform =
+            [weakState = weak_from_this()]
+            {
+                const auto state =
+                    weakState.lock();
+                if (state == nullptr
+                    || ! state->isActive())
+                {
+                    return false;
+                }
+
+                auto* info =
+                    state->owner.getComponent();
+                return info != nullptr
+                    && info->performWaveformVisibilityAccessibilityToggle (
+                        state);
+            };
+        auto* messageManager =
+            MessageManager::getInstanceWithoutCreating();
+        if (messageManager == nullptr)
+            return;
+
+        if (messageManager->isThisTheMessageThread())
+        {
+            perform();
+            return;
+        }
+
+        MessageManager::callSync (
+            perform);
+    }
+
+private:
+    Component::SafePointer<LfpChannelDisplayInfo> owner;
+    const int paneIndex;
+    const String streamKey;
+    const Uuid runtimeUuid;
+    const String persistedIdentifier;
+    const int persistedSourceNodeId;
+    const int persistedLocalIndex;
+    const String persistedChannelName;
+    const ContinuousChannel::Type persistedChannelType;
+    LfpStableChannelKey::Kind stableKeyKind =
+        LfpStableChannelKey::Kind::identifier;
+    String stableIdentifier;
+    int stableSourceNodeId = -1;
+    int stableLocalIndex = -1;
+    const bool waveformVisible;
+    String automationId;
+    String stableKeyText;
+    String title;
+    String description;
+    String help;
+    std::atomic<bool> valid { false };
+    std::atomic<bool> active { true };
+};
+
+class LfpWaveformVisibilityAccessibilityValue final
+    : public AccessibilityTextValueInterface
+{
+public:
+    explicit LfpWaveformVisibilityAccessibilityValue (
+        std::shared_ptr<LfpWaveformVisibilityAccessibilityState>
+            stateToUse)
+        : state (std::move (stateToUse))
+    {
+    }
+
+    bool isReadOnly() const override
+    {
+        return true;
+    }
+
+    void setValueAsString (const String&) override
+    {
+    }
+
+    String getCurrentValueAsString() const override
+    {
+        return state->isVisible()
+                   ? "Visible"
+                   : "Hidden";
+    }
+
+private:
+    std::shared_ptr<LfpWaveformVisibilityAccessibilityState> state;
+};
+
+class LfpWaveformVisibilityAccessibilityHandler final
+    : public AccessibilityHandler
+{
+public:
+    LfpWaveformVisibilityAccessibilityHandler (
+        Component& component,
+        std::shared_ptr<LfpWaveformVisibilityAccessibilityState>
+            stateToUse)
+        : AccessibilityHandler (
+              component,
+              AccessibilityRole::toggleButton,
+              createActions (stateToUse),
+              AccessibilityHandler::Interfaces {
+                  std::make_unique<LfpWaveformVisibilityAccessibilityValue> (
+                      stateToUse) }),
+          state (std::move (stateToUse))
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        auto current =
+            AccessibleState()
+                .withFocusable()
+                .withCheckable();
+        return state->isVisible()
+                   ? current.withChecked()
+                   : current;
+    }
+
+    String getTitle() const override
+    {
+        return state->getTitle();
+    }
+
+    String getDescription() const override
+    {
+        return state->getDescription();
+    }
+
+    String getHelp() const override
+    {
+        return state->getHelp();
+    }
+
+    bool isEnabled() const override
+    {
+        return state->isActive();
+    }
+
+private:
+    static AccessibilityActions createActions (
+        const std::shared_ptr<LfpWaveformVisibilityAccessibilityState>&
+            state)
+    {
+        return AccessibilityActions()
+            .addAction (
+                AccessibilityActionType::toggle,
+                [state]
+                {
+                    state->requestToggle();
+                });
+    }
+
+    std::shared_ptr<LfpWaveformVisibilityAccessibilityState> state;
+};
+
+class LfpWaveformVisibilityButton final
+    : public UtilityButton
+{
+public:
+    explicit LfpWaveformVisibilityButton (
+        String label)
+        : UtilityButton (std::move (label))
+    {
+    }
+
+    void setWaveformVisibilityAccessibilityState (
+        std::shared_ptr<LfpWaveformVisibilityAccessibilityState>
+            stateToUse)
+    {
+        accessibilityState = std::move (stateToUse);
+    }
+
+protected:
+    std::unique_ptr<AccessibilityHandler>
+    createAccessibilityHandler() override
+    {
+        const auto state =
+            accessibilityState.lock();
+        return state != nullptr
+            ? std::make_unique<
+                  LfpWaveformVisibilityAccessibilityHandler> (
+                  *this,
+                  state)
+            : nullptr;
+    }
+
+private:
+    std::weak_ptr<LfpWaveformVisibilityAccessibilityState>
+        accessibilityState;
+};
+} // namespace LfpViewer
 
 #pragma mark - LfpChannelDisplayInfo -
 // -------------------------------
@@ -51,7 +472,7 @@ LfpChannelDisplayInfo::LfpChannelDisplayInfo (LfpDisplaySplitter* canvas_, LfpDi
       mean (0.0f),
       isSingleChannel (false)
 {
-    enableButton = std::make_unique<UtilityButton> ("");
+    enableButton = std::make_unique<LfpWaveformVisibilityButton> ("");
     enableButton->setRadius (5.0f);
 
     enableButton->setEnabledState (true);
@@ -59,6 +480,7 @@ LfpChannelDisplayInfo::LfpChannelDisplayInfo (LfpDisplaySplitter* canvas_, LfpDi
     enableButton->addListener (this);
     enableButton->setClickingTogglesState (true);
     enableButton->setToggleState (true, dontSendNotification);
+    enableButton->setAccessible (false);
 
     addAndMakeVisible (enableButton.get());
 
@@ -88,6 +510,182 @@ void LfpChannelDisplayInfo::setEnabledState (bool state)
     LfpChannelDisplay::setEnabledState (
         state);
     enableButton->setToggleState (state, dontSendNotification);
+}
+
+void LfpChannelDisplayInfo::
+    refreshWaveformVisibilityAccessibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>& identity,
+        int nodeId,
+        bool structurallyAvailable,
+        bool waveformVisible)
+{
+    const auto isAvailable =
+        structurallyAvailable
+        && identity != nullptr
+        && identity->getStableChannelKey() != nullptr
+        && identity->getPaneIndex() >= 0
+        && identity->getStreamKey().isNotEmpty()
+        && isWaveformVisibilityAccessibilityControlAvailable();
+    if (! isAvailable)
+    {
+        revokeWaveformVisibilityAccessibility();
+        return;
+    }
+
+    const auto current =
+        waveformVisibilityAccessibilityState;
+    if (current != nullptr
+        && current->isActive()
+        && current->isVisible()
+               == waveformVisible
+        && current->matchesIdentity (
+               *identity))
+    {
+        return;
+    }
+
+    revokeWaveformVisibilityAccessibility();
+    auto successor = std::make_shared<
+        LfpWaveformVisibilityAccessibilityState> (
+        *this,
+        *identity,
+        nodeId,
+        waveformVisible);
+    if (! successor->isActive())
+    {
+        successor->retire();
+        return;
+    }
+
+    auto* button = dynamic_cast<
+        LfpWaveformVisibilityButton*> (
+        enableButton.get());
+    jassert (button != nullptr);
+    if (button == nullptr)
+    {
+        successor->retire();
+        return;
+    }
+
+    waveformVisibilityAccessibilityState =
+        std::move (successor);
+    enableButton->setComponentID (
+        waveformVisibilityAccessibilityState
+            ->getAutomationId());
+    enableButton->setTitle (
+        waveformVisibilityAccessibilityState
+            ->getTitle());
+    enableButton->setDescription (
+        waveformVisibilityAccessibilityState
+            ->getDescription());
+    enableButton->setHelpText (
+        waveformVisibilityAccessibilityState
+            ->getHelp());
+    enableButton->setAccessible (true);
+    button->setWaveformVisibilityAccessibilityState (
+        waveformVisibilityAccessibilityState);
+    enableButton->invalidateAccessibilityHandler();
+    const auto buttonForNotification =
+        Component::SafePointer<Component> (
+            enableButton.get());
+    MessageManager::callAsync (
+        [buttonForNotification]
+        {
+            if (auto* button =
+                    buttonForNotification.getComponent())
+            {
+                if (auto* handler =
+                        button
+                            ->getAccessibilityHandler())
+                {
+                    handler->notifyAccessibilityEvent (
+                        AccessibilityEvent::valueChanged);
+                }
+            }
+        });
+}
+
+void LfpChannelDisplayInfo::
+    revokeWaveformVisibilityAccessibility()
+{
+    if (waveformVisibilityAccessibilityState != nullptr)
+        waveformVisibilityAccessibilityState->retire();
+
+    waveformVisibilityAccessibilityState.reset();
+    if (auto* button = dynamic_cast<
+            LfpWaveformVisibilityButton*> (
+            enableButton.get()))
+    {
+        button->setWaveformVisibilityAccessibilityState (
+            {});
+    }
+    enableButton->setAccessible (false);
+    enableButton->setComponentID ({});
+    enableButton->setTitle ({});
+    enableButton->setDescription ({});
+    enableButton->setHelpText ({});
+    enableButton->invalidateAccessibilityHandler();
+}
+
+bool LfpChannelDisplayInfo::
+    performWaveformVisibilityAccessibilityToggle (
+        const std::shared_ptr<
+            LfpWaveformVisibilityAccessibilityState>& state)
+{
+    jassert (
+        MessageManager::existsAndIsCurrentThread());
+    if (state == nullptr
+        || state != waveformVisibilityAccessibilityState
+        || ! state->isActive()
+        || display == nullptr
+        || ! display
+                ->validateWaveformVisibilityAccessibility (
+                    *this))
+    {
+        return false;
+    }
+
+    const auto requestedState =
+        ! state->isVisible();
+    if (display->getStoredChannelVisibility (chan)
+        == requestedState)
+    {
+        return false;
+    }
+
+    state->retire();
+    display->setEnabledState (
+        requestedState,
+        chan,
+        true);
+    if (auto* handler =
+            display->getAccessibilityHandler())
+    {
+        handler->notifyAccessibilityEvent (
+            AccessibilityEvent::structureChanged);
+    }
+    return true;
+}
+
+bool LfpChannelDisplayInfo::
+    matchesWaveformVisibilityAccessibilityIdentity (
+        const LfpStableChannelIdentity& identity) const
+{
+    return waveformVisibilityAccessibilityState
+               != nullptr
+        && waveformVisibilityAccessibilityState
+               ->matchesIdentity (identity);
+}
+
+bool LfpChannelDisplayInfo::
+    isWaveformVisibilityAccessibilityControlAvailable () const
+{
+    return enableButton != nullptr
+        && enableButton->isShowing()
+        && enableButton->Component::isEnabled()
+        && isShowing()
+        && Component::isEnabled();
 }
 
 void LfpChannelDisplayInfo::setSingleChannelState (bool state)
@@ -319,7 +917,16 @@ void LfpChannelDisplayInfo::resized()
 
 void LfpChannelDisplayInfo::setEnabledButtonVisibility (bool shouldBeVisible)
 {
+    const auto changed =
+        enableButton->isVisible()
+        != shouldBeVisible;
     enableButton->setVisible (shouldBeVisible);
+    if (changed
+        && display != nullptr)
+    {
+        display
+            ->refreshWaveformVisibilityAccessibilityAvailability();
+    }
 }
 
 bool LfpChannelDisplayInfo::getEnabledButtonVisibility()

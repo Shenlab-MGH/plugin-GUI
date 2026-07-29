@@ -33,6 +33,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -377,6 +378,68 @@ UtilityButton* getIdentityTestEnableButton (
             && utilityButtonCount == 1
         ? enableButton
         : nullptr;
+}
+
+std::unique_ptr<AccessibilityHandler>
+createIdentityTestEnableButtonHandler (
+    UtilityButton& button)
+{
+    return static_cast<Component*> (
+               &button)
+        ->createAccessibilityHandler();
+}
+
+String decodeIdentityTestUtf8Hex (
+    StringRef text)
+{
+    const String value (text);
+    if (value.isEmpty()
+        || value.length() % 2 != 0)
+    {
+        return {};
+    }
+
+    std::string bytes;
+    bytes.reserve (
+        static_cast<size_t> (
+            value.length() / 2));
+    const auto nibble =
+        [] (juce_wchar character)
+        {
+            if (character >= '0'
+                && character <= '9')
+            {
+                return int (character - '0');
+            }
+            if (character >= 'A'
+                && character <= 'F')
+            {
+                return int (character - 'A') + 10;
+            }
+            return -1;
+        };
+    for (int index = 0;
+         index < value.length();
+         index += 2)
+    {
+        const auto high =
+            nibble (value[index]);
+        const auto low =
+            nibble (value[index + 1]);
+        if (high < 0
+            || low < 0)
+        {
+            return {};
+        }
+        bytes.push_back (
+            static_cast<char> (
+                (high << 4) | low));
+    }
+
+    return String::fromUTF8 (
+        bytes.data(),
+        static_cast<int> (
+            bytes.size()));
 }
 
 void configureIdentityPersistenceChannel (
@@ -826,6 +889,720 @@ protected:
     std::unique_ptr<ProcessorTester> tester;
     LfpDisplayNode* processor = nullptr;
 };
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        BaselineRawEnableButtonMustExposeStableWaveformVisibilitySurface)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_FALSE (buffers.isEmpty());
+    const auto channelName =
+        String::fromUTF8 (
+            "A.\xCE\xB2");
+    buffers[0]->streamKey =
+        "task6/stream";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        "id/1",
+        17,
+        0,
+        channelName,
+        ContinuousChannel::Type::
+            ELECTRODE);
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "task6/stream"));
+
+    auto* enableButton =
+        getIdentityTestEnableButton (
+            *splitters[0]
+                 ->lfpDisplay
+                 ->channelInfo[0]);
+    ASSERT_NE (enableButton, nullptr);
+    EXPECT_TRUE (enableButton->isVisible());
+    EXPECT_TRUE (
+        splitters[0]
+            ->lfpDisplay
+            ->channelInfo[0]
+            ->isVisible());
+    EXPECT_NE (
+        splitters[0]
+            ->lfpDisplay
+            ->channelInfo[0]
+            ->getStableChannelIdentity(),
+        nullptr);
+    auto handler =
+        static_cast<Component*> (
+            enableButton)
+            ->createAccessibilityHandler();
+    ASSERT_NE (handler, nullptr);
+
+    const auto expectedId =
+        "oe.processor."
+        + String (
+              processor
+                  ->getNodeId())
+        + ".lfp.display_1.stream_hex_7461736B362F73747265616D.channel_identifier_hex_69642F31.waveform_visibility";
+    EXPECT_EQ (
+        enableButton
+            ->getComponentID(),
+        expectedId);
+    EXPECT_EQ (
+        handler->getRole(),
+        AccessibilityRole::toggleButton);
+    EXPECT_EQ (
+        handler->getTitle(),
+        "LFP display 1 stream \"task6/stream\" channel \""
+            + channelName
+            + "\" waveform visibility");
+    EXPECT_EQ (
+        handler->getDescription(),
+        "Waveform visibility for channel \""
+            + channelName
+            + "\" (identifier \"id/1\") in stream \"task6/stream\" of LFP display 1.");
+    EXPECT_EQ (
+        handler->getHelp(),
+        "Show or hide drawing for channel \""
+            + channelName
+            + "\" (identifier \"id/1\") in stream \"task6/stream\" of LFP display 1. Hiding stops waveform drawing only; it does not disable acquisition, buffering, hardware, or recording selection.");
+    EXPECT_TRUE (
+        handler->getActions()
+            .contains (
+                AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        handler->getActions()
+            .contains (
+                AccessibilityActionType::press));
+    ASSERT_NE (
+        handler->getValueInterface(),
+        nullptr);
+    EXPECT_TRUE (
+        handler->getValueInterface()
+            ->isReadOnly());
+    EXPECT_EQ (
+        handler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Visible");
+}
+
+TEST (LfpStableChannelIdentityTests,
+      WaveformVisibilityUtf8HexIsCanonicalAndReversible)
+{
+    const auto unicode =
+        String::fromUTF8 (
+            "A.\xCE\xB2");
+    EXPECT_EQ (
+        encodeWaveformVisibilityUtf8Hex (
+            unicode),
+        "412ECEB2");
+    EXPECT_EQ (
+        encodeWaveformVisibilityUtf8Hex (
+            "id/1"),
+        "69642F31");
+    EXPECT_TRUE (
+        encodeWaveformVisibilityUtf8Hex (
+            "").isEmpty());
+
+    const auto delimiterFirst =
+        String::fromUTF8 (
+            "a.b/c");
+    const auto delimiterSecond =
+        String::fromUTF8 (
+            "a/b.c");
+    const auto firstEncoded =
+        encodeWaveformVisibilityUtf8Hex (
+            delimiterFirst);
+    const auto secondEncoded =
+        encodeWaveformVisibilityUtf8Hex (
+            delimiterSecond);
+    EXPECT_NE (
+        firstEncoded,
+        secondEncoded);
+    EXPECT_EQ (
+        decodeIdentityTestUtf8Hex (
+            firstEncoded),
+        delimiterFirst);
+    EXPECT_EQ (
+        decodeIdentityTestUtf8Hex (
+            secondEncoded),
+        delimiterSecond);
+    EXPECT_EQ (
+        decodeIdentityTestUtf8Hex (
+            encodeWaveformVisibilityUtf8Hex (
+                unicode)),
+        unicode);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityHandlersExposeEveryPaneAndStableKeyKind)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::THREE_VERT);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_EQ (splitters.size(), 3u);
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_EQ (buffers.size(), 2);
+    const auto unicodeStream =
+        String::fromUTF8 (
+            "stream/\xCE\xB1");
+    const auto unicodeName =
+        String::fromUTF8 (
+            "Name \xCE\xB2");
+    buffers[0]->streamKey =
+        unicodeStream;
+    buffers[1]->streamKey =
+        "source.stream";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        "id/1",
+        101,
+        0,
+        unicodeName,
+        ContinuousChannel::Type::ELECTRODE);
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        1,
+        "third.id",
+        101,
+        1,
+        "Third",
+        ContinuousChannel::Type::ELECTRODE);
+    configureIdentityPersistenceChannel (
+        *buffers[1],
+        0,
+        "",
+        77,
+        5,
+        "Source channel",
+        ContinuousChannel::Type::AUX);
+    canvas->updateSettings();
+
+    struct ExpectedSurface
+    {
+        int pane;
+        String stream;
+        int channel;
+        String channelName;
+        String automationId;
+        String stableKeyText;
+    };
+    const auto node =
+        String (
+            processor->getNodeId());
+    const std::array<ExpectedSurface, 3> expected {
+        ExpectedSurface {
+            0,
+            unicodeStream,
+            0,
+            unicodeName,
+            "oe.processor."
+                + node
+                + ".lfp.display_1.stream_hex_73747265616D2FCEB1.channel_identifier_hex_69642F31.waveform_visibility",
+            "identifier \"id/1\"" },
+        ExpectedSurface {
+            1,
+            "source.stream",
+            0,
+            "Source channel",
+            "oe.processor."
+                + node
+                + ".lfp.display_2.stream_hex_736F757263652E73747265616D.channel_source_77_local_5.waveform_visibility",
+            "source node 77, local channel index 5" },
+        ExpectedSurface {
+            2,
+            unicodeStream,
+            1,
+            "Third",
+            "oe.processor."
+                + node
+                + ".lfp.display_3.stream_hex_73747265616D2FCEB1.channel_identifier_hex_74686972642E6964.waveform_visibility",
+            "identifier \"third.id\"" } };
+
+    for (const auto& entry : expected)
+    {
+        ASSERT_TRUE (
+            splitters[
+                static_cast<size_t> (
+                    entry.pane)]
+                ->selectStreamByKey (
+                    entry.stream));
+        auto* button =
+            getIdentityTestEnableButton (
+                *splitters[
+                     static_cast<size_t> (
+                         entry.pane)]
+                     ->lfpDisplay
+                     ->channelInfo[
+                         entry.channel]);
+        ASSERT_NE (button, nullptr);
+        auto handler =
+            createIdentityTestEnableButtonHandler (
+                *button);
+        ASSERT_NE (handler, nullptr);
+
+        const auto oneBasedPane =
+            String (entry.pane + 1);
+        const auto expectedTitle =
+            "LFP display "
+            + oneBasedPane
+            + " stream \""
+            + entry.stream
+            + "\" channel \""
+            + entry.channelName
+            + "\" waveform visibility";
+        const auto expectedDescription =
+            "Waveform visibility for channel \""
+            + entry.channelName
+            + "\" ("
+            + entry.stableKeyText
+            + ") in stream \""
+            + entry.stream
+            + "\" of LFP display "
+            + oneBasedPane
+            + ".";
+        const auto expectedHelp =
+            "Show or hide drawing for channel \""
+            + entry.channelName
+            + "\" ("
+            + entry.stableKeyText
+            + ") in stream \""
+            + entry.stream
+            + "\" of LFP display "
+            + oneBasedPane
+            + ". Hiding stops waveform drawing only; it does not disable acquisition, buffering, hardware, or recording selection.";
+
+        EXPECT_EQ (
+            button->getComponentID(),
+            entry.automationId);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::toggleButton);
+        EXPECT_EQ (
+            handler->getTitle(),
+            expectedTitle);
+        EXPECT_EQ (
+            handler->getDescription(),
+            expectedDescription);
+        EXPECT_EQ (
+            handler->getHelp(),
+            expectedHelp);
+        EXPECT_TRUE (
+            handler->getCurrentState()
+                .isCheckable());
+        EXPECT_TRUE (
+            handler->getCurrentState()
+                .isChecked());
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::toggle));
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::press));
+        ASSERT_NE (
+            handler->getValueInterface(),
+            nullptr);
+        EXPECT_TRUE (
+            handler->getValueInterface()
+                ->isReadOnly());
+        EXPECT_EQ (
+            handler->getValueInterface()
+                ->getCurrentValueAsString(),
+            "Visible");
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityGenerationRetiresOldHandlersAndKeepsHiddenActionable)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    auto* button =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (button, nullptr);
+    auto visibleHandler =
+        createIdentityTestEnableButtonHandler (
+            *button);
+    ASSERT_NE (visibleHandler, nullptr);
+    const auto retiredVisibleActions =
+        visibleHandler->getActions();
+    ASSERT_TRUE (
+        retiredVisibleActions.invoke (
+            AccessibilityActionType::toggle));
+    ASSERT_FALSE (
+        display->getStoredChannelVisibility (
+            0));
+    EXPECT_FALSE (
+        visibleHandler->isEnabled());
+    EXPECT_TRUE (
+        retiredVisibleActions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_FALSE (
+        display->getStoredChannelVisibility (
+            0));
+
+    auto hiddenHandler =
+        createIdentityTestEnableButtonHandler (
+            *button);
+    ASSERT_NE (hiddenHandler, nullptr);
+    EXPECT_TRUE (
+        hiddenHandler->isEnabled());
+    EXPECT_TRUE (
+        hiddenHandler->getCurrentState()
+            .isCheckable());
+    EXPECT_FALSE (
+        hiddenHandler->getCurrentState()
+            .isChecked());
+    ASSERT_NE (
+        hiddenHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        hiddenHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Hidden");
+
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    EXPECT_TRUE (
+        hiddenHandler->isEnabled());
+    const auto retiredHiddenActions =
+        hiddenHandler->getActions();
+    ASSERT_TRUE (
+        retiredHiddenActions.invoke (
+            AccessibilityActionType::toggle));
+    ASSERT_TRUE (
+        display->getStoredChannelVisibility (
+            0));
+    EXPECT_FALSE (
+        hiddenHandler->isEnabled());
+    EXPECT_TRUE (
+        retiredHiddenActions.invoke (
+            AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        display->getStoredChannelVisibility (
+            0));
+
+    auto restoredHandler =
+        createIdentityTestEnableButtonHandler (
+            *button);
+    ASSERT_NE (restoredHandler, nullptr);
+    EXPECT_TRUE (
+        restoredHandler->isEnabled());
+    EXPECT_TRUE (
+        restoredHandler->getCurrentState()
+            .isChecked());
+    ASSERT_NE (
+        restoredHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        restoredHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Visible");
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityTracksProgrammaticAndStructuralAvailabilityChanges)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    auto* info =
+        display->channelInfo[0];
+    ASSERT_NE (info, nullptr);
+    auto* button =
+        getIdentityTestEnableButton (
+            *info);
+    ASSERT_NE (button, nullptr);
+
+    const auto id =
+        button->getComponentID();
+    ASSERT_FALSE (id.isEmpty());
+    auto visibleHandler =
+        createIdentityTestEnableButtonHandler (
+            *button);
+    ASSERT_NE (visibleHandler, nullptr);
+
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    EXPECT_FALSE (
+        display->getStoredChannelVisibility (
+            0));
+    EXPECT_FALSE (
+        visibleHandler->isEnabled());
+    EXPECT_EQ (
+        button->getComponentID(),
+        id);
+    auto hiddenHandler =
+        createIdentityTestEnableButtonHandler (
+            *button);
+    ASSERT_NE (hiddenHandler, nullptr);
+    EXPECT_TRUE (
+        hiddenHandler->isEnabled());
+    ASSERT_NE (
+        hiddenHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        hiddenHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Hidden");
+
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    EXPECT_TRUE (
+        hiddenHandler->isEnabled());
+
+    info->setSize (
+        info->getWidth(),
+        15);
+    EXPECT_FALSE (
+        button->isVisible());
+    EXPECT_TRUE (
+        button->getComponentID().isEmpty());
+    EXPECT_FALSE (
+        hiddenHandler->isEnabled());
+    EXPECT_EQ (
+        createIdentityTestEnableButtonHandler (
+            *button),
+        nullptr);
+
+    info->setSize (
+        info->getWidth(),
+        30);
+    EXPECT_TRUE (
+        button->isVisible());
+    EXPECT_EQ (
+        button->getComponentID(),
+        id);
+    auto restoredHiddenHandler =
+        createIdentityTestEnableButtonHandler (
+            *button);
+    ASSERT_NE (restoredHiddenHandler, nullptr);
+    EXPECT_TRUE (
+        restoredHiddenHandler->isEnabled());
+    ASSERT_NE (
+        restoredHiddenHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        restoredHiddenHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Hidden");
+
+    ASSERT_TRUE (
+        restoredHiddenHandler->getActions()
+            .invoke (
+                AccessibilityActionType::toggle));
+    EXPECT_TRUE (
+        display->getStoredChannelVisibility (
+            0));
+    EXPECT_FALSE (
+        restoredHiddenHandler->isEnabled());
+
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilitySuppressesInvalidAndAmbiguousStableIdentitySurfaces)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    const auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_FALSE (buffers.isEmpty());
+    buffers[0]->streamKey =
+        "ambiguous.visibility.stream";
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        0,
+        "",
+        900,
+        2,
+        "Ambiguous first",
+        ContinuousChannel::Type::AUX);
+    configureIdentityPersistenceChannel (
+        *buffers[0],
+        1,
+        "",
+        900,
+        2,
+        "Ambiguous second",
+        ContinuousChannel::Type::AUX);
+    buffers[0]
+        ->channelMetadata
+        .getReference (0)
+        .uuid = Uuid::null();
+    buffers[0]
+        ->channelMetadata
+        .getReference (1)
+        .uuid = Uuid::null();
+    canvas->updateSettings();
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "ambiguous.visibility.stream"));
+
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    ASSERT_GE (display->channelInfo.size(), 2);
+    for (int channel = 0;
+         channel < 2;
+         ++channel)
+    {
+        auto* button =
+            getIdentityTestEnableButton (
+                *display->channelInfo[channel]);
+        ASSERT_NE (button, nullptr);
+        EXPECT_TRUE (
+            button->getComponentID().isEmpty());
+        EXPECT_EQ (
+            createIdentityTestEnableButtonHandler (
+                *button),
+            nullptr);
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WaveformVisibilityRepublishesAfterXmlVisibilityRestore)
+{
+    auto canvas =
+        createIdentityCanvas (
+            SplitLayouts::SINGLE);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    display->setEnabledState (
+        false,
+        0,
+        true);
+    auto* hiddenButton =
+        getIdentityTestEnableButton (
+            *display->channelInfo[0]);
+    ASSERT_NE (hiddenButton, nullptr);
+    auto hiddenHandler =
+        createIdentityTestEnableButtonHandler (
+            *hiddenButton);
+    ASSERT_NE (hiddenHandler, nullptr);
+    ASSERT_NE (
+        hiddenHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        hiddenHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Hidden");
+
+    XmlElement savedRoot ("ROOT");
+    canvas->saveCustomParametersToXml (
+        &savedRoot);
+    showAllIdentityTestChannels (
+        *splitters[0]);
+    auto* visibleButton =
+        getIdentityTestEnableButton (
+            *splitters[0]
+                 ->lfpDisplay
+                 ->channelInfo[0]);
+    ASSERT_NE (visibleButton, nullptr);
+    auto visibleHandler =
+        createIdentityTestEnableButtonHandler (
+            *visibleButton);
+    ASSERT_NE (visibleHandler, nullptr);
+    ASSERT_NE (
+        visibleHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        visibleHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Visible");
+
+    canvas->loadCustomParametersFromXml (
+        &savedRoot);
+    splitters =
+        getIdentityTestSplitters (
+            *canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* restoredButton =
+        getIdentityTestEnableButton (
+            *splitters[0]
+                 ->lfpDisplay
+                 ->channelInfo[0]);
+    ASSERT_NE (restoredButton, nullptr);
+    auto restoredHandler =
+        createIdentityTestEnableButtonHandler (
+            *restoredButton);
+    ASSERT_NE (restoredHandler, nullptr);
+    ASSERT_NE (
+        restoredHandler->getValueInterface(),
+        nullptr);
+    EXPECT_EQ (
+        restoredHandler->getValueInterface()
+            ->getCurrentValueAsString(),
+        "Hidden");
+    EXPECT_FALSE (
+        visibleHandler->isEnabled());
+}
 
 TEST_F (LfpStableChannelIdentityBindingTests,
         PaneAndSelectedStreamAreBoundToDisplayAndInfo)

@@ -41,8 +41,10 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <mutex>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 #if JUCE_WINDOWS
 #include <UIAutomation.h>
@@ -474,6 +476,7 @@ enum class LfpWindowsUiaAction
     invoke,
     queryInvoke,
     toggle,
+    toggleOnce,
     queryToggle,
     select,
     removeFromSelection,
@@ -515,9 +518,80 @@ struct LfpWindowsUiaInvokeResult
     ExpandCollapseState expansionState =
         ExpandCollapseState_LeafNode;
     std::wstring name;
+    std::wstring automationId;
     std::wstring help;
     std::wstring value;
+    std::vector<int> runtimeId;
 };
+
+struct LfpWindowsUiaDesiredToggleResult
+{
+    LfpWindowsUiaInvokeResult before;
+    LfpWindowsUiaInvokeResult after;
+    HRESULT transportResult = E_PENDING;
+    bool toggleAttempted = false;
+    bool verified = false;
+};
+
+HRESULT readLfpWindowsUiaRuntimeId (
+    IUIAutomationElement* element,
+    std::vector<int>& output)
+{
+    output.clear();
+    if (element == nullptr)
+        return E_INVALIDARG;
+
+    SAFEARRAY* rawRuntimeId = nullptr;
+    const auto result =
+        element->GetRuntimeId (
+            &rawRuntimeId);
+    if (FAILED (result)
+        || rawRuntimeId == nullptr)
+    {
+        return FAILED (result)
+            ? result
+            : E_FAIL;
+    }
+
+    HRESULT readResult = S_OK;
+    if (SafeArrayGetDim (rawRuntimeId) != 1)
+    {
+        readResult = E_FAIL;
+    }
+    else
+    {
+        LONG first = 0;
+        LONG last = -1;
+        readResult = SafeArrayGetLBound (
+            rawRuntimeId,
+            1,
+            &first);
+        if (SUCCEEDED (readResult))
+        {
+            readResult = SafeArrayGetUBound (
+                rawRuntimeId,
+                1,
+                &last);
+        }
+        for (LONG index = first;
+             SUCCEEDED (readResult)
+             && index <= last;
+             ++index)
+        {
+            int value = 0;
+            readResult = SafeArrayGetElement (
+                rawRuntimeId,
+                &index,
+                &value);
+            if (SUCCEEDED (readResult))
+                output.push_back (value);
+        }
+    }
+    SafeArrayDestroy (rawRuntimeId);
+    if (FAILED (readResult))
+        output.clear();
+    return readResult;
+}
 
 class LfpScopedComApartment
 {
@@ -675,6 +749,19 @@ invokeLfpWindowsUiaControl (
         &output.enabled);
     BSTR text = nullptr;
     if (SUCCEEDED (
+            element->get_CurrentAutomationId (
+                &text))
+        && text != nullptr)
+    {
+        output.automationId = text;
+    }
+    SysFreeString (text);
+
+    readLfpWindowsUiaRuntimeId (
+        element.Get(),
+        output.runtimeId);
+    text = nullptr;
+    if (SUCCEEDED (
             element->get_CurrentName (
                 &text))
         && text != nullptr)
@@ -772,6 +859,16 @@ invokeLfpWindowsUiaControl (
             output.value = value;
         }
         SysFreeString (value);
+    }
+
+    if (action
+        == LfpWindowsUiaAction::
+               toggleOnce)
+    {
+        return finish (
+            togglePattern != nullptr
+                ? togglePattern->Toggle()
+                : E_NOINTERFACE);
     }
 
     if (action
@@ -1221,6 +1318,315 @@ private:
     std::atomic<int> command { noCommand };
     std::thread worker;
 };
+
+class LfpRetainedWindowsToggleSession final
+{
+public:
+    LfpRetainedWindowsToggleSession (
+        HWND windowToUse,
+        std::wstring automationIdToUse)
+        : window (windowToUse),
+          automationId (
+              std::move (
+                  automationIdToUse)),
+          worker (
+              [this]
+              {
+                  run();
+              })
+    {
+    }
+
+    ~LfpRetainedWindowsToggleSession()
+    {
+        command.store (stopCommand);
+        if (worker.joinable())
+            worker.join();
+    }
+
+    bool isReady() const
+    {
+        return ready.load();
+    }
+
+    HRESULT getSetupResult() const
+    {
+        return setupResult.load();
+    }
+
+    void requestToggle()
+    {
+        request (toggleCommand);
+    }
+
+    void requestReadToggle()
+    {
+        request (readToggleCommand);
+    }
+
+    void requestReadValue()
+    {
+        request (readValueCommand);
+    }
+
+    void requestReadRuntimeId()
+    {
+        request (readRuntimeIdCommand);
+    }
+
+    void requestSetValue (
+        std::wstring valueToSet)
+    {
+        {
+            const std::lock_guard<std::mutex>
+                lock (valueMutex);
+            requestedValue = std::move (
+                valueToSet);
+        }
+        request (setValueCommand);
+    }
+
+    bool hasCompleted() const
+    {
+        return completed.load();
+    }
+
+    HRESULT getResult() const
+    {
+        return result.load();
+    }
+
+    ToggleState getToggleState() const
+    {
+        return toggleState.load();
+    }
+
+    std::wstring getValue() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (valueMutex);
+        return currentValue;
+    }
+
+    std::vector<int> getRuntimeId() const
+    {
+        const std::lock_guard<std::mutex>
+            lock (runtimeIdMutex);
+        return currentRuntimeId;
+    }
+
+private:
+    void request (int requestedCommand)
+    {
+        completed.store (false);
+        command.store (requestedCommand);
+    }
+
+    void run()
+    {
+        const LfpScopedComApartment
+            comApartment;
+        auto setup = comApartment.getResult();
+        Microsoft::WRL::ComPtr<IUIAutomation> automation;
+        Microsoft::WRL::ComPtr<IUIAutomationElement> root;
+        Microsoft::WRL::ComPtr<IUIAutomationCondition> condition;
+        Microsoft::WRL::ComPtr<IUIAutomationElement> element;
+        Microsoft::WRL::ComPtr<IUIAutomationTogglePattern> toggle;
+        Microsoft::WRL::ComPtr<IUIAutomationValuePattern> value;
+
+        if (SUCCEEDED (setup))
+        {
+            setup = CoCreateInstance (
+                CLSID_CUIAutomation,
+                nullptr,
+                CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS (&automation));
+        }
+        if (SUCCEEDED (setup))
+        {
+            setup = automation->ElementFromHandle (
+                window,
+                &root);
+            if (SUCCEEDED (setup)
+                && root == nullptr)
+            {
+                setup = E_FAIL;
+            }
+        }
+        if (SUCCEEDED (setup))
+        {
+            VARIANT expectedId;
+            VariantInit (&expectedId);
+            expectedId.vt = VT_BSTR;
+            expectedId.bstrVal = SysAllocString (
+                automationId.c_str());
+            if (expectedId.bstrVal == nullptr)
+            {
+                setup = E_OUTOFMEMORY;
+            }
+            else
+            {
+                setup = automation
+                            ->CreatePropertyCondition (
+                                UIA_AutomationIdPropertyId,
+                                expectedId,
+                                &condition);
+            }
+            VariantClear (&expectedId);
+        }
+        if (SUCCEEDED (setup))
+        {
+            setup = root->FindFirst (
+                TreeScope_Subtree,
+                condition.Get(),
+                &element);
+            if (SUCCEEDED (setup)
+                && element == nullptr)
+            {
+                setup = E_FAIL;
+            }
+        }
+        if (SUCCEEDED (setup))
+        {
+            setup = element->GetCurrentPatternAs (
+                UIA_TogglePatternId,
+                IID_PPV_ARGS (&toggle));
+            if (SUCCEEDED (setup)
+                && toggle == nullptr)
+            {
+                setup = E_NOINTERFACE;
+            }
+        }
+        if (SUCCEEDED (setup))
+        {
+            setup = element->GetCurrentPatternAs (
+                UIA_ValuePatternId,
+                IID_PPV_ARGS (&value));
+            if (SUCCEEDED (setup)
+                && value == nullptr)
+            {
+                setup = E_NOINTERFACE;
+            }
+        }
+
+        setupResult.store (setup);
+        ready.store (true);
+        while (true)
+        {
+            const auto requested =
+                command.exchange (
+                    noCommand);
+            if (requested == stopCommand)
+                return;
+            if (requested == noCommand)
+            {
+                std::this_thread::yield();
+                continue;
+            }
+
+            HRESULT operationResult = setup;
+            if (SUCCEEDED (operationResult)
+                && requested == toggleCommand)
+            {
+                operationResult = toggle->Toggle();
+            }
+            else if (SUCCEEDED (operationResult)
+                     && requested == readToggleCommand)
+            {
+                ToggleState current =
+                    ToggleState_Indeterminate;
+                operationResult =
+                    toggle->get_CurrentToggleState (
+                        &current);
+                if (SUCCEEDED (operationResult))
+                {
+                    toggleState.store (current);
+                }
+            }
+            else if (SUCCEEDED (operationResult)
+                     && requested == readValueCommand)
+            {
+                BSTR current = nullptr;
+                operationResult =
+                    value->get_CurrentValue (
+                        &current);
+                if (SUCCEEDED (operationResult)
+                    && current != nullptr)
+                {
+                    const std::lock_guard<std::mutex>
+                        lock (valueMutex);
+                    currentValue = current;
+                }
+                SysFreeString (current);
+            }
+            else if (SUCCEEDED (operationResult)
+                     && requested == readRuntimeIdCommand)
+            {
+                std::vector<int> runtimeId;
+                operationResult =
+                    readLfpWindowsUiaRuntimeId (
+                        element.Get(),
+                        runtimeId);
+                if (SUCCEEDED (operationResult))
+                {
+                    const std::lock_guard<std::mutex>
+                        lock (runtimeIdMutex);
+                    currentRuntimeId = std::move (runtimeId);
+                }
+            }
+            else if (SUCCEEDED (operationResult)
+                     && requested == setValueCommand)
+            {
+                std::wstring requestedValueCopy;
+                {
+                    const std::lock_guard<std::mutex>
+                        lock (valueMutex);
+                    requestedValueCopy = requestedValue;
+                }
+                BSTR input = SysAllocString (
+                    requestedValueCopy.c_str());
+                if (input == nullptr)
+                {
+                    operationResult =
+                        E_OUTOFMEMORY;
+                }
+                else
+                {
+                    operationResult =
+                        value->SetValue (
+                            input);
+                    SysFreeString (input);
+                }
+            }
+            result.store (operationResult);
+            completed.store (true);
+        }
+    }
+
+    static constexpr int noCommand = 0;
+    static constexpr int toggleCommand = 1;
+    static constexpr int readToggleCommand = 2;
+    static constexpr int readValueCommand = 3;
+    static constexpr int readRuntimeIdCommand = 4;
+    static constexpr int setValueCommand = 5;
+    static constexpr int stopCommand = 6;
+
+    const HWND window;
+    const std::wstring automationId;
+    std::atomic<bool> ready { false };
+    std::atomic<bool> completed { false };
+    std::atomic<HRESULT> setupResult { E_PENDING };
+    std::atomic<HRESULT> result { E_PENDING };
+    std::atomic<ToggleState> toggleState {
+        ToggleState_Indeterminate };
+    std::atomic<int> command { noCommand };
+    mutable std::mutex valueMutex;
+    std::wstring requestedValue;
+    std::wstring currentValue;
+    mutable std::mutex runtimeIdMutex;
+    std::vector<int> currentRuntimeId;
+    std::thread worker;
+};
 #endif
 } // namespace
 
@@ -1526,7 +1932,8 @@ protected:
     invokeWindowsUiaFromWorker (
         HWND window,
         StringRef id,
-        LfpWindowsUiaAction action)
+        LfpWindowsUiaAction action,
+        StringRef valueToSet = {})
     {
         LfpWindowsUiaInvokeResult result;
         std::atomic<bool> workerReturned { false };
@@ -1538,7 +1945,10 @@ protected:
                     std::wstring (
                         String (id)
                             .toWideCharPointer()),
-                    action);
+                    action,
+                    std::wstring (
+                        String (valueToSet)
+                            .toWideCharPointer()));
                 workerReturned.store (true);
             });
         for (int attempt = 0;
@@ -1551,6 +1961,101 @@ protected:
         joinLfpWorkerOrAbort (
             worker,
             workerReturned);
+        return result;
+    }
+
+    LfpWindowsUiaDesiredToggleResult
+    setWaveformVisibilityWithFreshWindowsUia (
+        HWND window,
+        StringRef id,
+        StringRef expectedTitle,
+        StringRef expectedHelp,
+        bool desiredVisible)
+    {
+        LfpWindowsUiaDesiredToggleResult result;
+        const auto expectedId =
+            std::wstring (
+                String (id)
+                    .toWideCharPointer());
+        const auto expectedName =
+            std::wstring (
+                String (expectedTitle)
+                    .toWideCharPointer());
+        const auto expectedHelpText =
+            std::wstring (
+                String (expectedHelp)
+                    .toWideCharPointer());
+        const auto isCurrentWaveformSurface =
+            [&] (const LfpWindowsUiaInvokeResult& query)
+            {
+                const auto visible =
+                    query.toggleState
+                    == ToggleState_On;
+                return query.invokeResult == S_OK
+                    && query.automationId == expectedId
+                    && query.name == expectedName
+                    && query.help == expectedHelpText
+                    && query.controlType
+                           == UIA_CheckBoxControlTypeId
+                    && query.enabled == TRUE
+                    && query.togglePatternAvailable
+                    && query.valuePatternAvailable
+                    && query.valueReadOnly == TRUE
+                    && ! query.invokePatternAvailable
+                    && ! query.selectionItemPatternAvailable
+                    && ! query.expandCollapsePatternAvailable
+                    && (query.toggleState == ToggleState_On
+                        || query.toggleState == ToggleState_Off)
+                    && query.value
+                           == (visible
+                                   ? L"Visible"
+                                   : L"Hidden");
+            };
+
+        result.before =
+            invokeWindowsUiaFromWorker (
+                window,
+                id,
+                LfpWindowsUiaAction::queryToggle);
+        if (! isCurrentWaveformSurface (
+                result.before))
+        {
+            return result;
+        }
+
+        const auto beforeVisible =
+            result.before.toggleState
+            == ToggleState_On;
+        if (beforeVisible == desiredVisible)
+        {
+            result.after = result.before;
+            result.verified = true;
+            return result;
+        }
+
+        result.toggleAttempted = true;
+        result.transportResult =
+            invokeWindowsUiaFromWorker (
+                window,
+                id,
+                LfpWindowsUiaAction::toggleOnce)
+                .invokeResult;
+        result.after =
+            invokeWindowsUiaFromWorker (
+                window,
+                id,
+                LfpWindowsUiaAction::queryToggle);
+        result.verified =
+            isCurrentWaveformSurface (
+                result.after)
+            && (result.after.toggleState
+                    == (desiredVisible
+                            ? ToggleState_On
+                            : ToggleState_Off))
+            && result.after.value
+                   == (desiredVisible
+                           ? L"Visible"
+                           : L"Hidden");
         return result;
     }
 #endif
@@ -21345,6 +21850,263 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (
         hiddenPaneResult.invokeResult,
         E_FAIL);
+}
+#endif
+
+#if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWaveformVisibilityUsesFreshDesiredStateProtocol)
+{
+    auto canvas =
+        createAveragingCanvas (
+            LfpViewer::SplitLayouts::SINGLE);
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toFront (false);
+    const auto buffers =
+        processor->getDisplayBuffers();
+    ASSERT_FALSE (buffers.isEmpty());
+    auto* buffer = buffers[0];
+    buffer->streamKey =
+        "native/stream";
+    auto& metadata =
+        buffer->channelMetadata
+            .getReference (0);
+    metadata.identifier =
+        "native/id";
+    metadata.sourceNodeId = 311;
+    metadata.localIndex = 4;
+    metadata.name =
+        "Native channel";
+    metadata.type =
+        ContinuousChannel::Type::ELECTRODE;
+    canvas->updateSettings();
+    canvas->resized();
+    const auto splitters =
+        getDisplaySplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    ASSERT_TRUE (
+        splitters[0]
+            ->selectStreamByKey (
+                "native/stream"));
+    auto* display =
+        splitters[0]
+            ->lfpDisplay.get();
+    ASSERT_NE (display, nullptr);
+    ASSERT_GT (
+        display->channelInfo.size(),
+        0);
+    auto* button =
+        findLfpDescendant<UtilityButton> (
+            *display->channelInfo[0]);
+    ASSERT_NE (button, nullptr);
+    ASSERT_TRUE (button->isShowing());
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.stream_hex_6E61746976652F73747265616D.channel_identifier_hex_6E61746976652F6964.waveform_visibility";
+    const String expectedTitle =
+        "LFP display 1 stream \"native/stream\" channel \"Native channel\" waveform visibility";
+    const String expectedHelp =
+        "Show or hide drawing for channel \"Native channel\" (identifier \"native/id\") in stream \"native/stream\" of LFP display 1. Hiding stops waveform drawing only; it does not disable acquisition, buffering, hardware, or recording selection.";
+    EXPECT_EQ (
+        button->getComponentID(),
+        id);
+    const auto window =
+        static_cast<HWND> (
+            canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto query =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::queryToggle);
+    EXPECT_EQ (query.invokeResult, S_OK);
+    EXPECT_EQ (
+        query.automationId,
+        std::wstring (
+            id.toWideCharPointer()));
+    EXPECT_EQ (
+        query.controlType,
+        UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (query.enabled, TRUE);
+    EXPECT_EQ (
+        query.name,
+        std::wstring (
+            expectedTitle.toWideCharPointer()));
+    EXPECT_EQ (
+        query.help,
+        std::wstring (
+            expectedHelp.toWideCharPointer()));
+    EXPECT_TRUE (
+        query.togglePatternAvailable);
+    EXPECT_TRUE (
+        query.valuePatternAvailable);
+    EXPECT_EQ (
+        query.valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        query.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (
+        query.value,
+        L"Visible");
+    EXPECT_FALSE (
+        query.invokePatternAvailable);
+    EXPECT_FALSE (
+        query.selectionItemPatternAvailable);
+    EXPECT_FALSE (
+        query.expandCollapsePatternAvailable);
+    EXPECT_FALSE (query.runtimeId.empty());
+
+    const auto rejectedWrite =
+        invokeWindowsUiaFromWorker (
+            window,
+            id,
+            LfpWindowsUiaAction::setValue,
+            "Hidden");
+    EXPECT_EQ (
+        rejectedWrite.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_INVALIDOPERATION));
+    EXPECT_TRUE (
+        display->getStoredChannelVisibility (
+            0));
+
+    const auto waitForReady =
+        [] (LfpRetainedWindowsToggleSession& session)
+        {
+            for (int attempt = 0;
+                 attempt < 100
+                     && ! session.isReady();
+                 ++attempt)
+            {
+                MessageManager::getInstance()
+                    ->runDispatchLoopUntil (10);
+            }
+        };
+    const auto waitForCompletion =
+        [] (LfpRetainedWindowsToggleSession& session)
+        {
+            for (int attempt = 0;
+                 attempt < 100
+                     && ! session.hasCompleted();
+                 ++attempt)
+            {
+                MessageManager::getInstance()
+                    ->runDispatchLoopUntil (10);
+            }
+        };
+
+    LfpRetainedWindowsToggleSession diagnosticSession (
+        window,
+        std::wstring (
+            id.toWideCharPointer()));
+    waitForReady (diagnosticSession);
+    ASSERT_TRUE (diagnosticSession.isReady());
+    ASSERT_EQ (
+        diagnosticSession.getSetupResult(),
+        S_OK);
+    diagnosticSession.requestReadRuntimeId();
+    waitForCompletion (diagnosticSession);
+    ASSERT_TRUE (
+        diagnosticSession.hasCompleted());
+    ASSERT_EQ (
+        diagnosticSession.getResult(),
+        S_OK);
+    const auto retainedInitialRuntime =
+        diagnosticSession.getRuntimeId();
+    ASSERT_FALSE (retainedInitialRuntime.empty());
+
+    const auto isIndeterminateTransport =
+        [] (HRESULT result)
+        {
+            return result == S_OK
+                || result
+                       == static_cast<HRESULT> (
+                              UIA_E_ELEMENTNOTAVAILABLE)
+                || result
+                       == static_cast<HRESULT> (
+                              UIA_E_ELEMENTNOTENABLED);
+        };
+    const auto hiddenMutation =
+        setWaveformVisibilityWithFreshWindowsUia (
+            window,
+            id,
+            expectedTitle,
+            expectedHelp,
+            false);
+    EXPECT_TRUE (hiddenMutation.toggleAttempted);
+    EXPECT_TRUE (
+        isIndeterminateTransport (
+            hiddenMutation.transportResult));
+    EXPECT_TRUE (hiddenMutation.verified);
+    EXPECT_FALSE (
+        display->getStoredChannelVisibility (
+            0));
+    EXPECT_FALSE (
+        hiddenMutation.after.runtimeId.empty());
+    EXPECT_NE (
+        query.runtimeId,
+        hiddenMutation.after.runtimeId);
+
+    diagnosticSession.requestReadToggle();
+    waitForCompletion (diagnosticSession);
+    RecordProperty (
+        "task6_retained_toggle_after_hide_hresult",
+        std::to_string (
+            static_cast<long long> (
+                diagnosticSession.getResult())));
+    diagnosticSession.requestReadValue();
+    waitForCompletion (diagnosticSession);
+    RecordProperty (
+        "task6_retained_value_after_hide_hresult",
+        std::to_string (
+            static_cast<long long> (
+                diagnosticSession.getResult())));
+    diagnosticSession.requestReadRuntimeId();
+    waitForCompletion (diagnosticSession);
+    RecordProperty (
+        "task6_retained_runtime_after_hide_relation",
+        diagnosticSession.getRuntimeId()
+                == hiddenMutation.after.runtimeId
+            ? "matches_fresh"
+            : "differs_from_fresh");
+
+    const auto visibleMutation =
+        setWaveformVisibilityWithFreshWindowsUia (
+            window,
+            id,
+            expectedTitle,
+            expectedHelp,
+            true);
+    EXPECT_TRUE (visibleMutation.toggleAttempted);
+    EXPECT_TRUE (
+        isIndeterminateTransport (
+            visibleMutation.transportResult));
+    EXPECT_TRUE (visibleMutation.verified);
+    EXPECT_TRUE (
+        display->getStoredChannelVisibility (
+            0));
+    EXPECT_FALSE (
+        visibleMutation.after.runtimeId.empty());
+    EXPECT_NE (
+        hiddenMutation.after.runtimeId,
+        visibleMutation.after.runtimeId);
+
+    const auto alreadyVisible =
+        setWaveformVisibilityWithFreshWindowsUia (
+            window,
+            id,
+            expectedTitle,
+            expectedHelp,
+            true);
+    EXPECT_FALSE (alreadyVisible.toggleAttempted);
+    EXPECT_EQ (alreadyVisible.transportResult, E_PENDING);
+    EXPECT_TRUE (alreadyVisible.verified);
 }
 #endif
 

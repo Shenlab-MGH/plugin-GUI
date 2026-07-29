@@ -342,6 +342,7 @@ public:
 
 private:
     friend class LfpChannelDisplay;
+    friend class LfpChannelDisplayInfo;
     friend class LfpDisplayCanvas;
     friend class LfpDisplayOptions;
     friend class LfpDisplaySplitter;
@@ -361,6 +362,13 @@ private:
             availableStreams);
     /** Revokes hidden/disabled targets and rebinds newly available targets. */
     void refreshStableChannelIdentityAvailability();
+    /** Refreshes the independent drawing-visibility accessibility generation. */
+    void refreshWaveformVisibilityAccessibilityAvailability();
+    /** Retires every drawing-visibility accessibility generation. */
+    void invalidateWaveformVisibilityAccessibility();
+    /** Revalidates one retained visibility provider against the live channel. */
+    bool validateWaveformVisibilityAccessibility (
+        const LfpChannelDisplayInfo& info) const;
     /** Pre-revokes every current generation before a pane becomes unavailable. */
     void prepareStableChannelIdentityTargetUnavailable();
 

@@ -27,6 +27,7 @@
 #include <VisualizerWindowHeaders.h>
 
 #include <array>
+#include <memory>
 #include <vector>
 
 #include "LfpChannelDisplay.h"
@@ -35,6 +36,9 @@
 
 namespace LfpViewer
 {
+class LfpWaveformVisibilityAccessibilityState;
+
+TESTABLE String encodeWaveformVisibilityUtf8Hex (StringRef text);
 
 /**
     Displays meta data pertaining to an associated channel, such as channel number.
@@ -47,6 +51,7 @@ class LfpChannelDisplayInfo : public LfpChannelDisplay,
                               public TooltipClient
 {
     friend class LfpDisplay;
+    friend class LfpWaveformVisibilityAccessibilityState;
 
 public:
     /** Constructor */
@@ -105,6 +110,8 @@ private:
     int subProcessorIdx;
 
     std::unique_ptr<UtilityButton> enableButton;
+    std::shared_ptr<LfpWaveformVisibilityAccessibilityState>
+        waveformVisibilityAccessibilityState;
 
     bool channelTypeStringIsVisible;
     bool channelNumberHidden;
@@ -122,6 +129,20 @@ private:
     /** Get/set whether channel number is hidden */
     void setChannelNumberIsHidden (bool shouldBeHidden);
     bool isChannelNumberHidden();
+
+    void refreshWaveformVisibilityAccessibility (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>& identity,
+        int nodeId,
+        bool structurallyAvailable,
+        bool waveformVisible);
+    void revokeWaveformVisibilityAccessibility ();
+    bool performWaveformVisibilityAccessibilityToggle (
+        const std::shared_ptr<
+            LfpWaveformVisibilityAccessibilityState>& state);
+    bool matchesWaveformVisibilityAccessibilityIdentity (
+        const LfpStableChannelIdentity& identity) const;
+    bool isWaveformVisibilityAccessibilityControlAvailable () const;
 
     String getTooltip() override;
 };

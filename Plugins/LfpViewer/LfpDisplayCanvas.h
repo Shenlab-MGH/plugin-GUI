@@ -447,6 +447,7 @@ public:
     String getStreamKey() const;
 
 private:
+    friend class LfpDisplay;
     friend class LfpDisplayCanvas;
     friend class LfpDisplayOptions;
 

@@ -377,6 +377,7 @@ void LfpDisplay::setColours()
 void LfpDisplay::
     invalidateStableChannelIdentities()
 {
+    invalidateWaveformVisibilityAccessibility();
     for (const auto& slot :
          stableChannelIdentityBindingSlots)
     {
@@ -504,6 +505,7 @@ void LfpDisplay::
 #endif
     }
     endStableChannelIdentityBulkMutation();
+    refreshWaveformVisibilityAccessibilityAvailability();
 }
 
 LfpDisplay::StableChannelVisibilityKey::
@@ -1875,6 +1877,159 @@ void LfpDisplay::
                     index)],
             actionOwnerState);
     }
+
+    refreshWaveformVisibilityAccessibilityAvailability();
+}
+
+void LfpDisplay::
+    refreshWaveformVisibilityAccessibilityAvailability()
+{
+    const auto count =
+        jmin (
+            channels.size(),
+            channelInfo.size(),
+            static_cast<int> (
+                stableChannelIdentityBlueprints
+                    .size()));
+    const bool paneIsAvailable =
+        canvasSplit != nullptr
+        && canvasSplit
+               ->isIdentityTargetAvailable()
+        && canvasSplit->processor != nullptr
+        && canvasSplit->isShowing()
+        && canvasSplit->Component::isEnabled()
+        && isShowing()
+        && Component::isEnabled();
+    const auto nodeId = paneIsAvailable
+        ? canvasSplit->processor->getNodeId()
+        : -1;
+    const auto drawableMask =
+        createCurrentDrawableChannelMask();
+
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        auto* channel = channels[index];
+        auto* info = channelInfo[index];
+        const auto& identity =
+            stableChannelIdentityBlueprints[
+                static_cast<size_t> (
+                    index)];
+        const bool structurallyAvailable =
+            paneIsAvailable
+            && identity != nullptr
+            && canvasSplit->splitID
+                   == identity->getPaneIndex()
+            && canvasSplit->getStreamKey()
+                   == identity->getStreamKey()
+            && canvasSplit->displayBuffer != nullptr
+            && canvasSplit->displayBuffer->streamKey
+                   == identity->getStreamKey()
+            && drawableMask[
+                   static_cast<size_t> (
+                       index)]
+            && channel != nullptr
+            && info != nullptr
+            && channel->chan == index
+            && info->chan == index
+            && ! channel->getHidden()
+            && ! info->getHidden()
+            && channel->isShowing()
+            && info->isShowing()
+            && channel->Component::isEnabled()
+            && info->Component::isEnabled();
+        if (info != nullptr)
+        {
+            info->refreshWaveformVisibilityAccessibility (
+                identity,
+                nodeId,
+                structurallyAvailable,
+                getStoredChannelVisibility (
+                    index));
+        }
+    }
+
+    for (int index = count;
+         index < channelInfo.size();
+         ++index)
+    {
+        if (auto* info = channelInfo[index])
+            info->revokeWaveformVisibilityAccessibility();
+    }
+}
+
+void LfpDisplay::
+    invalidateWaveformVisibilityAccessibility()
+{
+    for (auto* info : channelInfo)
+    {
+        if (info != nullptr)
+            info->revokeWaveformVisibilityAccessibility();
+    }
+}
+
+bool LfpDisplay::
+    validateWaveformVisibilityAccessibility (
+        const LfpChannelDisplayInfo& info) const
+{
+    jassert (
+        MessageManager::existsAndIsCurrentThread());
+    const auto index = info.chan;
+    if (canvasSplit == nullptr
+        || ! canvasSplit->isIdentityTargetAvailable()
+        || ! isShowing()
+        || ! isEnabled()
+        || index < 0
+        || index >= channels.size()
+        || index >= channelInfo.size()
+        || index >= static_cast<int> (
+            stableChannelIdentityBlueprints.size())
+        || channelInfo[index] != &info
+        || channels[index] == nullptr
+        || canvasSplit->displayBuffer == nullptr
+        || ! info.isVisible()
+        || ! info.Component::isEnabled()
+        || ! channels[index]->isVisible()
+        || ! channels[index]->Component::isEnabled()
+        || const_cast<LfpChannelDisplayInfo&> (
+               info)
+               .getHidden()
+        || channels[index]->getHidden()
+        || ! info.isWaveformVisibilityAccessibilityControlAvailable())
+    {
+        return false;
+    }
+
+    const auto& identity =
+        stableChannelIdentityBlueprints[
+            static_cast<size_t> (
+                index)];
+    if (identity == nullptr
+        || identity->getStableChannelKey() == nullptr
+        || canvasSplit->splitID
+               != identity->getPaneIndex()
+        || canvasSplit->getStreamKey()
+               != identity->getStreamKey()
+        || canvasSplit->displayBuffer->streamKey
+               != identity->getStreamKey()
+        || ! info.matchesWaveformVisibilityAccessibilityIdentity (
+            *identity))
+    {
+        return false;
+    }
+
+    for (const auto& drawable :
+         drawableChannels)
+    {
+        if (drawable.channel == channels[index]
+            && drawable.channelInfo == &info)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool LfpDisplay::
@@ -2091,6 +2246,7 @@ bool LfpDisplay::
 void LfpDisplay::
     prepareStableChannelIdentityTargetUnavailable()
 {
+    invalidateWaveformVisibilityAccessibility();
     for (const auto& slot :
          stableChannelIdentityBindingSlots)
     {
@@ -3515,6 +3671,8 @@ void LfpDisplay::setEnabledState (bool state, int chan, bool updateSaved)
         channels[chan]->setEnabledState (state);
         channelInfo[chan]->setEnabledState (state);
     }
+
+    refreshWaveformVisibilityAccessibilityAvailability();
 }
 
 bool LfpDisplay::getEnabledState (int chan)
