@@ -9197,6 +9197,9 @@ TEST_F (LfpDisplayNodeTests,
     ASSERT_TRUE (reset->isShowing());
     retained.requestInvoke();
     waitForInvoke();
+    EXPECT_EQ (
+        retained.getInvokeResult(),
+        S_OK);
     MessageManager::getInstance()
         ->runDispatchLoopUntil (20);
     EXPECT_EQ (listener.callbackCount.load(), 0);
@@ -9205,28 +9208,12 @@ TEST_F (LfpDisplayNodeTests,
     ASSERT_TRUE (reset->isShowing());
     retained.requestInvoke();
     waitForInvoke();
-    if (SUCCEEDED (
-            retained.getInvokeResult()))
-    {
-        pumpUntilButtonCallbacks (
-            listener,
-            1);
-    }
-    else
-    {
-        SCOPED_TRACE (
-            "Retained native InvokePattern became unavailable after the drawer reopened; verifying recovery through a fresh provider.");
-        EXPECT_EQ (
-            invokeWindowsUiaFromWorker (
-                window,
-                id,
-                LfpWindowsUiaAction::invoke)
-                .invokeResult,
-            S_OK);
-        pumpUntilButtonCallbacks (
-            listener,
-            1);
-    }
+    EXPECT_EQ (
+        retained.getInvokeResult(),
+        S_OK);
+    pumpUntilButtonCallbacks (
+        listener,
+        1);
     EXPECT_EQ (listener.callbackCount.load(), 1);
     EXPECT_TRUE (
         listener
