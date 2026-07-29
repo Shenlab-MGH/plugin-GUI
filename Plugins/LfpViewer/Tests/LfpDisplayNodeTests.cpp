@@ -157,6 +157,23 @@ Component* findLfpDesktopComponentByAccessibilityTitle (
     return nullptr;
 }
 
+class LfpChannelSelectionProbe final
+    : public LfpViewer::
+          LfpChannelDisplay
+{
+public:
+    static bool read (
+        const LfpViewer::
+            LfpChannelDisplay&
+            channel)
+    {
+        const auto selectedMember =
+            &LfpChannelSelectionProbe::
+                isSelected;
+        return channel.*selectedMember;
+    }
+};
+
 Array<String> drainLfpBroadcastMessages (
     MessageCenter& messageCenter)
 {
@@ -9509,9 +9526,14 @@ TEST_F (LfpDisplayNodeTests,
     ASSERT_NE (
         target,
         source);
-    options->setSelectedType (
-        ContinuousChannel::Type::
-            ADC);
+    for (auto* channel :
+         display->channels)
+    {
+        EXPECT_FALSE (
+            LfpChannelSelectionProbe::
+                read (
+                    *channel));
+    }
 
     target->changeParameter (
         1);
@@ -9612,10 +9634,12 @@ TEST_F (LfpDisplayNodeTests,
         observation->invertSignalChecked);
     EXPECT_TRUE (
         observation->pressedInvertSignal);
-    EXPECT_EQ (
-        options->getSelectedType(),
-        ContinuousChannel::Type::
-            ELECTRODE);
+    EXPECT_TRUE (
+        LfpChannelSelectionProbe::read (
+            *target));
+    EXPECT_FALSE (
+        LfpChannelSelectionProbe::read (
+            *source));
     EXPECT_FALSE (
         target->getInputInverted());
     for (int index = 0;
@@ -9625,6 +9649,11 @@ TEST_F (LfpDisplayNodeTests,
         if (display->channels[index]
             != target)
         {
+            EXPECT_FALSE (
+                LfpChannelSelectionProbe::
+                    read (
+                        *display->channels[
+                            index]));
             EXPECT_EQ (
                 display->channels[index]
                     ->getInputInverted(),
