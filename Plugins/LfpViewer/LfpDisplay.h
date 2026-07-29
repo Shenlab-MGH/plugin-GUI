@@ -364,6 +364,8 @@ private:
     void refreshStableChannelIdentityAvailability();
     /** Refreshes the independent drawing-visibility accessibility generation. */
     void refreshWaveformVisibilityAccessibilityAvailability();
+    /** Coalesces drawing-visibility availability refreshes during bulk changes. */
+    void requestWaveformVisibilityAccessibilityAvailabilityRefresh();
     /** Retires every drawing-visibility accessibility generation. */
     void invalidateWaveformVisibilityAccessibility();
     /** Revalidates one retained visibility provider against the live channel. */
@@ -521,6 +523,7 @@ private:
         focusedStableChannel;
     int stableChannelIdentityBulkMutationDepth = 0;
     bool stableChannelIdentityRefreshPending = false;
+    bool waveformVisibilityAccessibilityRefreshPending = false;
 
 #if BUILD_TESTS
     void notifyStableIdentityLifecycleTestHook (

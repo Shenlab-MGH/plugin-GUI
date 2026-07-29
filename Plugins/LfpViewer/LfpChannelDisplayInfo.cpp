@@ -758,14 +758,11 @@ void LfpChannelDisplayInfo::
     handleWaveformVisibilityAccessibilityLifecycleChange()
 {
     jassert (MessageManager::existsAndIsCurrentThread());
+    revokeWaveformVisibilityAccessibility();
     if (display != nullptr)
     {
         display
-            ->refreshWaveformVisibilityAccessibilityAvailability();
-    }
-    else
-    {
-        revokeWaveformVisibilityAccessibility();
+            ->requestWaveformVisibilityAccessibilityAvailabilityRefresh();
     }
 }
 
@@ -1006,7 +1003,7 @@ void LfpChannelDisplayInfo::setEnabledButtonVisibility (bool shouldBeVisible)
         && display != nullptr)
     {
         display
-            ->refreshWaveformVisibilityAccessibilityAvailability();
+            ->requestWaveformVisibilityAccessibilityAvailabilityRefresh();
     }
 }
 

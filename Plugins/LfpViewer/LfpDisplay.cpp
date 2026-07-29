@@ -504,8 +504,8 @@ void LfpDisplay::
             index);
 #endif
     }
+    requestWaveformVisibilityAccessibilityAvailabilityRefresh();
     endStableChannelIdentityBulkMutation();
-    refreshWaveformVisibilityAccessibilityAvailability();
 }
 
 LfpDisplay::StableChannelVisibilityKey::
@@ -2277,6 +2277,18 @@ void LfpDisplay::
 }
 
 void LfpDisplay::
+    requestWaveformVisibilityAccessibilityAvailabilityRefresh()
+{
+    if (stableChannelIdentityBulkMutationDepth
+        > 0)
+    {
+        waveformVisibilityAccessibilityRefreshPending = true;
+        return;
+    }
+    refreshWaveformVisibilityAccessibilityAvailability();
+}
+
+void LfpDisplay::
     revokeStableChannelIdentityForChannel (
         int channelIndex)
 {
@@ -2316,12 +2328,25 @@ void LfpDisplay::
         > 0);
     --stableChannelIdentityBulkMutationDepth;
     if (stableChannelIdentityBulkMutationDepth
-            == 0
-        && stableChannelIdentityRefreshPending)
+        != 0)
     {
-        stableChannelIdentityRefreshPending =
-            false;
+        return;
+    }
+
+    const bool refreshStableIdentity =
+        stableChannelIdentityRefreshPending;
+    const bool refreshWaveformVisibility =
+        waveformVisibilityAccessibilityRefreshPending;
+    stableChannelIdentityRefreshPending = false;
+    waveformVisibilityAccessibilityRefreshPending = false;
+    if (refreshStableIdentity)
+    {
         refreshStableChannelIdentityAvailability();
+        return;
+    }
+    if (refreshWaveformVisibility)
+    {
+        refreshWaveformVisibilityAccessibilityAvailability();
     }
 }
 
@@ -3674,7 +3699,7 @@ void LfpDisplay::setEnabledState (bool state, int chan, bool updateSaved)
         channelInfo[chan]->setEnabledState (state);
     }
 
-    refreshWaveformVisibilityAccessibilityAvailability();
+    requestWaveformVisibilityAccessibilityAvailabilityRefresh();
 }
 
 bool LfpDisplay::getEnabledState (int chan)
