@@ -549,6 +549,163 @@ void LfpDisplay::
     }
 }
 
+bool LfpDisplay::
+    validateStableChannelAction (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity) const
+{
+    jassert (
+        MessageManager::
+            existsAndIsCurrentThread());
+    if (retainedIdentity == nullptr
+        || ! retainedIdentity
+                ->isAgentActionable()
+        || canvasSplit == nullptr
+        || ! canvasSplit
+                ->isIdentityTargetAvailable()
+        || canvasSplit->splitID
+               != retainedIdentity
+                      ->getPaneIndex()
+        || canvasSplit
+                   ->getStreamKey()
+               != retainedIdentity
+                      ->getStreamKey()
+        || ! isShowing()
+        || ! isEnabled())
+    {
+        return false;
+    }
+
+    const auto count =
+        jmin (
+            channels.size(),
+            channelInfo.size(),
+            static_cast<int> (
+                stableChannelIdentityBlueprints
+                    .size()),
+            static_cast<int> (
+                stableChannelIdentityBindingSlots
+                    .size()));
+    for (int index = 0;
+         index < count;
+         ++index)
+    {
+        const auto& slot =
+            stableChannelIdentityBindingSlots[
+                static_cast<size_t> (
+                    index)];
+        if (slot == nullptr
+            || slot->get()
+                   != retainedIdentity)
+        {
+            continue;
+        }
+
+        auto* channel =
+            channels[
+                index];
+        auto* info =
+            channelInfo[
+                index];
+        if (channel == nullptr
+            || info == nullptr)
+        {
+            return false;
+        }
+
+        const auto channelSlot =
+            std::atomic_load_explicit (
+                &channel
+                     ->stableChannelIdentityBindingSlot,
+                std::memory_order_acquire);
+        const auto infoSlot =
+            std::atomic_load_explicit (
+                &info
+                     ->stableChannelIdentityBindingSlot,
+                std::memory_order_acquire);
+        if (channelSlot != slot
+            || infoSlot != slot
+            || channel
+                       ->getStableChannelIdentity()
+                   != retainedIdentity
+            || info
+                       ->getStableChannelIdentity()
+                   != retainedIdentity)
+        {
+            return false;
+        }
+
+        const auto& blueprint =
+            stableChannelIdentityBlueprints[
+                static_cast<size_t> (
+                    index)];
+        const auto* retainedKey =
+            retainedIdentity
+                ->getStableChannelKey();
+        const auto* blueprintKey =
+            blueprint != nullptr
+                ? blueprint
+                      ->getStableChannelKey()
+                : nullptr;
+        if (blueprint == nullptr
+            || retainedKey == nullptr
+            || blueprintKey == nullptr
+            || ! (*retainedKey
+                   == *blueprintKey)
+            || blueprint
+                       ->getPaneIndex()
+                   != retainedIdentity
+                          ->getPaneIndex()
+            || blueprint
+                       ->getStreamKey()
+                   != retainedIdentity
+                          ->getStreamKey()
+            || blueprint
+                       ->getRuntimeUuid()
+                   != retainedIdentity
+                          ->getRuntimeUuid()
+            || channel->chan != index
+            || info->chan != index
+            || ! channel
+                    ->getEnabledState()
+            || ! info
+                    ->getEnabledState()
+            || channel
+                   ->getHidden()
+            || info
+                   ->getHidden()
+            || ! channel
+                    ->isShowing()
+            || ! info
+                    ->isShowing()
+            || ! channel
+                    ->Component::
+                    isEnabled()
+            || ! info
+                    ->Component::
+                    isEnabled())
+        {
+            return false;
+        }
+
+        for (const auto& drawable :
+             drawableChannels)
+        {
+            if (drawable.channel
+                    == channel
+                && drawable.channelInfo
+                       == info)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return false;
+}
+
 void LfpDisplay::
     prepareStableChannelIdentityTargetUnavailable()
 {
@@ -819,6 +976,38 @@ void LfpDisplay::
             phase,
             channelIndex);
     }
+}
+
+void LfpDisplay::
+    notifyStableIdentityComponentLifecycleTestHook (
+        const LfpChannelDisplay&
+            component,
+        bool visibilityChanged)
+{
+    const auto channelIndex =
+        component.chan;
+    const bool isInfo =
+        channelIndex >= 0
+        && channelIndex
+               < channelInfo.size()
+        && static_cast<
+               const LfpChannelDisplay*> (
+               channelInfo[
+                   channelIndex])
+               == &component;
+    notifyStableIdentityLifecycleTestHook (
+        visibilityChanged
+            ? (isInfo
+                   ? StableIdentityLifecycleTestPhase::
+                         infoVisibilityChangedEntry
+                   : StableIdentityLifecycleTestPhase::
+                         channelVisibilityChangedEntry)
+            : (isInfo
+                   ? StableIdentityLifecycleTestPhase::
+                         infoEnablementChangedEntry
+                   : StableIdentityLifecycleTestPhase::
+                         channelEnablementChangedEntry),
+        channelIndex);
 }
 #endif
 

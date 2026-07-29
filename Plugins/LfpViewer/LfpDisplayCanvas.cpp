@@ -206,6 +206,22 @@ LfpDisplayCanvas::~LfpDisplayCanvas()
 
 void LfpDisplayCanvas::visibilityChanged()
 {
+#if BUILD_TESTS
+    for (auto* split :
+         displaySplits)
+    {
+        if (split != nullptr
+            && split->lfpDisplay != nullptr)
+        {
+            split->lfpDisplay
+                ->notifyStableIdentityLifecycleTestHook (
+                    LfpDisplay::
+                        StableIdentityLifecycleTestPhase::
+                            canvasVisibilityChangedEntry,
+                    -1);
+        }
+    }
+#endif
     Visualizer::visibilityChanged();
     for (auto* split :
          displaySplits)
@@ -217,6 +233,22 @@ void LfpDisplayCanvas::visibilityChanged()
 
 void LfpDisplayCanvas::enablementChanged()
 {
+#if BUILD_TESTS
+    for (auto* split :
+         displaySplits)
+    {
+        if (split != nullptr
+            && split->lfpDisplay != nullptr)
+        {
+            split->lfpDisplay
+                ->notifyStableIdentityLifecycleTestHook (
+                    LfpDisplay::
+                        StableIdentityLifecycleTestPhase::
+                            canvasEnablementChangedEntry,
+                    -1);
+        }
+    }
+#endif
     Visualizer::enablementChanged();
     for (auto* split :
          displaySplits)
@@ -524,6 +556,85 @@ bool LfpDisplayCanvas::isPaneActive (
     return splitID < visiblePaneCount
            && displaySplits[splitID]
                   ->getSelectedState();
+}
+
+LfpStableChannelActionRequest
+LfpDisplayCanvas::
+    createStableChannelActionRequest (
+        std::shared_ptr<
+            const LfpStableChannelIdentity>
+            retainedIdentity)
+{
+    return {
+        this,
+        std::move (
+            retainedIdentity)
+    };
+}
+
+bool LfpDisplayCanvas::
+    validateStableChannelAction (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity) const
+{
+    jassert (
+        MessageManager::
+            existsAndIsCurrentThread());
+    if (retainedIdentity == nullptr
+        || ! retainedIdentity
+                ->isAgentActionable()
+        || ! isShowing()
+        || ! isEnabled())
+    {
+        return false;
+    }
+
+    const auto paneIndex =
+        retainedIdentity
+            ->getPaneIndex();
+    if (paneIndex < 0
+        || paneIndex
+               >= displaySplits.size())
+    {
+        return false;
+    }
+
+    auto* splitter =
+        displaySplits[
+            paneIndex];
+    if (splitter == nullptr
+        || splitter->canvas != this
+        || splitter->splitID
+               != paneIndex
+        || splitter->lfpDisplay
+               == nullptr
+        || splitter->displayBuffer
+               == nullptr
+        || splitter
+                   ->getStreamKey()
+               != retainedIdentity
+                      ->getStreamKey()
+        || splitter->displayBuffer
+                   ->streamKey
+               != retainedIdentity
+                      ->getStreamKey()
+        || ! splitter->isShowing()
+        || ! splitter->isEnabled()
+        || ! splitter
+                ->lfpDisplay
+                ->isShowing()
+        || ! splitter
+                ->lfpDisplay
+                ->isEnabled())
+    {
+        return false;
+    }
+
+    return splitter
+        ->lfpDisplay
+        ->validateStableChannelAction (
+            retainedIdentity);
 }
 
 void LfpDisplayCanvas::mouseMove (const MouseEvent& e)
@@ -1118,6 +1229,17 @@ void LfpDisplaySplitter::
 
 void LfpDisplaySplitter::visibilityChanged()
 {
+#if BUILD_TESTS
+    if (lfpDisplay != nullptr)
+    {
+        lfpDisplay
+            ->notifyStableIdentityLifecycleTestHook (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        splitterVisibilityChangedEntry,
+                -1);
+    }
+#endif
     Component::visibilityChanged();
     if (lfpDisplay != nullptr)
     {
@@ -1128,6 +1250,17 @@ void LfpDisplaySplitter::visibilityChanged()
 
 void LfpDisplaySplitter::enablementChanged()
 {
+#if BUILD_TESTS
+    if (lfpDisplay != nullptr)
+    {
+        lfpDisplay
+            ->notifyStableIdentityLifecycleTestHook (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        splitterEnablementChangedEntry,
+                -1);
+    }
+#endif
     Component::enablementChanged();
     if (lfpDisplay != nullptr)
     {

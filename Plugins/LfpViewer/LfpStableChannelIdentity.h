@@ -18,6 +18,7 @@
 
 #include <ProcessorHeaders.h>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -25,7 +26,9 @@
 namespace LfpViewer
 {
 class DisplayBuffer;
+class LfpDisplayCanvas;
 class LfpStableChannelIdentity;
+class LfpStableChannelActionRequest;
 class LfpStableChannelIdentityBindingSlot;
 
 /**
@@ -95,6 +98,14 @@ public:
     getStableChannelKey() const noexcept;
     const Uuid& getRuntimeUuid() const noexcept { return runtimeUuid; }
 
+    /**
+        Returns whether this immutable generation token is structurally valid
+        and has not been revoked.
+
+        This is a necessary precondition only. It is never sufficient
+        authorization for an agent mutation; live component availability must
+        also be revalidated by LfpStableChannelActionRequest.
+     */
     bool isAgentActionable() const noexcept;
 
 private:
@@ -148,6 +159,37 @@ private:
     const std::shared_ptr<
         GenerationState>
         generationState;
+};
+
+/**
+    A retained, owner-controlled request for one future channel command.
+
+    It retains no raw component, channel, or buffer pointer. Agent-facing code
+    must use performIfCurrentAndAvailable rather than treating the immutable
+    generation token as complete authorization.
+ */
+class LfpStableChannelActionRequest final
+{
+public:
+    TESTABLE bool validate() const;
+    TESTABLE bool performIfCurrentAndAvailable (
+        const std::function<void()>&
+            command) const;
+
+private:
+    friend class LfpDisplayCanvas;
+
+    struct State;
+
+    LfpStableChannelActionRequest (
+        Component* owner,
+        std::shared_ptr<
+            const LfpStableChannelIdentity>
+            retainedIdentity);
+
+    std::shared_ptr<
+        const State>
+        state;
 };
 
 /**

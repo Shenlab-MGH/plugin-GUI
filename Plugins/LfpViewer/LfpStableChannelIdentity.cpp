@@ -16,6 +16,7 @@
 
 #include "LfpStableChannelIdentity.h"
 #include "DisplayBuffer.h"
+#include "LfpDisplayCanvas.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -109,6 +110,102 @@ LfpStableChannelIdentity::
             streamKey,
             stableChannelKey,
             runtimeUuid));
+}
+
+struct LfpStableChannelActionRequest::
+    State
+{
+    State (
+        Component* owner_,
+        std::shared_ptr<
+            const LfpStableChannelIdentity>
+            retainedIdentity_)
+        : owner (owner_),
+          retainedIdentity (
+              std::move (
+                  retainedIdentity_))
+    {
+    }
+
+    Component::SafePointer<Component>
+        owner;
+    const std::shared_ptr<
+        const LfpStableChannelIdentity>
+        retainedIdentity;
+};
+
+LfpStableChannelActionRequest::
+    LfpStableChannelActionRequest (
+        Component* owner_,
+        std::shared_ptr<
+            const LfpStableChannelIdentity>
+            retainedIdentity_)
+    : state (
+          std::make_shared<State> (
+              owner_,
+              std::move (
+                  retainedIdentity_)))
+{
+}
+
+bool LfpStableChannelActionRequest::
+    validate() const
+{
+    return performIfCurrentAndAvailable (
+        [] {});
+}
+
+bool LfpStableChannelActionRequest::
+    performIfCurrentAndAvailable (
+        const std::function<void()>&
+            command) const
+{
+    if (! command)
+        return false;
+
+    const auto retainedState =
+        state;
+    const auto perform =
+        [retainedState,
+         command]
+        {
+            auto* ownerComponent =
+                retainedState
+                    ->owner
+                    .getComponent();
+            auto* canvas =
+                dynamic_cast<
+                    LfpDisplayCanvas*> (
+                    ownerComponent);
+            if (canvas == nullptr
+                || ! canvas
+                        ->validateStableChannelAction (
+                            retainedState
+                                ->retainedIdentity))
+            {
+                return false;
+            }
+
+            command();
+            return true;
+        };
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    if (messageManager == nullptr)
+        return false;
+
+    if (messageManager
+            ->isThisTheMessageThread())
+    {
+        return perform();
+    }
+
+    return MessageManager::callSync (
+               perform)
+        .value_or (
+            false);
 }
 
 std::shared_ptr<

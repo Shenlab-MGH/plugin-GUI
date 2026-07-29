@@ -80,7 +80,15 @@ public:
         afterPairPublication,
         beforeDrawableHierarchyMutation,
         beforePaneVisibilityMutation,
-        beforeChannelStateMutation
+        beforeChannelStateMutation,
+        canvasVisibilityChangedEntry,
+        canvasEnablementChangedEntry,
+        splitterVisibilityChangedEntry,
+        splitterEnablementChangedEntry,
+        channelVisibilityChangedEntry,
+        channelEnablementChangedEntry,
+        infoVisibilityChangedEntry,
+        infoEnablementChangedEntry
     };
 
     TESTABLE void setStableIdentityLifecycleTestHook (
@@ -355,6 +363,10 @@ private:
     void revokeOutgoingStableChannelIdentities (
         const std::vector<uint8_t>&
             desiredDrawableMask);
+    bool validateStableChannelAction (
+        const std::shared_ptr<
+            const LfpStableChannelIdentity>&
+            retainedIdentity) const;
 
     int singleChan;
 
@@ -395,6 +407,10 @@ private:
     void notifyStableIdentityLifecycleTestHook (
         StableIdentityLifecycleTestPhase phase,
         int channelIndex);
+    void notifyStableIdentityComponentLifecycleTestHook (
+        const LfpChannelDisplay&
+            component,
+        bool visibilityChanged);
 
     std::function<void (
         StableIdentityLifecycleTestPhase,

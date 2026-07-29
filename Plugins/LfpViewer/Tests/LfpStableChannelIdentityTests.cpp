@@ -25,7 +25,9 @@
 #include <ModelProcessors.h>
 #include <TestFixtures.h>
 #include <algorithm>
+#include <atomic>
 #include <memory>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -1469,6 +1471,518 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         revokedBeforeState);
     EXPECT_TRUE (
         channelWasStillEnabled);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        LiveGateAllowsOneCurrentVisibleCommandAndRejectsSameStreamRebind)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    auto* buffer =
+        splitter->displayBuffer;
+    ASSERT_NE (buffer, nullptr);
+    const auto retained =
+        display->channels[0]
+            ->getStableChannelIdentity();
+    ASSERT_NE (retained, nullptr);
+    ASSERT_TRUE (canvas->isShowing());
+    ASSERT_TRUE (canvas->isEnabled());
+    ASSERT_TRUE (splitter->isShowing());
+    ASSERT_TRUE (splitter->isEnabled());
+    ASSERT_TRUE (display->isShowing());
+    ASSERT_TRUE (display->isEnabled());
+    ASSERT_TRUE (
+        display->channels[0]
+            ->isShowing());
+    ASSERT_TRUE (
+        display->channels[0]
+            ->Component::isEnabled());
+    ASSERT_TRUE (
+        display->channelInfo[0]
+            ->isShowing());
+    ASSERT_TRUE (
+        display->channelInfo[0]
+            ->Component::isEnabled());
+    const auto request =
+        canvas
+            ->createStableChannelActionRequest (
+                retained);
+
+    int commandCount = 0;
+    bool ranOnMessageThread = false;
+    EXPECT_TRUE (
+        request.validate());
+    std::atomic<bool> workerFinished {
+        false
+    };
+    bool workerResult = false;
+    std::thread worker (
+        [&]
+        {
+            workerResult =
+                request
+                    .performIfCurrentAndAvailable (
+                        [&]
+                        {
+                            ++commandCount;
+                            ranOnMessageThread =
+                                MessageManager::
+                                    existsAndIsCurrentThread();
+                        });
+            workerFinished.store (
+                true);
+        });
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    ASSERT_NE (
+        messageManager,
+        nullptr);
+    for (int dispatch = 0;
+         dispatch < 1000
+         && ! workerFinished.load();
+         ++dispatch)
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                1);
+    }
+    ASSERT_TRUE (
+        workerFinished.load());
+    worker.join();
+    EXPECT_TRUE (
+        workerResult);
+    EXPECT_EQ (
+        commandCount,
+        1);
+    EXPECT_TRUE (
+        ranOnMessageThread);
+
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            buffer->streamKey));
+    EXPECT_FALSE (
+        request.validate());
+    EXPECT_FALSE (
+        request
+            .performIfCurrentAndAvailable (
+                [&]
+                {
+                    ++commandCount;
+                }));
+    EXPECT_EQ (
+        commandCount,
+        1);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        GenericComponentPointerHideRejectsAtLifecycleEntry)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+
+    struct VisibilityCase
+    {
+        Component* component;
+        LfpDisplay::
+            StableIdentityLifecycleTestPhase
+                expectedPhase;
+    };
+    const std::vector<VisibilityCase>
+        cases {
+            {
+                canvas.get(),
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        canvasVisibilityChangedEntry },
+            {
+                splitter,
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        splitterVisibilityChangedEntry },
+            {
+                display->channels[0],
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        channelVisibilityChangedEntry },
+            {
+                display->channelInfo[0],
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        infoVisibilityChangedEntry }
+        };
+
+    for (const auto& testCase :
+         cases)
+    {
+        const auto retained =
+            display->channels[0]
+                ->getStableChannelIdentity();
+        ASSERT_NE (retained, nullptr);
+        const auto request =
+            canvas
+                ->createStableChannelActionRequest (
+                    retained);
+        ASSERT_TRUE (
+            testCase.component
+                ->isShowing());
+        ASSERT_TRUE (
+            request.validate());
+        bool observedEntry = false;
+        bool gateAcceptedAtEntry = false;
+        int commandCount = 0;
+        display
+            ->setStableIdentityLifecycleTestHook (
+                [&] (
+                    LfpDisplay::
+                        StableIdentityLifecycleTestPhase
+                            phase,
+                    int channelIndex)
+                {
+                    if (phase
+                            == testCase
+                                   .expectedPhase
+                        && (channelIndex == -1
+                            || channelIndex == 0))
+                    {
+                        observedEntry = true;
+                        gateAcceptedAtEntry =
+                            request
+                                .performIfCurrentAndAvailable (
+                                    [&]
+                                    {
+                                        ++commandCount;
+                                    });
+                    }
+                });
+
+        testCase.component
+            ->setVisible (
+                false);
+
+        EXPECT_TRUE (
+            observedEntry);
+        EXPECT_FALSE (
+            gateAcceptedAtEntry);
+        EXPECT_EQ (
+            commandCount,
+            0);
+
+        display
+            ->setStableIdentityLifecycleTestHook (
+                {});
+        testCase.component
+            ->setVisible (
+                true);
+        ASSERT_NE (
+            display->channels[0]
+                ->getStableChannelIdentity(),
+            nullptr);
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        GenericComponentPointerDisableRejectsAtLifecycleEntry)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+
+    struct EnablementCase
+    {
+        Component* component;
+        LfpDisplay::
+            StableIdentityLifecycleTestPhase
+                expectedPhase;
+    };
+    const std::vector<EnablementCase>
+        cases {
+            {
+                canvas.get(),
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        canvasEnablementChangedEntry },
+            {
+                splitter,
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        splitterEnablementChangedEntry },
+            {
+                display->channels[0],
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        channelEnablementChangedEntry },
+            {
+                display->channelInfo[0],
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase::
+                        infoEnablementChangedEntry }
+        };
+
+    for (const auto& testCase :
+         cases)
+    {
+        const auto retained =
+            display->channels[0]
+                ->getStableChannelIdentity();
+        ASSERT_NE (retained, nullptr);
+        const auto request =
+            canvas
+                ->createStableChannelActionRequest (
+                    retained);
+        ASSERT_TRUE (
+            testCase.component
+                ->isShowing());
+        ASSERT_TRUE (
+            testCase.component
+                ->isEnabled());
+        ASSERT_TRUE (
+            request.validate());
+        bool observedEntry = false;
+        bool gateAcceptedAtEntry = false;
+        int commandCount = 0;
+        display
+            ->setStableIdentityLifecycleTestHook (
+                [&] (
+                    LfpDisplay::
+                        StableIdentityLifecycleTestPhase
+                            phase,
+                    int channelIndex)
+                {
+                    if (phase
+                            == testCase
+                                   .expectedPhase
+                        && (channelIndex == -1
+                            || channelIndex == 0))
+                    {
+                        observedEntry = true;
+                        gateAcceptedAtEntry =
+                            request
+                                .performIfCurrentAndAvailable (
+                                    [&]
+                                    {
+                                        ++commandCount;
+                                    });
+                    }
+                });
+
+        testCase.component
+            ->setEnabled (
+                false);
+
+        EXPECT_TRUE (
+            observedEntry);
+        EXPECT_FALSE (
+            gateAcceptedAtEntry);
+        EXPECT_EQ (
+            commandCount,
+            0);
+
+        display
+            ->setStableIdentityLifecycleTestHook (
+                {});
+        testCase.component
+            ->setEnabled (
+                true);
+        ASSERT_NE (
+            display->channels[0]
+                ->getStableChannelIdentity(),
+            nullptr);
+    }
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        WorkerLiveGateDuringGenericMutationReturnsFalseWithoutDeadlock)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    auto* splitter = splitters[0];
+    auto* display =
+        splitter->lfpDisplay.get();
+    const auto retained =
+        display->channels[0]
+            ->getStableChannelIdentity();
+    ASSERT_NE (retained, nullptr);
+    const auto request =
+        canvas
+            ->createStableChannelActionRequest (
+                retained);
+    ASSERT_TRUE (
+        splitter->isShowing());
+    ASSERT_TRUE (
+        request.validate());
+
+    std::atomic<bool> workerStarted {
+        false
+    };
+    std::atomic<bool> workerFinished {
+        false
+    };
+    bool workerResult = true;
+    int commandCount = 0;
+    std::thread worker;
+    display
+        ->setStableIdentityLifecycleTestHook (
+            [&] (
+                LfpDisplay::
+                    StableIdentityLifecycleTestPhase
+                        phase,
+                int)
+            {
+                if (phase
+                    != LfpDisplay::
+                           StableIdentityLifecycleTestPhase::
+                               splitterVisibilityChangedEntry)
+                {
+                    return;
+                }
+                worker =
+                    std::thread (
+                        [&]
+                        {
+                            workerStarted.store (
+                                true);
+                            workerResult =
+                                request
+                                    .performIfCurrentAndAvailable (
+                                        [&]
+                                        {
+                                            ++commandCount;
+                                        });
+                            workerFinished.store (
+                                true);
+                        });
+                while (! workerStarted.load())
+                    std::this_thread::yield();
+            });
+
+    Component* genericSplitter =
+        splitter;
+    genericSplitter->setVisible (
+        false);
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    ASSERT_NE (
+        messageManager,
+        nullptr);
+    for (int dispatch = 0;
+         dispatch < 1000
+         && ! workerFinished.load();
+         ++dispatch)
+    {
+        messageManager
+            ->runDispatchLoopUntil (
+                1);
+    }
+    ASSERT_TRUE (
+        workerFinished.load());
+    worker.join();
+
+    EXPECT_FALSE (
+        workerResult);
+    EXPECT_EQ (
+        commandCount,
+        0);
+}
+
+TEST_F (LfpStableChannelIdentityBindingTests,
+        RetainedLiveGateRejectsAfterOwnerDestruction)
+{
+    auto canvas = std::make_unique<LfpDisplayCanvas> (
+        processor,
+        SplitLayouts::SINGLE,
+        false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->addToDesktop (0);
+    canvas->resized();
+    canvas->setVisible (true);
+    canvas->updateSettings();
+    auto splitters =
+        getIdentityTestSplitters (*canvas);
+    ASSERT_FALSE (splitters.empty());
+    const auto retained =
+        splitters[0]
+            ->lfpDisplay
+            ->channels[0]
+            ->getStableChannelIdentity();
+    ASSERT_NE (retained, nullptr);
+    const auto request =
+        canvas
+            ->createStableChannelActionRequest (
+                retained);
+    ASSERT_TRUE (
+        request.validate());
+
+    canvas.reset();
+
+    int commandCount = 0;
+    EXPECT_FALSE (
+        request.validate());
+    EXPECT_FALSE (
+        request
+            .performIfCurrentAndAvailable (
+                [&]
+                {
+                    ++commandCount;
+                }));
+    EXPECT_EQ (
+        commandCount,
+        0);
 }
 
 TEST_F (LfpStableChannelIdentityBindingTests,

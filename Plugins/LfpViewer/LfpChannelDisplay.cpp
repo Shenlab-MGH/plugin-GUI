@@ -163,6 +163,15 @@ void LfpChannelDisplay::setHidden (bool isHidden_)
 
 void LfpChannelDisplay::visibilityChanged()
 {
+#if BUILD_TESTS
+    if (display != nullptr)
+    {
+        display
+            ->notifyStableIdentityComponentLifecycleTestHook (
+                *this,
+                true);
+    }
+#endif
     Component::visibilityChanged();
     if (display != nullptr)
     {
@@ -173,6 +182,15 @@ void LfpChannelDisplay::visibilityChanged()
 
 void LfpChannelDisplay::enablementChanged()
 {
+#if BUILD_TESTS
+    if (display != nullptr)
+    {
+        display
+            ->notifyStableIdentityComponentLifecycleTestHook (
+                *this,
+                false);
+    }
+#endif
     Component::enablementChanged();
     if (display != nullptr)
     {
