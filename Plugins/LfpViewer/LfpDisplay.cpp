@@ -889,7 +889,10 @@ void LfpDisplay::
     for (const auto* stream :
          availableStreams)
     {
-        if (stream == nullptr)
+        if (stream == nullptr
+            || stream->streamKey
+                   .trim()
+                   .isEmpty())
             continue;
 
         const auto identities =
@@ -921,6 +924,18 @@ void LfpDisplay::
             if (hiddenStableChannels.find (
                     visibilityKey)
                 == hiddenStableChannels.end())
+            {
+                continue;
+            }
+            if (stableKey->getKind()
+                    == LfpStableChannelKey::
+                           Kind::identifier
+                && (identity
+                            ->getPersistedSourceNodeId()
+                        < -1
+                    || identity
+                               ->getPersistedLocalIndex()
+                           < -1))
             {
                 continue;
             }
@@ -1363,10 +1378,12 @@ void LfpDisplay::
         == StagedWaveformVisibilityKind::
                version2)
     {
-        struct CurrentIdentity
+        struct CurrentMetadataRow
         {
-            StableChannelVisibilityKey
+            std::optional<
+                StableChannelVisibilityKey>
                 visibilityKey;
+            String streamKey;
             String identifier;
             int sourceNodeId;
             int localIndex;
@@ -1455,21 +1472,21 @@ void LfpDisplay::
                 return result;
             }
         };
-        std::vector<CurrentIdentity>
-            currentIdentities;
-        size_t currentIdentityCapacity =
+        std::vector<CurrentMetadataRow>
+            currentRows;
+        size_t currentRowCapacity =
             0;
         for (const auto* stream :
              availableStreams)
         {
-            currentIdentityCapacity +=
+            currentRowCapacity +=
                 static_cast<size_t> (
                     stream
                         ->channelMetadata
                         .size());
         }
-        currentIdentities.reserve (
-            currentIdentityCapacity);
+        currentRows.reserve (
+            currentRowCapacity);
         for (const auto* stream :
              availableStreams)
         {
@@ -1480,37 +1497,53 @@ void LfpDisplay::
                         : -1,
                     *stream,
                     availableStreams);
-            for (const auto& identity :
-                 identities)
+            for (int channel = 0;
+                 channel
+                 < stream->channelMetadata
+                       .size();
+                 ++channel)
             {
+                const auto& metadata =
+                    stream->channelMetadata[
+                        channel];
+                const auto& identity =
+                    channel
+                            < static_cast<int> (
+                                  identities
+                                      .size())
+                        ? identities[
+                              static_cast<
+                                  size_t> (
+                                  channel)]
+                        : nullptr;
                 const auto* stableKey =
                     identity != nullptr
                         ? identity
                               ->getStableChannelKey()
                         : nullptr;
-                if (identity == nullptr
-                    || stableKey == nullptr)
+                std::optional<
+                    StableChannelVisibilityKey>
+                    visibilityKey;
+                if (identity != nullptr
+                    && stableKey != nullptr)
                 {
-                    continue;
+                    visibilityKey.emplace (
+                        identity
+                            ->getPaneIndex(),
+                        identity
+                            ->getStreamKey(),
+                        *stableKey);
                 }
-                currentIdentities
+                currentRows
                     .push_back (
-                        { StableChannelVisibilityKey (
-                              identity
-                                  ->getPaneIndex(),
-                              identity
-                                  ->getStreamKey(),
-                              *stableKey),
-                          identity
-                              ->getPersistedIdentifier(),
-                          identity
-                              ->getPersistedSourceNodeId(),
-                          identity
-                              ->getPersistedLocalIndex(),
-                          identity
-                              ->getPersistedChannelName(),
-                          identity
-                              ->getPersistedChannelType() });
+                        { std::move (
+                              visibilityKey),
+                          stream->streamKey,
+                          metadata.identifier,
+                          metadata.sourceNodeId,
+                          metadata.localIndex,
+                          metadata.name,
+                          metadata.type });
 #if BUILD_TESTS
                 ++waveformVisibilityResolutionWorkForTests;
 #endif
@@ -1528,23 +1561,22 @@ void LfpDisplay::
             SourceLocalIndexKeyHash>
             sourceLocalIndex;
         identifierIndex.reserve (
-            currentIdentities.size());
+            currentRows.size());
         sourceLocalIndex.reserve (
-            currentIdentities.size());
+            currentRows.size());
         for (size_t index = 0;
              index
-             < currentIdentities.size();
+             < currentRows.size();
              ++index)
         {
             const auto& current =
-                currentIdentities[index];
+                currentRows[index];
             if (current.identifier
                     .trim()
                     .isNotEmpty())
             {
                 identifierIndex[
                     { current
-                          .visibilityKey
                           .streamKey
                           .toStdString(),
                       current.identifier
@@ -1557,7 +1589,6 @@ void LfpDisplay::
             {
                 sourceLocalIndex[
                     { current
-                          .visibilityKey
                           .streamKey
                           .toStdString(),
                       current.sourceNodeId,
@@ -1631,10 +1662,16 @@ void LfpDisplay::
             }
 
             const auto& uniqueMatch =
-                currentIdentities[
+                currentRows[
                     matches->front()];
+            if (! uniqueMatch
+                      .visibilityKey
+                      .has_value())
+            {
+                continue;
+            }
             auto& count = resolutionCounts[
-                uniqueMatch.visibilityKey];
+                *uniqueMatch.visibilityKey];
             ++count.recordsForStableKey;
             if (record.wellFormed
                 && uniqueMatch.channelName

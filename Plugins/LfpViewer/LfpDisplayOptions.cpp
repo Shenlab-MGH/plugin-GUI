@@ -3785,6 +3785,8 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
                     ->getDisplayBuffers());
         lfpDisplay
             ->applyStoredChannelVisibilityAfterBind();
+        canvasSplit->isLoading = false;
+        canvasSplit->redraw();
         return;
     }
 
