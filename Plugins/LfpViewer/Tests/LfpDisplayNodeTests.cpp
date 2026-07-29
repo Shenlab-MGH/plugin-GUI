@@ -7677,14 +7677,12 @@ TEST_F (LfpDisplayNodeTests,
             LfpViewer::LfpDisplaySplitter> (
             *canvas);
     ASSERT_NE (split, nullptr);
-    auto retainedHandler =
+    auto liveHandler =
         clipWarning->createAccessibilityHandler();
-    ASSERT_NE (retainedHandler, nullptr);
+    ASSERT_NE (liveHandler, nullptr);
     auto* value =
-        retainedHandler->getValueInterface();
+        liveHandler->getValueInterface();
     ASSERT_NE (value, nullptr);
-    const auto retainedActions =
-        retainedHandler->getActions();
 
     MessageManager::getInstance()
         ->runDispatchLoopUntil (30);
@@ -7738,19 +7736,35 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (clipWarning->getSelectedId(), 1);
     EXPECT_FALSE (split->drawClipWarning);
 
-    canvas.reset();
-    value->setValueAsString ("ON");
+    clipWarning->setEnabled (true);
+    clipWarning->synchroniseAccessibilityState();
+    auto retainedHandler =
+        clipWarning->createAccessibilityHandler();
+    ASSERT_NE (retainedHandler, nullptr);
+    auto* retainedValue =
+        retainedHandler->getValueInterface();
+    ASSERT_NE (retainedValue, nullptr);
+    const auto retainedActions =
+        retainedHandler->getActions();
     EXPECT_EQ (
-        value->getCurrentValueAsString(),
+        retainedValue->getCurrentValueAsString(),
         "OFF");
+
+    canvas.reset();
     workerReturned.store (false);
-    bool staleActionFound = false;
+    bool stalePressFound = false;
+    bool staleShowMenuFound = false;
     std::thread staleWorker (
         [&]
         {
-            staleActionFound =
+            retainedValue->setValueAsString (
+                "ON");
+            stalePressFound =
                 retainedActions.invoke (
                     AccessibilityActionType::press);
+            staleShowMenuFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::showMenu);
             workerReturned.store (true);
         });
     for (int attempt = 0;
@@ -7764,7 +7778,11 @@ TEST_F (LfpDisplayNodeTests,
     joinLfpWorkerOrAbort (
         staleWorker,
         workerReturned);
-    EXPECT_TRUE (staleActionFound);
+    EXPECT_EQ (
+        retainedValue->getCurrentValueAsString(),
+        "OFF");
+    EXPECT_TRUE (stalePressFound);
+    EXPECT_TRUE (staleShowMenuFound);
 }
 
 TEST_F (LfpDisplayNodeTests,
