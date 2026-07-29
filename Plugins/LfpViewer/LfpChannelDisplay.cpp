@@ -692,6 +692,7 @@ void LfpChannelDisplay::changeParameter (int id)
     {
         case 1:
             setInputInverted (! inputInverted);
+            break;
         case 2:
             canvasSplit->monitorChannel (chan);
         default:

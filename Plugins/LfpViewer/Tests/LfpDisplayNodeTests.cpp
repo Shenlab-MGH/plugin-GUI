@@ -100,6 +100,37 @@ Component* findLfpDescendantById (
     return nullptr;
 }
 
+Array<String> drainLfpBroadcastMessages (
+    MessageCenter& messageCenter)
+{
+    AudioBuffer<float> audioBuffer (
+        1,
+        1);
+    audioBuffer.clear();
+    MidiBuffer eventBuffer;
+    static_cast<AudioProcessor&> (
+        messageCenter)
+        .processBlock (
+            audioBuffer,
+            eventBuffer);
+
+    Array<String> messages;
+    for (const auto metadata :
+         eventBuffer)
+    {
+        if (auto event =
+                TextEvent::deserialize (
+                    metadata.data,
+                    messageCenter
+                        .getMessageChannel()))
+        {
+            messages.add (
+                event->getText());
+        }
+    }
+    return messages;
+}
+
 template <typename ComponentType>
 ComponentType* findLfpDescendant (
     Component& parent)
@@ -9369,6 +9400,110 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_FALSE (contextMenuChannel->getInputInverted());
     EXPECT_FALSE (nonInvertibleChannel->getInputInverted());
     EXPECT_FALSE (anotherInvertibleChannel->getInputInverted());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PerChannelInvertDoesNotRequestAudioMonitoring)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (
+            *canvas);
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (display->channels.isEmpty());
+    auto* channel = display->channels[0];
+    ASSERT_NE (channel, nullptr);
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    EXPECT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    channel->changeParameter (1);
+
+    EXPECT_TRUE (
+        channel->getInputInverted());
+    const auto messages =
+        drainLfpBroadcastMessages (
+            *messageCenter);
+    EXPECT_EQ (messages.size(), 0)
+        << (messages.isEmpty()
+                ? std::string()
+                : messages[0]
+                      .toStdString());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        PerChannelMonitorRequestsAudioExactlyOnce)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (
+            *canvas);
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (display->channels.isEmpty());
+    auto* channel = display->channels[0];
+    ASSERT_NE (channel, nullptr);
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    EXPECT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    channel->changeParameter (2);
+
+    EXPECT_FALSE (
+        channel->getInputInverted());
+    const auto messages =
+        drainLfpBroadcastMessages (
+            *messageCenter);
+    ASSERT_EQ (messages.size(), 1);
+    EXPECT_TRUE (
+        messages[0].startsWith (
+            "AUDIO SELECT "));
+}
+
+TEST_F (LfpDisplayNodeTests,
+        UnknownPerChannelMenuCommandsHaveNoSideEffects)
+{
+    auto canvas = std::make_unique<LfpViewer::LfpDisplayCanvas> (
+        processor, LfpViewer::SplitLayouts::SINGLE, false);
+    canvas->updateSettings();
+    auto* display =
+        findLfpDescendant<LfpViewer::LfpDisplay> (
+            *canvas);
+    ASSERT_NE (display, nullptr);
+    ASSERT_FALSE (display->channels.isEmpty());
+    auto* channel = display->channels[0];
+    ASSERT_NE (channel, nullptr);
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (messageCenter, nullptr);
+    EXPECT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    channel->changeParameter (0);
+    channel->changeParameter (37);
+
+    EXPECT_FALSE (
+        channel->getInputInverted());
+    EXPECT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
 }
 
 TEST_F (LfpDisplayNodeTests,
