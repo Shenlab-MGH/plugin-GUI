@@ -73,7 +73,11 @@ public:
                      String units = "",
                      bool hasGroupMetadata = false,
                      bool hasYposMetadata = false,
-                     bool hasXposMetadata = false);
+                     bool hasXposMetadata = false,
+                     Uuid uuid = Uuid::null(),
+                     String identifier = "",
+                     int sourceNodeId = -1,
+                     int localIndex = -1);
 
     /** Initializes the event channel at the start of each buffer */
     void initializeEventChannel (int nSamples);
@@ -95,6 +99,10 @@ public:
     struct ChannelMetadata
     {
         String name = "";
+        Uuid uuid = Uuid::null();
+        String identifier = "";
+        int sourceNodeId = -1;
+        int localIndex = -1;
         int group = 0;
         float xpos = 0.0f;
         float ypos = 0;

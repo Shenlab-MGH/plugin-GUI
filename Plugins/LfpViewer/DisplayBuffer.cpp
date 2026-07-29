@@ -82,10 +82,18 @@ void DisplayBuffer::addChannel (
     String units,
     bool hasGroupMetadata,
     bool hasYposMetadata,
-    bool hasXposMetadata)
+    bool hasXposMetadata,
+    Uuid uuid,
+    String identifier,
+    int sourceNodeId,
+    int localIndex)
 {
     ChannelMetadata metadata = ChannelMetadata();
     metadata.name = name;
+    metadata.uuid = uuid;
+    metadata.identifier = identifier;
+    metadata.sourceNodeId = sourceNodeId;
+    metadata.localIndex = localIndex;
     metadata.type = type;
     metadata.group = group;
     metadata.xpos = xpos;

@@ -3411,6 +3411,162 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ChannelMetadataCopiesIdentityAcrossSettingsUpdates)
+{
+    auto dynamicTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    2,
+                    sampleRate,
+                    bitVolts,
+                    2 }),
+            TestGuiRuntimeLifetime::
+                process);
+    auto* dynamicProcessor =
+        dynamicTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto* source =
+        dynamic_cast<
+            FakeSourceNode*> (
+            dynamicTester
+                ->getSourceNode());
+    ASSERT_NE (source, nullptr);
+
+    source->setStreamSourceNodeId (
+        0,
+        17);
+    source->setStreamSourceNodeId (
+        1,
+        29);
+    dynamicTester
+        ->updateSourceNodeSettings();
+
+    const auto expectMetadataToMatchChannels =
+        [&]
+    {
+        const auto buffers =
+            dynamicProcessor
+                ->getDisplayBuffers();
+        ASSERT_EQ (
+            buffers.size(),
+            dynamicProcessor
+                ->getDataStreams()
+                .size());
+
+        for (int channelIndex = 0;
+             channelIndex
+             < dynamicProcessor
+                   ->getTotalContinuousChannels();
+             ++channelIndex)
+        {
+            const auto* channel =
+                dynamicProcessor
+                    ->getContinuousChannel (
+                        channelIndex);
+            ASSERT_NE (channel, nullptr);
+
+            const auto bufferIterator =
+                dynamicProcessor
+                    ->displayBufferMap
+                    .find (
+                        channel
+                            ->getStreamId());
+            ASSERT_TRUE (
+                bufferIterator
+                != dynamicProcessor
+                       ->displayBufferMap
+                       .end());
+            const auto* displayBuffer =
+                bufferIterator->second;
+            const auto localIndex =
+                channel
+                    ->getLocalIndex();
+            ASSERT_GE (localIndex, 0);
+            ASSERT_LT (
+                localIndex,
+                displayBuffer
+                    ->channelMetadata
+                    .size());
+
+            const auto& metadata =
+                displayBuffer
+                    ->channelMetadata[
+                        localIndex];
+            EXPECT_EQ (
+                metadata.uuid
+                    .toString(),
+                channel
+                    ->getUniqueId()
+                    .toString());
+            EXPECT_EQ (
+                metadata.identifier,
+                channel
+                    ->getIdentifier());
+            EXPECT_EQ (
+                metadata.sourceNodeId,
+                channel
+                    ->getSourceNodeId());
+            EXPECT_EQ (
+                metadata.localIndex,
+                localIndex);
+        }
+    };
+
+    expectMetadataToMatchChannels();
+
+    const auto replacedUuid =
+        dynamicProcessor
+            ->getContinuousChannel (0)
+            ->getUniqueId()
+            .toString();
+    source->moveStream (
+        1,
+        0);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    expectMetadataToMatchChannels();
+
+    source->setStreamCountPreservingExisting (
+        2,
+        0);
+    dynamicTester
+        ->updateSourceNodeSettings();
+    EXPECT_TRUE (
+        dynamicProcessor
+            ->getDisplayBuffers()
+            .isEmpty());
+    EXPECT_TRUE (
+        dynamicProcessor
+            ->displayBufferMap
+            .empty());
+
+    source->setParams (
+        FakeSourceNodeParams {
+            3,
+            sampleRate,
+            bitVolts,
+            1 });
+    dynamicTester
+        ->updateSourceNodeSettings();
+    ASSERT_EQ (
+        dynamicProcessor
+            ->getTotalContinuousChannels(),
+        3);
+    EXPECT_NE (
+        dynamicProcessor
+            ->getContinuousChannel (0)
+            ->getUniqueId()
+            .toString(),
+        replacedUuid);
+    expectMetadataToMatchChannels();
+}
+
+TEST_F (LfpDisplayNodeTests,
         StreamXmlRestoreImmediatelySynchronisesEveryPaneState)
 {
     auto multiStreamTester =

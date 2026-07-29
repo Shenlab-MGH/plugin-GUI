@@ -124,7 +124,11 @@ void LfpDisplayNode::updateSettings()
                                                 channel->getUnits(), // units
                                                 hasGroupMetadata,
                                                 hasYposMetadata,
-                                                hasXposMetadata); // metadata flags
+                                                hasXposMetadata, // metadata flags
+                                                channel->getUniqueId(),
+                                                channel->getIdentifier(),
+                                                channel->getSourceNodeId(),
+                                                channel->getLocalIndex());
     }
 
     Array<DisplayBuffer*> toDelete;
