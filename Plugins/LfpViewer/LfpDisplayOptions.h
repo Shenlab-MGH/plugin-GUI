@@ -257,6 +257,10 @@ public:
     void setColourGroupingSelection (
         int itemId);
 
+    /** Applies a colour-scheme item id and refreshes display and accessibility state. */
+    void setColourSchemeSelection (
+        int itemId);
+
     /** Applies a channel-skip item id and refreshes display and accessibility state. */
     void setChannelDisplaySkipSelection (
         int itemId);
@@ -388,7 +392,9 @@ private:
 
     std::unique_ptr<LfpPauseButton> pauseButton;
 
-    std::unique_ptr<ComboBox> colourSchemeOptionSelection;
+    std::unique_ptr<
+        MessageThreadComboBox>
+        colourSchemeOptionSelection;
     std::unique_ptr<Label> colourSchemeOptionLabel;
 
     std::unique_ptr<

@@ -7983,6 +7983,647 @@ TEST_F (LfpDisplayNodeTests,
 }
 
 TEST_F (LfpDisplayNodeTests,
+        ExposesColourSchemeForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const std::array<String, 8>
+        choices {
+            "Classic",
+            "Monochrome Gray",
+            "Monochrome Yellow",
+            "Monochrome Purple",
+            "Monochrome Green",
+            "Open Ephys Logo",
+            "Tropical",
+            "Light Background"
+        };
+    const std::array<String, 8>
+        choiceIds {
+            "classic",
+            "monochrome_gray",
+            "monochrome_yellow",
+            "monochrome_purple",
+            "monochrome_green",
+            "open_ephys_logo",
+            "tropical",
+            "light_background"
+        };
+    const std::array<String, 3>
+        paneValues {
+            "Monochrome Gray",
+            "Tropical",
+            "Light Background"
+        };
+    const std::array<int, 3>
+        expectedActiveIndices {
+            1,
+            6,
+            7
+        };
+    const auto prefix =
+        "oe.processor."
+        + String (
+            processor->getNodeId())
+        + ".lfp.display_";
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".colour_scheme";
+        auto* colourScheme =
+            dynamic_cast<
+                MessageThreadComboBox*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (
+            colourScheme,
+            nullptr)
+            << id;
+        EXPECT_EQ (
+            colourScheme->getName(),
+            "Colour scheme");
+        EXPECT_EQ (
+            colourScheme->getNumItems(),
+            8);
+        for (int choiceIndex = 0;
+             choiceIndex < 8;
+             ++choiceIndex)
+        {
+            EXPECT_EQ (
+                colourScheme
+                    ->getItemText (
+                        choiceIndex),
+                choices[choiceIndex]);
+        }
+
+        int choiceIndex = 0;
+        for (PopupMenu::MenuItemIterator
+                 iterator (
+                     *colourScheme
+                          ->getRootMenu(),
+                     false);
+             iterator.next();)
+        {
+            ASSERT_LT (
+                choiceIndex,
+                8);
+            EXPECT_EQ (
+                iterator
+                    .getItem()
+                    .accessibilityId,
+                id
+                    + ".choice."
+                    + choiceIds[
+                          choiceIndex]);
+            ++choiceIndex;
+        }
+        EXPECT_EQ (choiceIndex, 8);
+
+        auto* handler =
+            colourScheme
+                ->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::comboBox);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (displayNumber)
+                + " colour scheme");
+        const auto description =
+            "Choose the trace and background colour scheme for LFP display "
+            + String (displayNumber)
+            + ": Classic, Monochrome Gray, Monochrome Yellow, Monochrome Purple, Monochrome Green, Open Ephys Logo, Tropical, or Light Background. This changes display rendering only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_FALSE (
+            value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "Classic");
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        showMenu));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        expand));
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        collapse));
+
+        value->setValueAsString (
+            paneValues[displayIndex]);
+        auto* split =
+            splitters[displayIndex];
+        ASSERT_NE (split, nullptr);
+        EXPECT_EQ (
+            split->lfpDisplay
+                ->getActiveColourSchemeIdx(),
+            expectedActiveIndices[
+                displayIndex]);
+        EXPECT_EQ (
+            colourScheme
+                ->getSelectedId(),
+            expectedActiveIndices[
+                displayIndex]
+                + 1);
+        EXPECT_EQ (
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *colourScheme)
+                ->isVisible(),
+            displayIndex == 0);
+    }
+
+    std::vector<Label*> labels;
+    collectLfpDescendants (
+        *canvas,
+        labels);
+    EXPECT_EQ (
+        std::count_if (
+            labels.begin(),
+            labels.end(),
+            [] (const Label* label)
+            {
+                return label->getName()
+                       == "ColourSchemeLabel";
+            }),
+        3);
+    for (const auto* label : labels)
+    {
+        if (label->getName()
+            == "ColourSchemeLabel")
+        {
+            EXPECT_FALSE (
+                label->isAccessible());
+        }
+    }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ColourSchemeWorkerValueActionsAndTeardownStaySafe)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.colour_scheme";
+    auto* colourScheme =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (colourScheme, nullptr);
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+    auto* split =
+        splitters[0];
+    ASSERT_NE (split, nullptr);
+    auto retainedHandler =
+        colourScheme
+            ->createAccessibilityHandler();
+    ASSERT_NE (
+        retainedHandler,
+        nullptr);
+    auto* retainedValue =
+        retainedHandler
+            ->getValueInterface();
+    ASSERT_NE (
+        retainedValue,
+        nullptr);
+    const auto retainedActions =
+        retainedHandler
+            ->getActions();
+
+    const auto writeFromWorker =
+        [&] (StringRef newValue)
+    {
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                retainedValue
+                    ->setValueAsString (
+                        String (newValue));
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+    };
+
+    LfpThreadTrackingComboBoxListener
+        listener;
+    colourScheme->addListener (
+        &listener);
+    writeFromWorker (
+        "Open Ephys Logo");
+    colourScheme->removeListener (
+        &listener);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_EQ (
+        colourScheme->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        5);
+    EXPECT_EQ (
+        retainedValue
+            ->getCurrentValueAsString(),
+        "Open Ephys Logo");
+
+    bool expandFound = false;
+    std::atomic<bool>
+        actionReturned { false };
+    std::thread expandWorker (
+        [&]
+        {
+            expandFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        expand);
+            actionReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! actionReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        expandWorker,
+        actionReturned);
+    EXPECT_TRUE (expandFound);
+    EXPECT_TRUE (
+        colourScheme
+            ->isPopupActive());
+
+    actionReturned.store (false);
+    bool collapseFound = false;
+    std::thread collapseWorker (
+        [&]
+        {
+            collapseFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        collapse);
+            actionReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! actionReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        collapseWorker,
+        actionReturned);
+    EXPECT_TRUE (collapseFound);
+    EXPECT_FALSE (
+        colourScheme
+            ->isPopupActive());
+
+    colourScheme->setEnabled (false);
+    writeFromWorker ("Classic");
+    EXPECT_EQ (
+        colourScheme->getSelectedId(),
+        6);
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        5);
+    colourScheme->setEnabled (true);
+    colourScheme
+        ->synchroniseAccessibilityState();
+
+    canvas.reset();
+    std::atomic<bool>
+        staleWorkerReturned { false };
+    bool stalePressFound = false;
+    bool staleShowMenuFound = false;
+    std::thread staleWorker (
+        [&]
+        {
+            retainedValue
+                ->setValueAsString (
+                    "Classic");
+            stalePressFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        press);
+            staleShowMenuFound =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        showMenu);
+            staleWorkerReturned.store (
+                true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! staleWorkerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        staleWorkerReturned);
+    EXPECT_EQ (
+        retainedValue
+            ->getCurrentValueAsString(),
+        "Open Ephys Logo");
+    EXPECT_TRUE (stalePressFound);
+    EXPECT_TRUE (
+        staleShowMenuFound);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ColourSchemeValueSurvivesZeroChannelsBufferRemovalAndXmlRestore)
+{
+    auto zeroChannelTester =
+        std::make_unique<ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (
+            zeroChannelProcessor
+                ->getNodeId())
+        + ".lfp.display_1.colour_scheme";
+    auto* colourScheme =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (colourScheme, nullptr);
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+    auto* split =
+        splitters[0];
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *colourScheme);
+    ASSERT_NE (split, nullptr);
+    ASSERT_NE (options, nullptr);
+    auto* value =
+        colourScheme
+            ->getAccessibilityHandler()
+            ->getValueInterface();
+    ASSERT_NE (value, nullptr);
+
+    value->setValueAsString (
+        "Light Background");
+    EXPECT_EQ (
+        colourScheme->getSelectedId(),
+        8);
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        7);
+    canvas->removeBufferForDisplay (0);
+    value->setValueAsString (
+        "Monochrome Gray");
+    EXPECT_EQ (
+        colourScheme->getSelectedId(),
+        2);
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        1);
+
+    value->setValueAsString (
+        "Tropical");
+    XmlElement savedRoot ("ROOT");
+    options->saveParameters (
+        &savedRoot);
+    auto* savedPane =
+        savedRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (savedPane, nullptr);
+    EXPECT_EQ (
+        savedPane->getIntAttribute (
+            "colourScheme"),
+        7);
+
+    value->setValueAsString (
+        "Classic");
+    LfpThreadTrackingComboBoxListener
+        listener;
+    colourScheme->addListener (
+        &listener);
+    options->loadParameters (
+        &savedRoot);
+    EXPECT_EQ (
+        value
+            ->getCurrentValueAsString(),
+        "Tropical");
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        6);
+
+    const auto expectClassicFallback =
+        [&] (XmlElement& root)
+    {
+        options->loadParameters (
+            &root);
+        EXPECT_EQ (
+            colourScheme
+                ->getSelectedId(),
+            1);
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "Classic");
+        EXPECT_EQ (
+            split->lfpDisplay
+                ->getActiveColourSchemeIdx(),
+            0);
+        XmlElement canonicalRoot (
+            "ROOT");
+        options->saveParameters (
+            &canonicalRoot);
+        auto* canonicalPane =
+            canonicalRoot.getChildByName (
+                "LFPDISPLAY0");
+        ASSERT_NE (
+            canonicalPane,
+            nullptr);
+        EXPECT_EQ (
+            canonicalPane
+                ->getIntAttribute (
+                    "colourScheme"),
+            1);
+    };
+
+    XmlElement missingRoot (
+        savedRoot);
+    auto* missingPane =
+        missingRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (missingPane, nullptr);
+    missingPane->removeAttribute (
+        "colourScheme");
+    expectClassicFallback (
+        missingRoot);
+
+    XmlElement malformedRoot (
+        savedRoot);
+    auto* malformedPane =
+        malformedRoot.getChildByName (
+            "LFPDISPLAY0");
+    ASSERT_NE (
+        malformedPane,
+        nullptr);
+    malformedPane->setAttribute (
+        "colourScheme",
+        "not-a-number");
+    expectClassicFallback (
+        malformedRoot);
+
+    for (const auto invalidId :
+         { -1, 0, 9, 999 })
+    {
+        XmlElement invalidRoot (
+            savedRoot);
+        auto* invalidPane =
+            invalidRoot.getChildByName (
+                "LFPDISPLAY0");
+        ASSERT_NE (
+            invalidPane,
+            nullptr);
+        invalidPane->setAttribute (
+            "colourScheme",
+            invalidId);
+        expectClassicFallback (
+            invalidRoot);
+    }
+    colourScheme->removeListener (
+        &listener);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        0);
+}
+
+TEST_F (LfpDisplayNodeTests,
         ExposesTrialAveragingToggleForEveryPane)
 {
     auto canvas =
@@ -9861,6 +10502,273 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (
         closedDrawerResult.invokeResult,
         E_FAIL);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWritesAndSelectsColourScheme)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.colour_scheme";
+    auto* colourScheme =
+        dynamic_cast<
+            MessageThreadComboBox*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (colourScheme, nullptr);
+    const auto splitters =
+        getDisplaySplitters (
+            *canvas);
+    ASSERT_EQ (
+        splitters.size(),
+        3);
+    auto* split =
+        splitters[0];
+    ASSERT_NE (split, nullptr);
+    const auto window =
+        static_cast<HWND> (
+            canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+
+    const auto runAction =
+        [&] (StringRef targetId,
+             LfpWindowsUiaAction action,
+             StringRef newValue = {})
+    {
+        LfpWindowsUiaInvokeResult
+            result;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (targetId)
+                                .toWideCharPointer()),
+                        action,
+                        std::wstring (
+                            String (newValue)
+                                .toWideCharPointer()));
+                workerReturned.store (
+                    true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return result;
+    };
+
+    const auto description =
+        L"Choose the trace and background colour scheme for LFP display 1: Classic, Monochrome Gray, Monochrome Yellow, Monochrome Purple, Monochrome Green, Open Ephys Logo, Tropical, or Light Background. This changes display rendering only; acquisition and recording are unaffected.";
+    const auto initialResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        initialResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initialResult.controlType,
+        UIA_ComboBoxControlTypeId);
+    EXPECT_EQ (
+        initialResult.name,
+        L"LFP display 1 colour scheme");
+    EXPECT_EQ (
+        initialResult.help,
+        description);
+    EXPECT_TRUE (
+        initialResult
+            .valuePatternAvailable);
+    EXPECT_EQ (
+        initialResult.valueReadOnly,
+        FALSE);
+    EXPECT_TRUE (
+        initialResult
+            .expandCollapsePatternAvailable);
+    EXPECT_TRUE (
+        initialResult
+            .invokePatternAvailable);
+    EXPECT_EQ (
+        initialResult.value,
+        L"Classic");
+
+    const auto setValueResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            "Tropical");
+    EXPECT_EQ (
+        setValueResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        setValueResult.value,
+        L"Tropical");
+    EXPECT_EQ (
+        colourScheme->getSelectedId(),
+        7);
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        6);
+
+    const auto expandResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand);
+    EXPECT_EQ (
+        expandResult.focusResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        expandResult.expansionState,
+        ExpandCollapseState_Expanded);
+    EXPECT_TRUE (
+        colourScheme
+            ->isPopupActive());
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (50);
+    const auto choiceId =
+        id
+        + ".choice.light_background";
+    const auto selectResult =
+        runAction (
+            choiceId,
+            LfpWindowsUiaAction::
+                select);
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (50);
+    EXPECT_EQ (
+        selectResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        selectResult.controlType,
+        UIA_MenuItemControlTypeId);
+    EXPECT_TRUE (
+        selectResult
+            .selectionItemPatternAvailable);
+    EXPECT_EQ (
+        colourScheme->getSelectedId(),
+        8);
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        7);
+
+    const auto reexpandedResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                expand);
+    EXPECT_EQ (
+        reexpandedResult.invokeResult,
+        S_OK);
+    const auto selectedChoiceResult =
+        runAction (
+            choiceId,
+            LfpWindowsUiaAction::
+                querySelection);
+    EXPECT_EQ (
+        selectedChoiceResult
+            .invokeResult,
+        S_OK);
+    EXPECT_TRUE (
+        selectedChoiceResult.selected);
+    const auto collapseResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                collapse);
+    EXPECT_EQ (
+        collapseResult.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        collapseResult.expansionState,
+        ExpandCollapseState_Collapsed);
+    EXPECT_FALSE (
+        colourScheme
+            ->isPopupActive());
+
+    colourScheme->setEnabled (false);
+    const auto disabledResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                setValue,
+            "Classic");
+    EXPECT_EQ (
+        disabledResult.invokeResult,
+        UIA_E_ELEMENTNOTENABLED);
+    EXPECT_EQ (
+        split->lfpDisplay
+            ->getActiveColourSchemeIdx(),
+        7);
+    colourScheme->setEnabled (true);
+
+    const auto hiddenPaneResult =
+        runAction (
+            prefix
+                + "2.colour_scheme",
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        hiddenPaneResult.invokeResult,
+        E_FAIL);
+
+    canvas->toggleOptionsDrawer (false);
+    const auto closedDrawerResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        closedDrawerResult.invokeResult,
+        S_OK);
+
+    canvas->removeFromDesktop();
+    const auto closedWindowResult =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryValue);
+    EXPECT_EQ (
+        closedWindowResult.invokeResult,
+        UIA_E_ELEMENTNOTAVAILABLE);
 }
 #endif
 

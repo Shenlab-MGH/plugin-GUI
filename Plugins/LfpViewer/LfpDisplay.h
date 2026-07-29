@@ -147,7 +147,7 @@ public:
     void setActiveColourSchemeIdx (int index);
 
     /** Gets the index of the selected colour scheme */
-    int getActiveColourSchemeIdx();
+    TESTABLE int getActiveColourSchemeIdx();
 
     /** Returns the number of available colour schemes*/
     int getNumColourSchemes();

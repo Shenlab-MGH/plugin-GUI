@@ -1674,16 +1674,81 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
 
     // Colour scheme
     Array<String> colourSchemeNames = lfpDisplay->getColourSchemeNameArray();
-    colourSchemeOptionSelection = std::make_unique<ComboBox> ("colourSchemeOptionSelection");
+    colourSchemeOptionSelection =
+        std::make_unique<
+            MessageThreadComboBox>();
+    colourSchemeOptionSelection->setName (
+        "Colour scheme");
+    const auto colourSchemeDescription =
+        "Choose the trace and background colour scheme for LFP display "
+        + String (displayNumber)
+        + ": Classic, Monochrome Gray, Monochrome Yellow, Monochrome Purple, Monochrome Green, Open Ephys Logo, Tropical, or Light Background. This changes display rendering only; acquisition and recording are unaffected.";
+    applyLfpDisplayParameterMetadata (
+        *colourSchemeOptionSelection,
+        *processor,
+        displayNumber,
+        "colour_scheme",
+        "LFP display "
+            + String (displayNumber)
+            + " colour scheme",
+        colourSchemeDescription);
     for (int i = 0; i < colourSchemeNames.size(); i++)
         colourSchemeOptionSelection->addItem (colourSchemeNames[i], i + 1);
-    colourSchemeOptionSelection->setEditableText (false);
-    colourSchemeOptionSelection->addListener (this);
-    colourSchemeOptionSelection->setSelectedId (1, dontSendNotification);
+    const std::array<String, 8>
+        colourSchemeChoiceIds {
+            "classic",
+            "monochrome_gray",
+            "monochrome_yellow",
+            "monochrome_purple",
+            "monochrome_green",
+            "open_ephys_logo",
+            "tropical",
+            "light_background"
+        };
+    int colourSchemeChoiceIndex = 0;
+    for (PopupMenu::MenuItemIterator
+             iterator (
+                 *colourSchemeOptionSelection
+                      ->getRootMenu(),
+                 false);
+         iterator.next();)
+    {
+        if (colourSchemeChoiceIndex
+            >= static_cast<int> (
+                   colourSchemeChoiceIds
+                       .size()))
+        {
+            jassertfalse;
+            break;
+        }
+        iterator
+            .getItem()
+            .accessibilityId =
+            colourSchemeOptionSelection
+                ->getComponentID()
+            + ".choice."
+            + colourSchemeChoiceIds[
+                  colourSchemeChoiceIndex++];
+    }
+    colourSchemeOptionSelection
+        ->setEditableText (false);
+    colourSchemeOptionSelection
+        ->setAccessibilityValueSelectionEnabled (
+            true);
+    colourSchemeOptionSelection
+        ->setSelectedId (
+            1,
+            dontSendNotification);
+    colourSchemeOptionSelection
+        ->addListener (this);
     mainOptions->addAndMakeVisible (colourSchemeOptionSelection.get());
+    colourSchemeOptionSelection
+        ->synchroniseAccessibilityState();
 
     colourSchemeOptionLabel = std::make_unique<Label> ("ColourSchemeLabel", "Colour scheme");
     colourSchemeOptionLabel->setFont (labelFont);
+    colourSchemeOptionLabel->setAccessible (
+        false);
     colourSchemeOptionLabel->attachToComponent (colourSchemeOptionSelection.get(), false);
     mainOptions->addAndMakeVisible (colourSchemeOptionLabel.get());
 
@@ -3064,6 +3129,15 @@ void LfpDisplayOptions::
 void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
 {
     if (cb
+        == colourSchemeOptionSelection
+               .get())
+    {
+        setColourSchemeSelection (
+            cb->getSelectedId());
+        return;
+    }
+
+    if (cb
         == colourGroupingSelection
                .get())
     {
@@ -3195,14 +3269,7 @@ void LfpDisplayOptions::comboBoxChanged (ComboBox* cb)
     if (canvasSplit->getNumChannels() == 0)
         return;
 
-    if (cb == colourSchemeOptionSelection.get())
-    {
-        lfpDisplay->setActiveColourSchemeIdx (cb->getSelectedId() - 1);
-
-        lfpDisplay->setColours();
-        canvasSplit->redraw();
-    }
-    else if (cb == timebaseSelection.get())
+    if (cb == timebaseSelection.get())
     {
         if (cb->getSelectedId())
         {
@@ -3415,6 +3482,30 @@ ContinuousChannel::Type LfpDisplayOptions::getSelectedType()
 bool LfpDisplayOptions::isAuxAutoScaleEnabled()
 {
     return selectedVoltageRangeValues[ContinuousChannel::Type::AUX].equalsIgnoreCase ("Auto");
+}
+
+void LfpDisplayOptions::
+    setColourSchemeSelection (
+        int itemId)
+{
+    const auto validId =
+        itemId >= 1
+                && itemId
+                       <= lfpDisplay
+                              ->getNumColourSchemes()
+            ? itemId
+            : 1;
+    colourSchemeOptionSelection
+        ->setSelectedId (
+            validId,
+            dontSendNotification);
+    lfpDisplay
+        ->setActiveColourSchemeIdx (
+            validId - 1);
+    lfpDisplay->setColours();
+    canvasSplit->redraw();
+    colourSchemeOptionSelection
+        ->synchroniseAccessibilityState();
 }
 
 void LfpDisplayOptions::
@@ -3734,8 +3825,10 @@ void LfpDisplayOptions::loadParameters (XmlElement* xml)
             spreadSelection->setText (xmlNode->getStringAttribute ("Spread"), dontSendNotification);
 
             // COLOUR SCHEME
-            lfpDisplay->setActiveColourSchemeIdx (xmlNode->getIntAttribute ("colourScheme") - 1);
-            colourSchemeOptionSelection->setSelectedId (xmlNode->getIntAttribute ("colourScheme"), dontSendNotification);
+            setColourSchemeSelection (
+                xmlNode->getIntAttribute (
+                    "colourScheme",
+                    1));
 
             // COLOUR GROUPING
             restoreColourGroupingParameter (
