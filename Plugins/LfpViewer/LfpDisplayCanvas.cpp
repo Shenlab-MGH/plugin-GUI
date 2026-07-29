@@ -729,6 +729,7 @@ LfpDisplaySplitter::LfpDisplaySplitter (LfpDisplayNode* node,
                                                   displayGain (1.0f),
                                                   timeOffset (0.0f),
                                                   triggerChannel (-1),
+                                                  numTrials (-1.0f),
                                                   trialAveraging (false),
                                                   splitID (id),
                                                   processor (node),
@@ -903,6 +904,7 @@ void LfpDisplaySplitter::beginAnimation()
         syncDisplay();
 
         numTrials = -1;
+        trialResetPending = false;
 
         eventState = 0;
     }
@@ -1116,14 +1118,18 @@ void LfpDisplaySplitter::setAveraging (bool avg)
     if (trialAveraging == false)
     {
         numTrials = -1;
+        trialResetPending = false;
     }
+
+    if (avg == false)
+        trialResetPending = false;
 
     trialAveraging = avg;
 }
 
 void LfpDisplaySplitter::resetTrials()
 {
-    numTrials = -1;
+    trialResetPending = true;
 }
 
 void LfpDisplaySplitter::refreshSplitterState()
@@ -1302,6 +1308,12 @@ void LfpDisplaySplitter::updateScreenBuffer()
 
                         if (channel == 0)
                         {
+                            if (trialResetPending)
+                            {
+                                numTrials = -1;
+                                trialResetPending = false;
+                            }
+
                             numTrials += 1;
 
                             //std::cout << "Rewinding playhead" << std::endl;

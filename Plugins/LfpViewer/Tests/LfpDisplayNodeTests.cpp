@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <thread>
@@ -8240,6 +8241,279 @@ TEST_F (LfpDisplayNodeTests,
             ->removeListener (
                 &listeners[displayIndex]);
     }
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ResetTrialsRequestsCoalesceAndApplyAtNextTrigger)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 600);
+    canvas->resized();
+    canvas->setVisible (true);
+
+    auto* split =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (split, nullptr);
+    ASSERT_NE (split->options, nullptr);
+    std::vector<
+        UtilityButton*>
+        utilityButtons;
+    collectLfpDescendants (
+        *split->options,
+        utilityButtons);
+    const auto resetIterator =
+        std::find_if (
+            utilityButtons.begin(),
+            utilityButtons.end(),
+            [] (UtilityButton* candidate)
+            {
+                return candidate->getLabel()
+                       == "RESET";
+            });
+    ASSERT_NE (
+        resetIterator,
+        utilityButtons.end());
+    auto* reset = *resetIterator;
+    ASSERT_NE (reset, nullptr);
+
+    const auto streamId =
+        processor
+            ->getDataStreams()[0]
+            ->getStreamId();
+    const auto* sourceStream =
+        tester
+            ->getSourceNodeDataStream (
+                streamId);
+    ASSERT_NE (sourceStream, nullptr);
+    const auto eventChannels =
+        sourceStream
+            ->getEventChannels();
+    ASSERT_GE (
+        eventChannels.size(),
+        1);
+    int64 nextSampleNumber = 0;
+    const auto processConstant =
+        [&] (
+            float value,
+            int numSamples)
+    {
+        auto block =
+            createBuffer (
+                value,
+                0.0f,
+                numChannels,
+                numSamples);
+        tester->processBlock (
+            processor,
+            block);
+        nextSampleNumber +=
+            numSamples;
+    };
+    const auto processTriggeredConstant =
+        [&] (
+            float value,
+            int numSamples,
+            int triggerOffset)
+    {
+        auto block =
+            createBuffer (
+                value,
+                0.0f,
+                numChannels,
+                numSamples);
+        auto event =
+            TTLEvent::
+                createTTLEvent (
+                    eventChannels[0],
+                    nextSampleNumber
+                        + triggerOffset,
+                    uint8 (0),
+                    true);
+        tester->processBlock (
+            processor,
+            block,
+            event.get());
+        nextSampleNumber +=
+            numSamples;
+    };
+
+    split->options
+        ->setTriggerSourceSelection (
+            2);
+    split->options
+        ->setAveraging (
+            true);
+    processor->startAcquisition();
+    canvas->beginAnimation();
+    canvas->endAnimation();
+
+    processConstant (
+        10.0f,
+        1024);
+    processTriggeredConstant (
+        10.0f,
+        400,
+        200);
+    ASSERT_EQ (
+        split->getTriggerChannel(),
+        0);
+    ASSERT_EQ (
+        split->selectedStreamId,
+        streamId);
+    ASSERT_GT (
+        processor
+            ->getLatestTriggerTime (
+                split->splitID),
+        0);
+    canvas->refreshState();
+    ASSERT_GT (
+        split->screenBufferIndex[0],
+        0);
+    EXPECT_NEAR (
+        split->getYCoordMean (
+            0,
+            100),
+        10.0f,
+        0.001f);
+    const auto indexBeforeReset =
+        split->screenBufferIndex[0];
+
+    split->options
+        ->buttonClicked (
+            reset);
+    split->options
+        ->buttonClicked (
+            reset);
+    ASSERT_EQ (
+        split->screenBufferIndex[0],
+        indexBeforeReset);
+
+    processConstant (
+        20.0f,
+        400);
+    canvas->refreshState();
+
+    ASSERT_GT (
+        split->screenBufferIndex[0],
+        0);
+    for (int sample = 0;
+         sample
+         < split
+               ->screenBufferIndex[0];
+         ++sample)
+    {
+        EXPECT_TRUE (
+            std::isfinite (
+                split
+                    ->getYCoordMean (
+                        0,
+                        sample)))
+            << "non-finite triggered average at screen sample "
+            << sample;
+    }
+
+    for (int block = 0;
+         block < 10;
+         ++block)
+    {
+        processConstant (
+            20.0f,
+            400);
+        canvas->refreshState();
+    }
+
+    processConstant (
+        40.0f,
+        1024);
+    processTriggeredConstant (
+        40.0f,
+        400,
+        200);
+    ASSERT_GT (
+        processor
+            ->getLatestTriggerTime (
+                split->splitID),
+        0);
+    const auto indexBeforeNextTrigger =
+        split->screenBufferIndex[0];
+    canvas->refreshState();
+
+    ASSERT_GT (
+        split->screenBufferIndex[0],
+        100);
+    EXPECT_LT (
+        split->screenBufferIndex[0],
+        indexBeforeNextTrigger);
+    EXPECT_NEAR (
+        split->getYCoordMean (
+            0,
+            100),
+        40.0f,
+        0.001f);
+
+    for (int block = 0;
+         block < 10;
+         ++block)
+    {
+        processConstant (
+            40.0f,
+            400);
+        canvas->refreshState();
+    }
+
+    split->options
+        ->setTriggerSourceSelection (
+            1);
+    ASSERT_EQ (
+        split->getTriggerChannel(),
+        -1);
+    split->options
+        ->buttonClicked (
+            reset);
+    split->options
+        ->buttonClicked (
+            reset);
+
+    processConstant (
+        60.0f,
+        1024);
+    split->options
+        ->setTriggerSourceSelection (
+            2);
+
+    processTriggeredConstant (
+        60.0f,
+        400,
+        200);
+    ASSERT_GT (
+        processor
+            ->getLatestTriggerTime (
+                split->splitID),
+        0);
+    canvas->refreshState();
+
+    ASSERT_GT (
+        split->screenBufferIndex[0],
+        100);
+    EXPECT_NEAR (
+        split->getYCoordMean (
+            0,
+            100),
+        60.0f,
+        0.001f);
+
+    processor->stopAcquisition();
 }
 
 #if JUCE_WINDOWS

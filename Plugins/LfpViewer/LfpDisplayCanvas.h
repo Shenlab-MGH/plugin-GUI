@@ -271,7 +271,7 @@ public:
     const float getYCoordMin (int chan, int samp);
 
     /** Gets the mean Y coordinate (in uV) for a particular channel / sample combo */
-    const float getYCoordMean (int chan, int samp);
+    TESTABLE const float getYCoordMean (int chan, int samp);
 
     /** Gets the maximum Y coordinate (in uV) for a particular channel / sample combo */
     const float getYCoordMax (int chan, int samp);
@@ -397,6 +397,7 @@ private:
     float numTrials;
 
     bool trialAveraging;
+    bool trialResetPending = false;
 
     float displayGain;
     float timeOffset;
