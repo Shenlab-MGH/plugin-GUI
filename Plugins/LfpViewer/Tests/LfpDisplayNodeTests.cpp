@@ -100,6 +100,63 @@ Component* findLfpDescendantById (
     return nullptr;
 }
 
+Component* findLfpDescendantByAccessibilityTitle (
+    Component& parent,
+    StringRef title)
+{
+    if (auto* handler =
+            parent.getAccessibilityHandler())
+    {
+        if (handler->getTitle()
+            == title)
+        {
+            return &parent;
+        }
+    }
+
+    for (auto* child :
+         parent.getChildren())
+    {
+        if (auto* result =
+                findLfpDescendantByAccessibilityTitle (
+                    *child,
+                    title))
+        {
+            return result;
+        }
+    }
+
+    return nullptr;
+}
+
+Component* findLfpDesktopComponentByAccessibilityTitle (
+    StringRef title)
+{
+    auto& desktop =
+        Desktop::getInstance();
+
+    for (int index = 0;
+         index < desktop
+                     .getNumComponents();
+         ++index)
+    {
+        if (auto* component =
+                desktop.getComponent (
+                    index))
+        {
+            if (auto* result =
+                    findLfpDescendantByAccessibilityTitle (
+                        *component,
+                        title))
+            {
+                return result;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 Array<String> drainLfpBroadcastMessages (
     MessageCenter& messageCenter)
 {
@@ -9400,6 +9457,186 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_FALSE (contextMenuChannel->getInputInverted());
     EXPECT_FALSE (nonInvertibleChannel->getInputInverted());
     EXPECT_FALSE (anotherInvertibleChannel->getInputInverted());
+}
+
+TEST_F (LfpDisplayNodeTests,
+        ReversedChannelPopupUsesDrawableTargetForStateAndAction)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::
+                    SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (
+        1200,
+        800);
+    canvas->addToDesktop (
+        0);
+    canvas->setVisible (
+        true);
+
+    auto* display =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplay> (
+            *canvas);
+    ASSERT_NE (
+        display,
+        nullptr);
+    ASSERT_GT (
+        display->channels.size(),
+        1);
+
+    auto* options =
+        display->options;
+    ASSERT_NE (
+        options,
+        nullptr);
+    options->setChannelsReversed (
+        true);
+    ASSERT_EQ (
+        display->drawableChannels[0].channel,
+        display->channels.getLast());
+    auto* target =
+        display->drawableChannels[0].channel;
+    auto* source =
+        display->channels[0];
+    ASSERT_NE (
+        target,
+        source);
+    options->setSelectedType (
+        ContinuousChannel::Type::
+            ADC);
+
+    target->changeParameter (
+        1);
+    std::vector<bool> initialInversion;
+    for (auto* channel :
+         display->channels)
+    {
+        initialInversion.push_back (
+            channel->getInputInverted());
+    }
+
+    auto* messageCenter =
+        tester->processorGraph
+            ->getMessageCenter();
+    ASSERT_NE (
+        messageCenter,
+        nullptr);
+    EXPECT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
+
+    struct PopupObservation
+    {
+        bool foundInvertSignal = false;
+        bool invertSignalChecked = false;
+        bool pressedInvertSignal = false;
+    };
+    auto observation =
+        std::make_shared<
+            PopupObservation>();
+    MessageManager::callAsync (
+        [observation]
+        {
+            if (auto* item =
+                    findLfpDesktopComponentByAccessibilityTitle (
+                        "Invert signal"))
+            {
+                observation->foundInvertSignal =
+                    true;
+                if (auto* handler =
+                        item->getAccessibilityHandler())
+                {
+                    observation->invertSignalChecked =
+                        handler->getCurrentState()
+                            .isChecked();
+                    observation->pressedInvertSignal =
+                        handler->getActions()
+                            .invoke (
+                                AccessibilityActionType::
+                                    press);
+                }
+            }
+
+            if (! observation->pressedInvertSignal)
+            {
+                PopupMenu::
+                    dismissAllActiveMenus();
+            }
+        });
+
+    const auto eventTime =
+        Time::getCurrentTime();
+    const auto targetPoint =
+        Point<float> (
+            float (target->getX()
+                   + target->getWidth()
+                         / 2),
+            float (target->getY()
+                   + target->getHeight()
+                         / 2));
+    MouseEvent rightClick (
+        Desktop::getInstance()
+            .getMainMouseSource(),
+        targetPoint,
+        ModifierKeys (
+            ModifierKeys::
+                rightButtonModifier),
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        display,
+        display,
+        eventTime,
+        targetPoint,
+        eventTime,
+        1,
+        false);
+
+    display->mouseDown (
+        rightClick);
+
+    EXPECT_TRUE (
+        observation->foundInvertSignal);
+    EXPECT_TRUE (
+        observation->invertSignalChecked);
+    EXPECT_TRUE (
+        observation->pressedInvertSignal);
+    EXPECT_EQ (
+        options->getSelectedType(),
+        ContinuousChannel::Type::
+            ELECTRODE);
+    EXPECT_FALSE (
+        target->getInputInverted());
+    for (int index = 0;
+         index < display->channels.size();
+         ++index)
+    {
+        if (display->channels[index]
+            != target)
+        {
+            EXPECT_EQ (
+                display->channels[index]
+                    ->getInputInverted(),
+                initialInversion[
+                    static_cast<size_t> (
+                        index)]);
+        }
+    }
+    EXPECT_TRUE (
+        drainLfpBroadcastMessages (
+            *messageCenter)
+            .isEmpty());
 }
 
 TEST_F (LfpDisplayNodeTests,

@@ -1336,7 +1336,7 @@ void LfpDisplay::mouseDown (const MouseEvent& event)
 
     if (event.mods.isRightButtonDown())
     { // if right click
-        PopupMenu channelMenu = channels[closest]->getOptions();
+        PopupMenu channelMenu = drawableChannels[closest].channel->getOptions();
         const int result = channelMenu.show();
         drawableChannels[closest].channel->changeParameter (result);
     }
