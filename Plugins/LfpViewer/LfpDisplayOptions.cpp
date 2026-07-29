@@ -2069,17 +2069,38 @@ LfpDisplayOptions::LfpDisplayOptions (LfpDisplayCanvas* canvas_, LfpDisplaySplit
     extendedOptions->addAndMakeVisible (triggerSourceLabel.get());
 
     // average signal
-    averageSignalButton = std::make_unique<UtilityButton> ("OFF");
+    averageSignalButton =
+        std::make_unique<
+            LfpOptionToggleButton> (
+            "OFF");
     averageSignalButton->setRadius (5.0f);
     averageSignalButton->setEnabledState (true);
     averageSignalButton->setCorners (true, true, true, true);
     averageSignalButton->addListener (this);
     averageSignalButton->setClickingTogglesState (true);
-    averageSignalButton->setToggleState (false, sendNotification);
+    averageSignalButton->setToggleState (
+        false,
+        dontSendNotification);
+    const auto trialAveragingDescription =
+        "Average successive TTL-triggered traces in LFP display "
+        + String (displayNumber)
+        + ". This takes effect only when a trigger source is selected; turning it on starts a new trial average. This changes display rendering only; acquisition and recording are unaffected.";
+    applyLfpDisplayControlMetadata (
+        *averageSignalButton,
+        *processor,
+        displayNumber,
+        "trial_averaging",
+        "LFP display "
+            + String (displayNumber)
+            + " trial averaging",
+        trialAveragingDescription);
     extendedOptions->addAndMakeVisible (averageSignalButton.get());
+    averageSignalButton
+        ->refreshAccessibilityState();
 
     averageSignalLabel = std::make_unique<Label> ("AverageSignalLabel", "Trial averaging:");
     averageSignalLabel->setFont (labelFont);
+    averageSignalLabel->setAccessible (false);
     extendedOptions->addAndMakeVisible (averageSignalLabel.get());
 
     // reset triggered display
@@ -2550,6 +2571,9 @@ void LfpDisplayOptions::setAveraging (bool state)
         averageSignalButton->setLabel ("OFF");
         resetButton->setVisible (false);
     }
+
+    averageSignalButton
+        ->refreshAccessibilityState();
 }
 
 void LfpDisplayOptions::setSortByDepth (bool state)

@@ -303,6 +303,12 @@ public:
     /** Set whether triggered display should use online averaging */
     void setAveraging (bool);
 
+    /** Returns whether triggered display uses online averaging */
+    bool isAveraging() const noexcept
+    {
+        return trialAveraging;
+    }
+
     /** Reset trial count for online average */
     void resetTrials();
 

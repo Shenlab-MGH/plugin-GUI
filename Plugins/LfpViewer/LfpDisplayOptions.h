@@ -428,7 +428,7 @@ private:
         triggerSourceSelection;
     std::unique_ptr<Label> triggerSourceLabel;
 
-    std::unique_ptr<UtilityButton> averageSignalButton;
+    std::unique_ptr<LfpOptionToggleButton> averageSignalButton;
     std::unique_ptr<Label> averageSignalLabel;
 
     std::unique_ptr<UtilityButton> resetButton;

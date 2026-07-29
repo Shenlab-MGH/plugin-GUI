@@ -7618,7 +7618,824 @@ TEST_F (LfpDisplayNodeTests,
         split->isInTriggeredMode());
 }
 
+TEST_F (LfpDisplayNodeTests,
+        ExposesTrialAveragingToggleForEveryPane)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const auto displayNumber =
+            displayIndex + 1;
+        const auto id =
+            prefix
+            + String (displayNumber)
+            + ".trial_averaging";
+        auto* button =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    id));
+        ASSERT_NE (button, nullptr)
+            << id;
+        EXPECT_NE (
+            dynamic_cast<
+                LfpViewer::
+                    LfpOptionToggleButton*> (
+                button),
+            nullptr);
+
+        auto* handler =
+            button
+                ->getAccessibilityHandler();
+        ASSERT_NE (handler, nullptr);
+        const auto description =
+            "Average successive TTL-triggered traces in LFP display "
+            + String (displayNumber)
+            + ". This takes effect only when a trigger source is selected; turning it on starts a new trial average. This changes display rendering only; acquisition and recording are unaffected.";
+        EXPECT_EQ (
+            handler->getRole(),
+            AccessibilityRole::
+                toggleButton);
+        EXPECT_EQ (
+            handler->getTitle(),
+            "LFP display "
+                + String (displayNumber)
+                + " trial averaging");
+        EXPECT_EQ (
+            handler->getDescription(),
+            description);
+        EXPECT_EQ (
+            handler->getHelp(),
+            description);
+        EXPECT_TRUE (
+            handler
+                ->getCurrentState()
+                .isCheckable());
+        EXPECT_FALSE (
+            handler
+                ->getCurrentState()
+                .isChecked());
+        EXPECT_TRUE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        toggle));
+        EXPECT_FALSE (
+            handler->getActions()
+                .contains (
+                    AccessibilityActionType::
+                        press));
+        auto* value =
+            handler
+                ->getValueInterface();
+        ASSERT_NE (value, nullptr);
+        EXPECT_TRUE (value->isReadOnly());
+        EXPECT_EQ (
+            value
+                ->getCurrentValueAsString(),
+            "Off");
+
+        auto* options =
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *button);
+        ASSERT_NE (options, nullptr);
+        EXPECT_EQ (
+            options->isVisible(),
+            displayIndex == 0);
+    }
+
+    std::vector<Label*> labels;
+    collectLfpDescendants (
+        *canvas,
+        labels);
+    int averagingLabelCount = 0;
+    for (const auto* label : labels)
+    {
+        if (label->getName()
+            == "AverageSignalLabel")
+        {
+            ++averagingLabelCount;
+            EXPECT_FALSE (
+                label->isAccessible());
+        }
+    }
+    EXPECT_EQ (averagingLabelCount, 3);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        TrialAveragingToggleRunsOnMessageThreadAndSurvivesEdgeCases)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto id =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_1.trial_averaging";
+    auto* button =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (button, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *button);
+    ASSERT_NE (options, nullptr);
+    auto* splitter =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (splitter, nullptr);
+    EXPECT_FALSE (
+        splitter->isAveraging());
+    std::vector<UtilityButton*>
+        utilityButtons;
+    collectLfpDescendants (
+        *options,
+        utilityButtons);
+    const auto resetIterator =
+        std::find_if (
+            utilityButtons.begin(),
+            utilityButtons.end(),
+            [] (UtilityButton* candidate)
+            {
+                return candidate->getLabel()
+                       == "RESET";
+            });
+    ASSERT_NE (
+        resetIterator,
+        utilityButtons.end());
+    auto* reset = *resetIterator;
+    ASSERT_NE (reset, nullptr);
+    EXPECT_FALSE (reset->isVisible());
+
+    auto* liveHandler =
+        button
+            ->getAccessibilityHandler();
+    ASSERT_NE (liveHandler, nullptr);
+    auto* liveValue =
+        liveHandler
+            ->getValueInterface();
+    ASSERT_NE (liveValue, nullptr);
+    const auto retainedActions =
+        liveHandler
+            ->getActions();
+
+    LfpThreadTrackingButtonListener
+        listener;
+    button->addListener (&listener);
+    std::atomic<bool>
+        workerReturned { false };
+    bool toggled = false;
+    std::thread worker (
+        [&]
+        {
+            toggled =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        toggle);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && (! workerReturned.load()
+                 || ! button
+                          ->getToggleState());
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        worker,
+        workerReturned);
+    button->removeListener (&listener);
+
+    EXPECT_TRUE (toggled);
+    EXPECT_EQ (
+        listener.callbackCount.load(),
+        1);
+    EXPECT_TRUE (
+        listener
+            .callbackUsedMessageThread
+            .load());
+    EXPECT_TRUE (
+        button->getToggleState());
+    EXPECT_TRUE (
+        splitter->isAveraging());
+    EXPECT_TRUE (
+        liveHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        liveValue
+            ->getCurrentValueAsString(),
+        "On");
+    EXPECT_TRUE (reset->isVisible());
+
+    options->setAveraging (false);
+    EXPECT_FALSE (
+        button->getToggleState());
+    EXPECT_FALSE (
+        splitter->isAveraging());
+    EXPECT_FALSE (
+        liveHandler
+            ->getCurrentState()
+            .isChecked());
+    EXPECT_EQ (
+        liveValue
+            ->getCurrentValueAsString(),
+        "Off");
+    EXPECT_FALSE (reset->isVisible());
+
+    button->setEnabled (false);
+    workerReturned.store (false);
+    std::thread disabledWorker (
+        [&]
+        {
+            toggled =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        toggle);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        disabledWorker,
+        workerReturned);
+    EXPECT_TRUE (toggled);
+    EXPECT_FALSE (
+        button->getToggleState());
+    EXPECT_FALSE (
+        splitter->isAveraging());
+    EXPECT_FALSE (
+        liveHandler->isEnabled());
+
+    button->setEnabled (true);
+    canvas->removeBufferForDisplay (0);
+    EXPECT_TRUE (
+        retainedActions.invoke (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_TRUE (
+        button->getToggleState());
+    EXPECT_TRUE (
+        splitter->isAveraging());
+    EXPECT_TRUE (reset->isVisible());
+
+    auto zeroChannelTester =
+        std::make_unique<
+            ProcessorTester> (
+            TestSourceNodeBuilder (
+                FakeSourceNodeParams {
+                    0,
+                    sampleRate,
+                    bitVolts }));
+    auto* zeroChannelProcessor =
+        zeroChannelTester
+            ->createProcessor<
+                LfpViewer::
+                    LfpDisplayNode> (
+                Plugin::Processor::SINK);
+    auto zeroCanvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            zeroChannelProcessor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    zeroCanvas->updateSettings();
+    zeroCanvas->setSize (900, 800);
+    zeroCanvas->addToDesktop (0);
+    zeroCanvas->setVisible (true);
+    zeroCanvas->toggleOptionsDrawer (true);
+    const auto zeroId =
+        "oe.processor."
+        + String (
+            zeroChannelProcessor
+                ->getNodeId())
+        + ".lfp.display_1.trial_averaging";
+    auto* zeroButton =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *zeroCanvas,
+                zeroId));
+    ASSERT_NE (zeroButton, nullptr);
+    auto* zeroSplitter =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *zeroCanvas);
+    ASSERT_NE (zeroSplitter, nullptr);
+    auto zeroActions =
+        zeroButton
+            ->getAccessibilityHandler()
+            ->getActions();
+    EXPECT_TRUE (
+        zeroActions.invoke (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_TRUE (
+        zeroButton->getToggleState());
+    EXPECT_TRUE (
+        zeroSplitter->isAveraging());
+    zeroCanvas
+        ->removeBufferForDisplay (0);
+    EXPECT_TRUE (
+        zeroActions.invoke (
+            AccessibilityActionType::
+                toggle));
+    EXPECT_FALSE (
+        zeroButton->getToggleState());
+    EXPECT_FALSE (
+        zeroSplitter->isAveraging());
+
+    canvas.reset();
+    workerReturned.store (false);
+    std::thread staleWorker (
+        [&]
+        {
+            toggled =
+                retainedActions.invoke (
+                    AccessibilityActionType::
+                        toggle);
+            workerReturned.store (true);
+        });
+    for (int attempt = 0;
+         attempt < 100
+             && ! workerReturned.load();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    joinLfpWorkerOrAbort (
+        staleWorker,
+        workerReturned);
+    EXPECT_TRUE (toggled);
+}
+
+TEST_F (LfpDisplayNodeTests,
+        TrialAveragingXmlRoundTripsPerPaneWithoutNotifications)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (900, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    std::array<Button*, 3> buttons {};
+    std::array<
+        LfpViewer::LfpDisplayOptions*,
+        3>
+        options {};
+    std::array<
+        UtilityButton*,
+        3>
+        resetButtons {};
+    std::array<
+        AccessibilityValueInterface*,
+        3>
+        values {};
+    std::array<
+        LfpThreadTrackingButtonListener,
+        3>
+        listeners;
+    std::vector<
+        LfpViewer::LfpDisplaySplitter*>
+        splitters;
+    collectLfpDescendants (
+        *canvas,
+        splitters);
+    ASSERT_EQ (splitters.size(), 3);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        buttons[displayIndex] =
+            dynamic_cast<Button*> (
+                findLfpDescendantById (
+                    *canvas,
+                    prefix
+                        + String (
+                            displayIndex + 1)
+                        + ".trial_averaging"));
+        ASSERT_NE (
+            buttons[displayIndex],
+            nullptr);
+        options[displayIndex] =
+            findLfpAncestor<
+                LfpViewer::
+                    LfpDisplayOptions> (
+                *buttons[displayIndex]);
+        ASSERT_NE (
+            options[displayIndex],
+            nullptr);
+        values[displayIndex] =
+            buttons[displayIndex]
+                ->getAccessibilityHandler()
+                ->getValueInterface();
+        ASSERT_NE (
+            values[displayIndex],
+            nullptr);
+        std::vector<UtilityButton*>
+            utilityButtons;
+        collectLfpDescendants (
+            *options[displayIndex],
+            utilityButtons);
+        const auto resetIterator =
+            std::find_if (
+                utilityButtons.begin(),
+                utilityButtons.end(),
+                [] (
+                    UtilityButton*
+                        candidate)
+                {
+                    return candidate
+                               ->getLabel()
+                           == "RESET";
+                });
+        ASSERT_NE (
+            resetIterator,
+            utilityButtons.end());
+        resetButtons[displayIndex] =
+            *resetIterator;
+        buttons[displayIndex]
+            ->addListener (
+                &listeners[displayIndex]);
+        options[displayIndex]
+            ->setAveraging (
+                displayIndex != 1);
+    }
+
+    XmlElement savedRoot ("ROOT");
+    for (auto* paneOptions : options)
+        paneOptions->saveParameters (
+            &savedRoot);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        auto* savedPane =
+            savedRoot.getChildByName (
+                "LFPDISPLAY"
+                + String (displayIndex));
+        ASSERT_NE (
+            savedPane,
+            nullptr);
+        EXPECT_EQ (
+            savedPane
+                ->getBoolAttribute (
+                    "trialAvg"),
+            displayIndex != 1);
+        options[displayIndex]
+            ->setAveraging (false);
+    }
+
+    for (auto* paneOptions : options)
+        paneOptions->loadParameters (
+            &savedRoot);
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        const bool expected =
+            displayIndex != 1;
+        EXPECT_EQ (
+            buttons[displayIndex]
+                ->getToggleState(),
+            expected);
+        EXPECT_EQ (
+            buttons[displayIndex]
+                ->getAccessibilityHandler()
+                ->getCurrentState()
+                .isChecked(),
+            expected);
+        EXPECT_EQ (
+            values[displayIndex]
+                ->getCurrentValueAsString(),
+            expected ? "On" : "Off");
+        EXPECT_EQ (
+            resetButtons[displayIndex]
+                ->isVisible(),
+            expected);
+        EXPECT_EQ (
+            splitters[displayIndex]
+                ->isAveraging(),
+            expected);
+    }
+
+    auto missingRoot =
+        std::make_unique<XmlElement> (
+            savedRoot);
+    auto* missingPane =
+        missingRoot
+            ->getChildByName (
+                "LFPDISPLAY0");
+    ASSERT_NE (missingPane, nullptr);
+    missingPane->removeAttribute (
+        "trialAvg");
+    options[0]->loadParameters (
+        missingRoot.get());
+    EXPECT_FALSE (
+        buttons[0]->getToggleState());
+    EXPECT_EQ (
+        values[0]
+            ->getCurrentValueAsString(),
+        "Off");
+    EXPECT_FALSE (
+        resetButtons[0]->isVisible());
+    EXPECT_FALSE (
+        splitters[0]->isAveraging());
+
+    auto malformedRoot =
+        std::make_unique<XmlElement> (
+            savedRoot);
+    auto* malformedPane =
+        malformedRoot
+            ->getChildByName (
+                "LFPDISPLAY0");
+    ASSERT_NE (malformedPane, nullptr);
+    malformedPane->setAttribute (
+        "trialAvg",
+        "garbage");
+    options[0]->loadParameters (
+        malformedRoot.get());
+    EXPECT_FALSE (
+        buttons[0]->getToggleState());
+    EXPECT_EQ (
+        values[0]
+            ->getCurrentValueAsString(),
+        "Off");
+    EXPECT_FALSE (
+        resetButtons[0]->isVisible());
+    EXPECT_FALSE (
+        splitters[0]->isAveraging());
+
+    for (int displayIndex = 0;
+         displayIndex < 3;
+         ++displayIndex)
+    {
+        EXPECT_EQ (
+            listeners[displayIndex]
+                .callbackCount.load(),
+            0);
+        buttons[displayIndex]
+            ->removeListener (
+                &listeners[displayIndex]);
+    }
+}
+
 #if JUCE_WINDOWS
+TEST_F (LfpDisplayNodeTests,
+        WindowsUiaWorkerTogglesTrialAveraging)
+{
+    auto canvas =
+        std::make_unique<
+            LfpViewer::
+                LfpDisplayCanvas> (
+            processor,
+            LfpViewer::
+                SplitLayouts::SINGLE,
+            false);
+    canvas->updateSettings();
+    canvas->setSize (1200, 800);
+    canvas->addToDesktop (0);
+    canvas->setVisible (true);
+    canvas->toggleOptionsDrawer (true);
+    ASSERT_TRUE (canvas->isShowing());
+
+    const auto prefix =
+        "oe.processor."
+        + String (processor->getNodeId())
+        + ".lfp.display_";
+    const auto id =
+        prefix
+        + "1.trial_averaging";
+    auto* button =
+        dynamic_cast<Button*> (
+            findLfpDescendantById (
+                *canvas,
+                id));
+    ASSERT_NE (button, nullptr);
+    auto* options =
+        findLfpAncestor<
+            LfpViewer::
+                LfpDisplayOptions> (
+            *button);
+    ASSERT_NE (options, nullptr);
+    auto* splitter =
+        findLfpDescendant<
+            LfpViewer::
+                LfpDisplaySplitter> (
+            *canvas);
+    ASSERT_NE (splitter, nullptr);
+    std::vector<UtilityButton*>
+        utilityButtons;
+    collectLfpDescendants (
+        *options,
+        utilityButtons);
+    const auto resetIterator =
+        std::find_if (
+            utilityButtons.begin(),
+            utilityButtons.end(),
+            [] (UtilityButton* candidate)
+            {
+                return candidate->getLabel()
+                       == "RESET";
+            });
+    ASSERT_NE (
+        resetIterator,
+        utilityButtons.end());
+    auto* reset = *resetIterator;
+
+    const auto window =
+        static_cast<HWND> (
+            canvas->getWindowHandle());
+    ASSERT_NE (window, nullptr);
+    const auto runAction =
+        [&] (StringRef targetId,
+             LfpWindowsUiaAction action)
+    {
+        LfpWindowsUiaInvokeResult result;
+        std::atomic<bool>
+            workerReturned { false };
+        std::thread worker (
+            [&]
+            {
+                result =
+                    invokeLfpWindowsUiaControl (
+                        window,
+                        std::wstring (
+                            String (targetId)
+                                .toWideCharPointer()),
+                        action);
+                workerReturned.store (true);
+            });
+        for (int attempt = 0;
+             attempt < 100
+                 && ! workerReturned.load();
+             ++attempt)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (10);
+        }
+        joinLfpWorkerOrAbort (
+            worker,
+            workerReturned);
+        return result;
+    };
+
+    const auto description =
+        L"Average successive TTL-triggered traces in LFP display 1. This takes effect only when a trigger source is selected; turning it on starts a new trial average. This changes display rendering only; acquisition and recording are unaffected.";
+    const auto initial =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryToggle);
+    EXPECT_EQ (
+        initial.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        initial.controlType,
+        UIA_CheckBoxControlTypeId);
+    EXPECT_EQ (
+        initial.enabled,
+        TRUE);
+    EXPECT_EQ (
+        initial.name,
+        L"LFP display 1 trial averaging");
+    EXPECT_EQ (
+        initial.help,
+        description);
+    EXPECT_TRUE (
+        initial.togglePatternAvailable);
+    EXPECT_EQ (
+        initial.toggleState,
+        ToggleState_Off);
+    EXPECT_TRUE (
+        initial.valuePatternAvailable);
+    EXPECT_EQ (
+        initial.valueReadOnly,
+        TRUE);
+    EXPECT_EQ (
+        initial.value,
+        L"Off");
+    EXPECT_FALSE (
+        initial.invokePatternAvailable);
+
+    const auto enabled =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                toggle);
+    EXPECT_EQ (
+        enabled.invokeResult,
+        S_OK);
+    EXPECT_EQ (
+        enabled.toggleState,
+        ToggleState_On);
+    EXPECT_EQ (
+        enabled.value,
+        L"On");
+    EXPECT_TRUE (
+        button->getToggleState());
+    EXPECT_TRUE (
+        splitter->isAveraging());
+    EXPECT_TRUE (reset->isVisible());
+
+    button->setEnabled (false);
+    const auto disabled =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                toggle);
+    EXPECT_EQ (
+        disabled.invokeResult,
+        static_cast<HRESULT> (
+            UIA_E_ELEMENTNOTENABLED));
+    EXPECT_TRUE (
+        button->getToggleState());
+
+    const auto hidden =
+        runAction (
+            prefix
+                + "2.trial_averaging",
+            LfpWindowsUiaAction::
+                queryToggle);
+    EXPECT_EQ (
+        hidden.invokeResult,
+        E_FAIL);
+
+    button->setEnabled (true);
+    canvas->toggleOptionsDrawer (
+        false);
+    const auto closed =
+        runAction (
+            id,
+            LfpWindowsUiaAction::
+                queryToggle);
+    EXPECT_EQ (
+        closed.invokeResult,
+        E_FAIL);
+}
+
 TEST_F (LfpDisplayNodeTests,
         WindowsUiaWritesAndSelectsTriggerSource)
 {
