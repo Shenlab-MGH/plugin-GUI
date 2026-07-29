@@ -620,6 +620,306 @@ private:
     const HRESULT result;
 };
 
+HRESULT createLfpWindowsUiaIdCondition (
+    IUIAutomation& automation,
+    const std::wstring& automationId,
+    Microsoft::WRL::ComPtr<
+        IUIAutomationCondition>& condition)
+{
+    VARIANT expectedId;
+    VariantInit (&expectedId);
+    expectedId.vt = VT_BSTR;
+    expectedId.bstrVal =
+        SysAllocString (
+            automationId.c_str());
+    if (expectedId.bstrVal == nullptr)
+        return E_OUTOFMEMORY;
+
+    const auto result =
+        automation.CreatePropertyCondition (
+            UIA_AutomationIdPropertyId,
+            expectedId,
+            &condition);
+    VariantClear (&expectedId);
+    return result;
+}
+
+HRESULT findExactlyOneLfpWindowsUiaElement (
+    IUIAutomationElement& searchRoot,
+    IUIAutomationCondition& condition,
+    int& matchingElementCount,
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>& element)
+{
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElementArray>
+        matches;
+    auto result =
+        searchRoot.FindAll (
+            TreeScope_Subtree,
+            &condition,
+            &matches);
+    if (FAILED (result)
+        || matches == nullptr)
+    {
+        return FAILED (result)
+            ? result
+            : E_FAIL;
+    }
+
+    result =
+        matches->get_Length (
+            &matchingElementCount);
+    if (FAILED (result))
+        return result;
+    if (matchingElementCount != 1)
+        return S_FALSE;
+
+    return matches->GetElement (
+        0,
+        &element);
+}
+
+HWND findLfpWindowsUiaScopedPopupWindow (
+    HWND expectedWindow,
+    const std::wstring& parentAutomationId)
+{
+    const auto findOnMessageThread =
+        [expectedWindow,
+         parentAutomationId]() -> HWND
+    {
+        auto* focused =
+            Component::
+                getCurrentlyFocusedComponent();
+        bool expectedParentHasFocus = false;
+        for (auto* component = focused;
+             component != nullptr;
+             component =
+                 component->getParentComponent())
+        {
+            if (component->getComponentID()
+                == String (
+                    parentAutomationId.c_str()))
+            {
+                expectedParentHasFocus = true;
+                break;
+            }
+        }
+
+        if (! expectedParentHasFocus
+            || focused == nullptr
+            || static_cast<HWND> (
+                   focused
+                       ->getTopLevelComponent()
+                       ->getWindowHandle())
+                   != expectedWindow)
+        {
+            return nullptr;
+        }
+
+        auto* modal =
+            Component::
+                getCurrentlyModalComponent();
+        auto* peer =
+            modal != nullptr
+                ? modal->getPeer()
+                : nullptr;
+        if (modal == nullptr
+            || peer == nullptr
+            || ! modal->isShowing()
+            || (peer->getStyleFlags()
+                & ComponentPeer::
+                      windowIsTemporary)
+                   == 0)
+        {
+            return nullptr;
+        }
+
+        return static_cast<HWND> (
+            modal->getWindowHandle());
+    };
+
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    if (messageManager == nullptr)
+        return nullptr;
+
+    const auto popupWindow =
+        messageManager->isThisTheMessageThread()
+            ? findOnMessageThread()
+            : messageManager
+                  ->callSync (
+                      findOnMessageThread)
+                  .value_or (nullptr);
+
+    DWORD expectedProcessId = 0;
+    const auto expectedThreadId =
+        GetWindowThreadProcessId (
+            expectedWindow,
+            &expectedProcessId);
+    DWORD popupProcessId = 0;
+    const auto popupThreadId =
+        popupWindow != nullptr
+            ? GetWindowThreadProcessId (
+                  popupWindow,
+                  &popupProcessId)
+            : 0;
+    if (popupWindow == nullptr
+        || ! IsWindow (popupWindow)
+        || ! IsWindowVisible (popupWindow)
+        || expectedThreadId == 0
+        || popupThreadId != expectedThreadId
+        || popupProcessId != expectedProcessId)
+    {
+        return nullptr;
+    }
+
+    return popupWindow;
+}
+
+HRESULT findLfpWindowsUiaChoicePopupElement (
+    HWND expectedWindow,
+    IUIAutomation& automation,
+    IUIAutomationElement& expectedRoot,
+    IUIAutomationCondition& choiceCondition,
+    const std::wstring& choiceAutomationId,
+    int& matchingElementCount,
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>& element)
+{
+    const auto choiceMarker =
+        choiceAutomationId.find (
+            L".choice.");
+    if (choiceMarker
+        == std::wstring::npos)
+    {
+        return E_INVALIDARG;
+    }
+
+    const auto parentAutomationId =
+        choiceAutomationId.substr (
+            0,
+            choiceMarker);
+    Microsoft::WRL::ComPtr<
+        IUIAutomationCondition>
+        parentCondition;
+    auto result =
+        createLfpWindowsUiaIdCondition (
+            automation,
+            parentAutomationId,
+            parentCondition);
+    if (FAILED (result))
+        return result;
+
+    int parentMatchCount = 0;
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>
+        parentElement;
+    result =
+        findExactlyOneLfpWindowsUiaElement (
+            expectedRoot,
+            *parentCondition.Get(),
+            parentMatchCount,
+            parentElement);
+    if (result != S_OK
+        || parentElement == nullptr)
+    {
+        return FAILED (result)
+            ? result
+            : E_FAIL;
+    }
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationExpandCollapsePattern>
+        parentExpansion;
+    result =
+        parentElement->GetCurrentPatternAs (
+            UIA_ExpandCollapsePatternId,
+            IID_PPV_ARGS (
+                &parentExpansion));
+    ExpandCollapseState parentState =
+        ExpandCollapseState_Collapsed;
+    if (SUCCEEDED (result)
+        && parentExpansion != nullptr)
+    {
+        result =
+            parentExpansion
+                ->get_CurrentExpandCollapseState (
+                    &parentState);
+    }
+    if (FAILED (result)
+        || parentExpansion == nullptr
+        || parentState
+               != ExpandCollapseState_Expanded)
+    {
+        return FAILED (result)
+            ? result
+            : E_FAIL;
+    }
+
+    const auto popupWindow =
+        findLfpWindowsUiaScopedPopupWindow (
+            expectedWindow,
+            parentAutomationId);
+    if (popupWindow == nullptr)
+        return E_FAIL;
+
+    Microsoft::WRL::ComPtr<
+        IUIAutomationElement>
+        popupElement;
+    result =
+        automation.ElementFromHandle (
+            popupWindow,
+            &popupElement);
+    if (FAILED (result)
+        || popupElement == nullptr)
+    {
+        return FAILED (result)
+            ? result
+            : E_FAIL;
+    }
+
+    return findExactlyOneLfpWindowsUiaElement (
+        *popupElement.Get(),
+        choiceCondition,
+        matchingElementCount,
+        element);
+}
+
+HRESULT drainLfpWindowsUiaChoiceSelectionCallbacks()
+{
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    if (messageManager == nullptr
+        || messageManager
+               ->isThisTheMessageThread())
+    {
+        return E_UNEXPECTED;
+    }
+
+    // Select() dismisses the modal popup asynchronously. Its completion
+    // callback queues the ComboBox listener notification, so two FIFO message
+    // dispatch barriers are required before the selected model may be read.
+    const auto dispatchBarrier =
+        []
+        {
+            return true;
+        };
+    const auto popupDismissed =
+        messageManager->callSync (
+            dispatchBarrier);
+    const auto selectionDelivered =
+        messageManager->callSync (
+            dispatchBarrier);
+    return popupDismissed.value_or (false)
+               && selectionDelivered
+                      .value_or (false)
+        ? S_OK
+        : E_FAIL;
+}
+
 LfpWindowsUiaInvokeResult
 invokeLfpWindowsUiaControl (
     HWND window,
@@ -676,89 +976,41 @@ invokeLfpWindowsUiaControl (
                 : E_FAIL);
     }
 
-    VARIANT expectedId;
-    VariantInit (&expectedId);
-    expectedId.vt = VT_BSTR;
-    expectedId.bstrVal =
-        SysAllocString (
-            automationId.c_str());
-    if (expectedId.bstrVal
-        == nullptr)
-    {
-        return finish (
-            E_OUTOFMEMORY);
-    }
-
     Microsoft::WRL::ComPtr<
         IUIAutomationCondition>
         idCondition;
     result =
-        automation
-            ->CreatePropertyCondition (
-                UIA_AutomationIdPropertyId,
-                expectedId,
-                &idCondition);
-    VariantClear (&expectedId);
+        createLfpWindowsUiaIdCondition (
+            *automation.Get(),
+            automationId,
+            idCondition);
     if (FAILED (result))
         return finish (result);
 
     Microsoft::WRL::ComPtr<
         IUIAutomationElement>
         element;
-    const auto findExactlyOne =
-        [&] (IUIAutomationElement& searchRoot)
-        {
-            Microsoft::WRL::ComPtr<
-                IUIAutomationElementArray>
-                matches;
-            auto findResult =
-                searchRoot.FindAll (
-                    TreeScope_Subtree,
-                    idCondition.Get(),
-                    &matches);
-            if (FAILED (findResult)
-                || matches == nullptr)
-            {
-                return FAILED (findResult)
-                    ? findResult
-                    : E_FAIL;
-            }
-
-            int matchCount = 0;
-            findResult =
-                matches->get_Length (
-                    &matchCount);
-            if (FAILED (findResult))
-                return findResult;
-
-            output.matchingElementCount =
-                matchCount;
-            if (matchCount != 1)
-                return S_FALSE;
-
-            return matches->GetElement (
-                0,
-                &element);
-        };
-    result = findExactlyOne (*rootElement.Get());
+    result =
+        findExactlyOneLfpWindowsUiaElement (
+            *rootElement.Get(),
+            *idCondition.Get(),
+            output.matchingElementCount,
+            element);
     if (result == S_FALSE
         && output.matchingElementCount == 0
         && automationId.find (
                L".choice.")
                != std::wstring::npos)
     {
-        Microsoft::WRL::ComPtr<
-            IUIAutomationElement>
-            desktopElement;
         result =
-            automation
-                ->GetRootElement (
-                    &desktopElement);
-        if (SUCCEEDED (result)
-            && desktopElement != nullptr)
-        {
-            result = findExactlyOne (*desktopElement.Get());
-        }
+            findLfpWindowsUiaChoicePopupElement (
+                window,
+                *automation.Get(),
+                *rootElement.Get(),
+                *idCondition.Get(),
+                automationId,
+                output.matchingElementCount,
+                element);
     }
     if (result != S_OK
         || element == nullptr)
@@ -1094,6 +1346,28 @@ invokeLfpWindowsUiaControl (
         result =
             selectionItemPattern
                 ->Select();
+        if (SUCCEEDED (result)
+            && automationId.find (
+                   L".choice.")
+                   != std::wstring::npos)
+        {
+            valuePattern.Reset();
+            expandCollapsePattern.Reset();
+            selectionItemPattern.Reset();
+            togglePattern.Reset();
+            invokePattern.Reset();
+            element.Reset();
+            rootElement.Reset();
+            idCondition.Reset();
+            automation.Reset();
+
+            const auto callbacksDrained =
+                drainLfpWindowsUiaChoiceSelectionCallbacks();
+            return finish (
+                SUCCEEDED (callbacksDrained)
+                    ? result
+                    : callbacksDrained);
+        }
         if (SUCCEEDED (result))
         {
             result =
