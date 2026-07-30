@@ -62,6 +62,53 @@ TESTABLE AcquisitionRecordingStatus deriveAcquisitionRecordingStatus (
     const std::vector<RecordNodeRuntimeState>& recordNodes);
 
 /**
+    Shared owner-read boundary used by the concrete runtime overloads.
+
+    The templates keep the production accessor loop directly testable without
+    starting audio callbacks or RecordThreads.
+*/
+namespace AcquisitionRecordingStatusDetail
+{
+template <typename GraphOwner>
+AcquisitionRecordingStatus captureFromGraph (
+    bool callbacksAreActive,
+    GraphOwner& graph)
+{
+    std::vector<RecordNodeRuntimeState> recordNodes;
+    const auto currentRecordNodes =
+        graph.getRecordNodes();
+    recordNodes.reserve (
+        static_cast<std::size_t> (
+            currentRecordNodes.size()));
+
+    for (auto* node : currentRecordNodes)
+    {
+        recordNodes.push_back ({
+            node->getRecordingStatus(),
+            node->recordThread != nullptr
+                && node->recordThread
+                       ->isThreadRunning()
+        });
+    }
+
+    return deriveAcquisitionRecordingStatus (
+        callbacksAreActive,
+        recordNodes);
+}
+
+template <typename AudioOwner,
+          typename GraphOwner>
+AcquisitionRecordingStatus captureFromOwners (
+    AudioOwner& audio,
+    GraphOwner& graph)
+{
+    return captureFromGraph (
+        audio.callbacksAreActive(),
+        graph);
+}
+} // namespace AcquisitionRecordingStatusDetail
+
+/**
     Copies the current Record Node facts from the graph and derives achieved
     state. Must be called on the JUCE message thread.
 */

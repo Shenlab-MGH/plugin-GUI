@@ -1,6 +1,10 @@
 #include "../../Source/Utils/AcquisitionRecordingStatus.h"
 
+#include "../../Source/AccessClass.h"
+#include "../../Source/Audio/AudioComponent.h"
 #include "../../Source/Processors/ProcessorGraph/ProcessorGraph.h"
+#include "../../Source/Processors/RecordNode/RecordNode.h"
+#include "../../Source/UI/ControlPanel.h"
 
 #include "gtest/gtest.h"
 
@@ -12,6 +16,65 @@ namespace
 using Mode = AcquisitionRecordingMode;
 using Node = RecordNodeRuntimeState;
 using Status = AcquisitionRecordingStatus;
+
+struct InspectableWriter
+{
+    bool running = false;
+    int readCount = 0;
+
+    bool isThreadRunning()
+    {
+        ++readCount;
+        return running;
+    }
+};
+
+struct InspectableRecordNode
+{
+    bool recording = false;
+    mutable int readCount = 0;
+    InspectableWriter* recordThread = nullptr;
+
+    bool getRecordingStatus() const
+    {
+        ++readCount;
+        return recording;
+    }
+};
+
+struct InspectableGraph
+{
+    std::vector<InspectableRecordNode*> nodes;
+    int readCount = 0;
+
+    std::vector<InspectableRecordNode*> getRecordNodes()
+    {
+        ++readCount;
+        return nodes;
+    }
+};
+
+struct InspectableAudio
+{
+    bool callbacksActive = false;
+    int readCount = 0;
+
+    bool callbacksAreActive()
+    {
+        ++readCount;
+        return callbacksActive;
+    }
+};
+
+struct ScopedGuiRuntimeCleanup
+{
+    ~ScopedGuiRuntimeCleanup()
+    {
+        AccessClass::clearAccessClassStateForTesting();
+        DeletedAtShutdown::deleteAll();
+        MessageManager::deleteInstance();
+    }
+};
 
 void expectStatus (const Status& status,
                    std::optional<Mode> mode,
@@ -204,6 +267,120 @@ TEST (AcquisitionRecordingStatusTests,
         false,
         false,
         0,
+        0,
+        0,
+        true);
+}
+
+TEST (AcquisitionRecordingStatusTests,
+      SharedProductionOwnerAccessMapsCallbacksAndEveryCurrentNodeFact)
+{
+    InspectableAudio audio { true };
+    InspectableWriter firstWriter { true };
+    InspectableWriter secondWriter { false };
+    InspectableRecordNode firstNode {
+        true,
+        0,
+        &firstWriter
+    };
+    InspectableRecordNode secondNode {
+        true,
+        0,
+        &secondWriter
+    };
+    InspectableRecordNode thirdNode {
+        false,
+        0,
+        nullptr
+    };
+    InspectableGraph graph {
+        { &firstNode, &secondNode, &thirdNode }
+    };
+
+    const auto copied =
+        AcquisitionRecordingStatusDetail::
+            captureFromOwners (audio, graph);
+
+    expectStatus (
+        copied,
+        std::nullopt,
+        true,
+        false,
+        3,
+        2,
+        1,
+        false);
+    EXPECT_EQ (audio.readCount, 1);
+    EXPECT_EQ (graph.readCount, 1);
+    EXPECT_EQ (firstNode.readCount, 1);
+    EXPECT_EQ (secondNode.readCount, 1);
+    EXPECT_EQ (thirdNode.readCount, 1);
+    EXPECT_EQ (firstWriter.readCount, 1);
+    EXPECT_EQ (secondWriter.readCount, 1);
+}
+
+TEST (AcquisitionRecordingStatusTests,
+      ConcreteOwnersCaptureInactiveRecordNodesWithoutStartingRuntimeThreads)
+{
+    MessageManager::getInstance();
+    const ScopedGuiRuntimeCleanup cleanup;
+    const MessageManagerLock messageManagerLock;
+    AccessClass::clearAccessClassStateForTesting();
+
+    auto audio =
+        std::make_unique<AudioComponent>();
+    auto graph =
+        std::make_unique<ProcessorGraph> (true);
+    auto controlPanel =
+        std::make_unique<ControlPanel> (
+            graph.get(),
+            audio.get(),
+            true);
+    controlPanel->updateRecordEngineList();
+
+    const auto addRecordNode =
+        [&] (int nodeId)
+        {
+            auto node =
+                std::make_unique<RecordNode>();
+            node->setNodeId (nodeId);
+            node->setProcessorType (
+                Plugin::Processor::RECORD_NODE);
+            node->setHeadlessMode (true);
+            AudioProcessorGraph::Node* added =
+                graph->addNode (
+                std::unique_ptr<AudioProcessor> (
+                    node.release()),
+                AudioProcessorGraph::NodeID (nodeId));
+            return added != nullptr
+                     ? static_cast<RecordNode*> (
+                           added->getProcessor())
+                     : nullptr;
+        };
+
+    const auto* first = addRecordNode (201);
+    const auto* second = addRecordNode (202);
+    ASSERT_NE (first, nullptr);
+    ASSERT_NE (second, nullptr);
+    ASSERT_FALSE (audio->callbacksAreActive());
+    ASSERT_FALSE (first->getRecordingStatus());
+    ASSERT_FALSE (second->getRecordingStatus());
+    ASSERT_FALSE (
+        first->recordThread->isThreadRunning());
+    ASSERT_FALSE (
+        second->recordThread->isThreadRunning());
+
+    const auto copied =
+        captureAcquisitionRecordingStatus (
+            *audio,
+            *graph);
+
+    expectStatus (
+        copied,
+        Mode::idle,
+        false,
+        false,
+        2,
         0,
         0,
         true);

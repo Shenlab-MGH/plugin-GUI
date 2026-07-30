@@ -66,30 +66,18 @@ AcquisitionRecordingStatus captureAcquisitionRecordingStatus (
     bool callbacksAreActive,
     ProcessorGraph& graph)
 {
-    std::vector<RecordNodeRuntimeState> recordNodes;
-    const auto currentRecordNodes = graph.getRecordNodes();
-    recordNodes.reserve (
-        static_cast<std::size_t> (currentRecordNodes.size()));
-
-    for (auto* node : currentRecordNodes)
-    {
-        recordNodes.push_back ({
-            node->getRecordingStatus(),
-            node->recordThread != nullptr
-                && node->recordThread->isThreadRunning()
-        });
-    }
-
-    return deriveAcquisitionRecordingStatus (
-        callbacksAreActive,
-        recordNodes);
+    return AcquisitionRecordingStatusDetail::
+        captureFromGraph (
+            callbacksAreActive,
+            graph);
 }
 
 AcquisitionRecordingStatus captureAcquisitionRecordingStatus (
     AudioComponent& audio,
     ProcessorGraph& graph)
 {
-    return captureAcquisitionRecordingStatus (
-        audio.callbacksAreActive(),
-        graph);
+    return AcquisitionRecordingStatusDetail::
+        captureFromOwners (
+            audio,
+            graph);
 }
