@@ -24,11 +24,25 @@
 #include "ControlStatusJson.h"
 #include "json.hpp"
 
+#include <map>
+#include <set>
+
 namespace
 {
 using json = nlohmann::json;
 
-bool isSupportedField (const std::string& field)
+StatusRequestParseResult invalidStatusRequest (const String& error)
+{
+    return { std::nullopt, "invalid_request", error };
+}
+
+bool isSupportedStatusRequestField (const std::string& field)
+{
+    return field == "mode"
+           || field == "confirm_unsynchronized";
+}
+
+bool isSupportedRecordingOptionsField (const std::string& field)
 {
     return field == "expanded"
            || field == "force_new_directory"
@@ -55,6 +69,111 @@ bool readOptionalBoolean (const json& document,
 }
 } // namespace
 
+StatusRequestParseResult parseStatusRequest (StringRef requestBody)
+{
+    bool duplicateFieldFound = false;
+    std::map<int, std::set<std::string>> fieldsByDepth;
+
+    const auto rejectDuplicateFields =
+        [&duplicateFieldFound, &fieldsByDepth] (
+            int depth,
+            json::parse_event_t event,
+            json& parsed)
+        {
+            if (event == json::parse_event_t::object_start)
+                fieldsByDepth[depth + 1].clear();
+            else if (event == json::parse_event_t::key)
+            {
+                const auto field = parsed.get<std::string>();
+                if (! fieldsByDepth[depth].insert (field).second)
+                    duplicateFieldFound = true;
+            }
+
+            return true;
+        };
+
+    json document;
+    try
+    {
+        document = json::parse (
+            String (requestBody).toStdString(),
+            rejectDuplicateFields);
+    }
+    catch (const json::exception& exception)
+    {
+        return invalidStatusRequest (
+            "Invalid JSON request: "
+            + String::fromUTF8 (exception.what()));
+    }
+
+    if (duplicateFieldFound)
+        return invalidStatusRequest (
+            "Status request fields must not be duplicated.");
+
+    if (! document.is_object())
+        return invalidStatusRequest (
+            "Status request must be a JSON object.");
+
+    for (const auto& item : document.items())
+    {
+        if (! isSupportedStatusRequestField (item.key()))
+        {
+            return invalidStatusRequest (
+                "Unknown status request field: "
+                + String (item.key()));
+        }
+    }
+
+    const auto modeValue = document.find ("mode");
+    if (modeValue == document.end())
+        return invalidStatusRequest (
+            "Field 'mode' is required.");
+
+    if (! modeValue->is_string())
+        return invalidStatusRequest (
+            "Field 'mode' must be a string.");
+
+    const auto modeName = modeValue->get<std::string>();
+    AcquisitionRecordingMode mode;
+    if (modeName == "IDLE")
+        mode = AcquisitionRecordingMode::idle;
+    else if (modeName == "ACQUIRE")
+        mode = AcquisitionRecordingMode::acquire;
+    else if (modeName == "RECORD")
+        mode = AcquisitionRecordingMode::record;
+    else
+    {
+        return invalidStatusRequest (
+            "Field 'mode' must be exactly IDLE, ACQUIRE, or RECORD.");
+    }
+
+    bool confirmUnsynchronized = false;
+    const auto confirmation =
+        document.find ("confirm_unsynchronized");
+    if (confirmation != document.end())
+    {
+        if (! confirmation->is_boolean())
+        {
+            return invalidStatusRequest (
+                "Field 'confirm_unsynchronized' must be a boolean.");
+        }
+
+        if (mode != AcquisitionRecordingMode::record)
+        {
+            return invalidStatusRequest (
+                "Field 'confirm_unsynchronized' is valid only for RECORD.");
+        }
+
+        confirmUnsynchronized = confirmation->get<bool>();
+    }
+
+    return {
+        StatusRequest { mode, confirmUnsynchronized },
+        {},
+        {}
+    };
+}
+
 RecordingOptionsUpdateParseResult parseRecordingOptionsUpdate (StringRef requestBody)
 {
     json document;
@@ -76,7 +195,7 @@ RecordingOptionsUpdateParseResult parseRecordingOptionsUpdate (StringRef request
 
     for (const auto& item : document.items())
     {
-        if (! isSupportedField (item.key()))
+        if (! isSupportedRecordingOptionsField (item.key()))
             return { std::nullopt,
                      "Unknown recording options field: " + String (item.key()) };
     }
