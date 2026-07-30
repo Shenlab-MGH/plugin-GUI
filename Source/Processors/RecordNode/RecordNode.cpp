@@ -41,6 +41,136 @@ using namespace std::chrono;
 
 bool RecordNode::overrideTimestampWarningShown = false;
 
+struct RecordNode::NonModalRecordingStartOwner
+{
+    explicit NonModalRecordingStartOwner (
+        RecordNode& recordNode)
+        : node (recordNode)
+    {
+    }
+
+    int nodeId() const
+    {
+        return node.getNodeId();
+    }
+
+    String recordingDirectory() const
+    {
+        return node.rootFolder.getFullPathName();
+    }
+
+    int experimentNumber() const
+    {
+        return node.experimentNumber;
+    }
+
+    int recordingIndex() const
+    {
+        return node.recordingNumber;
+    }
+
+    bool writerRunning() const
+    {
+        return node.recordThread != nullptr
+               && node.recordThread
+                      ->isThreadRunning();
+    }
+
+    bool pipelineAvailable() const
+    {
+        return node.recordThread != nullptr
+               && node.recordEngine != nullptr
+               && node.dataQueue != nullptr
+               && node.eventQueue != nullptr
+               && node.spikeQueue != nullptr
+               && node.messageChannel != nullptr;
+    }
+
+    bool settingsPersistenceAvailable() const
+    {
+        return ! node.settingsNeeded
+               || AccessClass::getProcessorGraph()
+                      != nullptr;
+    }
+
+    RecordNodeRecordingDirectoryState
+    inspectRecordingDirectory (
+        const String& directory) const
+    {
+        const File target (directory);
+        if (target.isDirectory())
+        {
+            return RecordNodeRecordingDirectoryState::
+                directory;
+        }
+        if (target.exists())
+        {
+            return RecordNodeRecordingDirectoryState::
+                nonDirectory;
+        }
+        return RecordNodeRecordingDirectoryState::
+            missing;
+    }
+
+    RecordNodeRecordingDirectoryCreateResult
+    createRecordingDirectory (
+        const String& directory) const
+    {
+        const auto creation =
+            File (directory).createDirectory();
+        return {
+            creation.wasOk(),
+            creation.getErrorMessage()
+        };
+    }
+
+    void prepareRecording()
+    {
+        node.prepareRecordingStart();
+    }
+
+    void setFileComponents (
+        const String& directory,
+        int experimentNumber,
+        int recordingIndex)
+    {
+        if (node.recordThread != nullptr)
+        {
+            node.recordThread->setFileComponents (
+                File (directory),
+                experimentNumber,
+                recordingIndex);
+        }
+    }
+
+    bool startWriter()
+    {
+        return node.recordThread != nullptr
+               && node.recordThread->startThread();
+    }
+
+    void markRecordingActive()
+    {
+        node.isRecording = true;
+    }
+
+    bool shouldPersistSettings() const
+    {
+        return node.settingsNeeded;
+    }
+
+    void persistSettings (
+        const String& directory,
+        int experimentNumber)
+    {
+        node.persistRecordingSettings (
+            File (directory),
+            experimentNumber);
+    }
+
+    RecordNode& node;
+};
+
 EventMonitor::EventMonitor()
     : receivedEvents (0),
       receivedSpikes (0),
@@ -789,79 +919,157 @@ bool RecordNode::stopAcquisition()
     return true;
 }
 
-// called by GenericProcessor::setRecording() and CoreServices::setRecordingStatus()
-void RecordNode::startRecording()
+void RecordNode::prepareRecordingStart()
 {
     Array<int> chanProcessorMap;
     Array<int> chanOrderinProc;
     OwnedArray<RecordProcessorInfo> procInfo;
 
-    // in case recording starts before acquisition:
-    if (eventChannels.size() == 0 || eventChannels.getLast()->getSourceNodeName() != "Message Center")
+    if (eventChannels.size() == 0
+        || eventChannels.getLast()
+                   ->getSourceNodeName()
+               != "Message Center")
     {
-        eventChannels.add (new EventChannel (*messageChannel));
-        eventChannels.getLast()->addProcessor (this);
-        eventChannels.getLast()->setDataStream (getDataStream (synchronizer.mainStreamKey), false);
+        eventChannels.add (
+            new EventChannel (*messageChannel));
+        eventChannels.getLast()->addProcessor (
+            this);
+        eventChannels.getLast()->setDataStream (
+            getDataStream (
+                synchronizer.mainStreamKey),
+            false);
     }
 
     int lastSourceNodeId = -1;
-
     int channelIndexInRecordNode = 0;
     int channelIndexInStream = 0;
 
     channelMap.clear();
     localChannelMap.clear();
-
     timestampChannelMap.clear();
 
     int streamIndex = 0;
-
     for (auto stream : dataStreams)
     {
-        RecordProcessorInfo* pi = new RecordProcessorInfo();
-        pi->processorId = stream->getSourceNodeId();
+        auto* processorInfo =
+            new RecordProcessorInfo();
+        processorInfo->processorId =
+            stream->getSourceNodeId();
 
-        if (stream->getSourceNodeId() != lastSourceNodeId)
+        if (stream->getSourceNodeId()
+            != lastSourceNodeId)
         {
             channelIndexInStream = 0;
-            lastSourceNodeId = stream->getSourceNodeId();
+            lastSourceNodeId =
+                stream->getSourceNodeId();
         }
 
-        for (auto channelRecordState : ((MaskChannelsParameter*) stream->getParameter ("channels"))->getChannelStates())
+        for (auto channelRecordState :
+             static_cast<MaskChannelsParameter*> (
+                 stream->getParameter ("channels"))
+                 ->getChannelStates())
         {
             if (channelRecordState)
             {
-                channelMap.add (channelIndexInRecordNode);
-                localChannelMap.add (channelIndexInStream++);
-                timestampChannelMap.add (streamIndex);
+                channelMap.add (
+                    channelIndexInRecordNode);
+                localChannelMap.add (
+                    channelIndexInStream++);
+                timestampChannelMap.add (
+                    streamIndex);
             }
-
-            channelIndexInRecordNode++;
+            ++channelIndexInRecordNode;
         }
 
-        procInfo.add (pi);
-        streamIndex++;
+        procInfo.add (processorInfo);
+        ++streamIndex;
     }
 
-    int numRecordedChannels = channelMap.size();
+    const int numRecordedChannels =
+        channelMap.size();
 
     validBlocks.clear();
-    validBlocks.insertMultiple (0, false, getNumInputs());
+    validBlocks.insertMultiple (
+        0,
+        false,
+        getNumInputs());
 
     recordEngine->registerRecordNode (this);
-    recordEngine->setChannelMap (channelMap, localChannelMap);
+    recordEngine->setChannelMap (
+        channelMap,
+        localChannelMap);
 
     recordThread->setChannelMap (channelMap);
-    recordThread->setTimestampChannelMap (timestampChannelMap);
+    recordThread->setTimestampChannelMap (
+        timestampChannelMap);
 
-    dataQueue->setChannelCount (numRecordedChannels);
-    dataQueue->setTimestampStreamCount (dataStreams.size());
+    dataQueue->setChannelCount (
+        numRecordedChannels);
+    dataQueue->setTimestampStreamCount (
+        dataStreams.size());
 
-    recordThread->setQueuePointers (dataQueue.get(), eventQueue.get(), spikeQueue.get());
+    recordThread->setQueuePointers (
+        dataQueue.get(),
+        eventQueue.get(),
+        spikeQueue.get());
     recordThread->setFirstBlockFlag (false);
 
-    /* Set write properties */
     setFirstBlock = false;
+}
+
+void RecordNode::persistRecordingSettings (
+    const File& recordingDirectory,
+    int experiment)
+{
+    const String settingsFileName =
+        recordingDirectory.getFullPathName()
+        + File::getSeparatorString()
+        + "settings"
+        + ((experiment > 1)
+               ? "_" + String (experiment)
+               : String())
+        + ".xml";
+
+    auto xml =
+        std::make_unique<XmlElement> (
+            "SETTINGS");
+    AccessClass::getProcessorGraph()
+        ->saveToXml (xml.get());
+    xml->writeTo (settingsFileName);
+    settingsNeeded = false;
+}
+
+RecordNodeRecordingStartResult
+RecordNode::startRecordingNonModal()
+{
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    jassert (
+        messageManager != nullptr
+        && messageManager
+               ->isThisTheMessageThread());
+
+    NonModalRecordingStartOwner owner (*this);
+    auto result =
+        startRecordNodeRecordingFromOwner (owner);
+
+    if (result.error.has_value())
+    {
+        LOGE (
+            "Record Node "
+            + String (getNodeId())
+            + ": "
+            + result.detail);
+    }
+
+    return result;
+}
+
+// called by GenericProcessor::setRecording() and CoreServices::setRecordingStatus()
+void RecordNode::startRecording()
+{
+    prepareRecordingStart();
 
     if (! rootFolder.exists())
     {
@@ -890,17 +1098,9 @@ void RecordNode::startRecording()
     isRecording = true;
 
     if (settingsNeeded)
-    {
-        String settingsFileName = rootFolder.getFullPathName() + File::getSeparatorString() + "settings" + ((experimentNumber > 1) ? "_" + String (experimentNumber) : String()) + ".xml";
-
-        std::unique_ptr<XmlElement> xml = std::make_unique<XmlElement> ("SETTINGS");
-
-        AccessClass::getProcessorGraph()->saveToXml (xml.get());
-
-        xml->writeTo (settingsFileName);
-
-        settingsNeeded = false;
-    }
+        persistRecordingSettings (
+            rootFolder,
+            experimentNumber);
 }
 
 // called by GenericProcessor::setRecording() and CoreServices::setRecordingStatus()

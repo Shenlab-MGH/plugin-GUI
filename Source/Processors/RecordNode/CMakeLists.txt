@@ -9,6 +9,7 @@ add_sources(open-ephys
 	RecordEngine.h
 	RecordNode.cpp
 	RecordNode.h
+	RecordNodeRecordingStart.h
 	RecordNodeEditor.cpp
 	RecordNodeEditor.h
 	RecordThread.cpp

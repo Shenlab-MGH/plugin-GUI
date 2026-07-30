@@ -37,6 +37,7 @@
 #include "../Synchronizer/Synchronizer.h"
 #include "DataQueue.h"
 #include "RecordNodeEditor.h"
+#include "RecordNodeRecordingStart.h"
 #include "RecordThread.h"
 
 #include "DiskMonitor/DiskSpaceChecker.h"
@@ -139,6 +140,23 @@ public:
 
     /* Called at start of recording; launches the RecordThread*/
     void startRecording() override;
+
+    /** Starts recording without GUI or global-status side effects.
+
+        This synchronous operation must run on the JUCE message thread.
+        The returned value owns copied strings and identifiers only; it
+        retains no RecordNode, File, RecordThread, or adapter reference.
+
+        writerStarted means that JUCE launched the writer thread. The
+        thread may not yet have reached RecordEngine::openFiles().
+
+        Preflight and directory failures perform no recording setup.
+        A writerThreadStartFailed result can occur after channel maps,
+        queues, and file components have been prepared, but
+        isRecording remains false.
+    */
+    RecordNodeRecordingStartResult
+    startRecordingNonModal();
 
     /* Called at end of recording; stops the RecordThread*/
     void stopRecording() override;
@@ -262,6 +280,13 @@ public:
     static bool overrideTimestampWarningShown;
 
 private:
+    struct NonModalRecordingStartOwner;
+
+    void prepareRecordingStart();
+    void persistRecordingSettings (
+        const File& recordingDirectory,
+        int experiment);
+
     /** Handles other types of events (text, sync texts, etc.) */
     void handleEvent (const EventChannel* channel, const EventPacket& eventPacket);
 
