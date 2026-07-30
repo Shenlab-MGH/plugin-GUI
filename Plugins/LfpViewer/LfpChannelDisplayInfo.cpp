@@ -1203,8 +1203,6 @@ protected:
 private:
     void notifyOwner()
     {
-        if (state.expired())
-            return;
         if (auto* currentOwner =
                 owner.getComponent())
         {
@@ -1861,21 +1859,15 @@ LfpChannelDisplayInfo::
 
 bool LfpChannelDisplayInfo::
     matchesChannelActionAccessibilityIdentity (
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state,
         const LfpStableChannelIdentity& identity,
         int nodeId) const
 {
-    for (const auto& state :
-         channelActionAccessibilityStates)
-    {
-        if (state == nullptr
-            || ! state->matchesIdentity (
-                identity,
-                nodeId))
-        {
-            return false;
-        }
-    }
-    return true;
+    return state != nullptr
+        && state->matchesIdentity (
+            identity,
+            nodeId);
 }
 
 bool LfpChannelDisplayInfo::

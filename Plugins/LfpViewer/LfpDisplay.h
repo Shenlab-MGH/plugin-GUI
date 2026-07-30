@@ -558,6 +558,7 @@ private:
     bool waveformVisibilityAccessibilityRefreshPending = false;
     bool channelActionAccessibilityRefreshPending = false;
     bool channelActionAccessibilityAsyncRefreshPending = false;
+    bool channelActionStructureNotificationPending = false;
 
 #if BUILD_TESTS
     void notifyStableIdentityLifecycleTestHook (

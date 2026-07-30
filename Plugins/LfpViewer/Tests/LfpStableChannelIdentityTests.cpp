@@ -1589,6 +1589,9 @@ TEST_F (LfpStableChannelIdentityBindingTests,
     for (const auto hide :
          { true, false })
     {
+        target->deselect();
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (20);
         auto* monitor =
             findIdentityTestChildByIdSuffix (
                 *info,
@@ -1606,6 +1609,13 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             monitor->setVisible (false);
         else
             monitor->setEnabled (false);
+        for (int dispatch = 0;
+             dispatch < 20;
+             ++dispatch)
+        {
+            MessageManager::getInstance()
+                ->runDispatchLoopUntil (1);
+        }
 
         EXPECT_FALSE (monitor->isAccessible());
         auto fresh =
@@ -1628,12 +1638,26 @@ TEST_F (LfpStableChannelIdentityBindingTests,
                 *messageCenter)
                 .isEmpty());
 
+        auto* select =
+            findIdentityTestChildByIdSuffix (
+                *info,
+                ".select");
+        ASSERT_NE (select, nullptr);
+        ASSERT_FALSE (target->getSelected());
+        ASSERT_TRUE (
+            select->getAccessibilityHandler()
+                ->getActions()
+                .invoke (
+                    AccessibilityActionType::press));
+        EXPECT_TRUE (target->getSelected())
+            << "An available sibling must not depend on the missing monitor state";
+
         if (hide)
             monitor->setVisible (true);
         else
             monitor->setEnabled (true);
         MessageManager::getInstance()
-            ->runDispatchLoopUntil (1);
+            ->runDispatchLoopUntil (20);
         monitor =
             findIdentityTestChildByIdSuffix (
                 *info,
@@ -9185,5 +9209,31 @@ TEST_F (LfpStableChannelIdentityBindingTests,
         splitter->lfpDisplay
             ->getChannelActionNotificationFlushesForTests(),
         4u);
+
+    splitter->lfpDisplay
+        ->resetChannelActionAccessibilityWorkForTests();
+    splitter->lfpDisplay
+        ->channels[0]
+        ->select();
+    for (int dispatch = 0;
+         dispatch < 100
+             && splitter->lfpDisplay
+                        ->getChannelActionAccessibilityWorkForTests()
+                    == 0;
+         ++dispatch)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (1);
+    }
+    EXPECT_GE (
+        splitter->lfpDisplay
+            ->getChannelActionAccessibilityWorkForTests(),
+        static_cast<uint64> (
+            channelCount));
+    EXPECT_LE (
+        splitter->lfpDisplay
+            ->getChannelActionAccessibilityWorkForTests(),
+        static_cast<uint64> (
+            channelCount * 2));
 }
 } // namespace

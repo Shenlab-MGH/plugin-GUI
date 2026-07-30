@@ -209,6 +209,8 @@ private:
         const std::shared_ptr<
             LfpChannelActionAccessibilityState>& state);
     bool matchesChannelActionAccessibilityIdentity (
+        const std::shared_ptr<
+            LfpChannelActionAccessibilityState>& state,
         const LfpStableChannelIdentity& identity,
         int nodeId) const;
     bool matchesChannelActionAccessibilityLiveIdentity (

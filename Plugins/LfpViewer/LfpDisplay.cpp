@@ -412,7 +412,7 @@ void LfpDisplay::
     stableChannelIdentityRefreshPending =
         false;
     channelActionAccessibilityRefreshPending =
-        false;
+        channelActionStructureNotificationPending;
 }
 
 void LfpDisplay::
@@ -1927,9 +1927,6 @@ void LfpDisplay::
          index < count;
          ++index)
     {
-#if BUILD_TESTS
-        ++channelActionAccessibilityWorkForTests;
-#endif
         auto* channel = channels[index];
         auto* info = channelInfo[index];
         const auto& identity =
@@ -2066,6 +2063,9 @@ void LfpDisplay::
          index < count;
          ++index)
     {
+#if BUILD_TESTS
+        ++channelActionAccessibilityWorkForTests;
+#endif
         auto* channel = channels[index];
         auto* info = channelInfo[index];
         const auto& identity =
@@ -2116,7 +2116,10 @@ void LfpDisplay::
     std::vector<
         Component::SafePointer<Component>>
         structureTargets;
-    bool notificationPending = false;
+    bool notificationPending =
+        channelActionStructureNotificationPending;
+    channelActionStructureNotificationPending =
+        false;
     for (auto* info : channelInfo)
     {
         if (info != nullptr)
@@ -2132,7 +2135,11 @@ void LfpDisplay::
     if (notificationPending)
     {
         structureTargets.emplace_back (
-            this);
+            isAccessible()
+                ? static_cast<Component*> (
+                      this)
+                : static_cast<Component*> (
+                      canvasSplit));
 #if BUILD_TESTS
         ++channelActionNotificationFlushesForTests;
 #endif
@@ -2183,6 +2190,9 @@ void LfpDisplay::
 void LfpDisplay::
     invalidateChannelActionAccessibility()
 {
+    channelActionStructureNotificationPending =
+        channelActionStructureNotificationPending
+        || isAccessible();
     for (auto* info : channelInfo)
     {
         if (info != nullptr)
@@ -2317,6 +2327,7 @@ bool LfpDisplay::
                != identity->getStreamKey()
         || ! info
                 .matchesChannelActionAccessibilityIdentity (
+                    state,
                     *identity,
                     canvasSplit->processor
                         ->getNodeId()))

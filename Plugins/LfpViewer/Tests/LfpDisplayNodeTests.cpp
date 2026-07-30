@@ -553,6 +553,23 @@ struct LfpTask7ScopedActionDescriptor
     LfpWindowsUiaInvokeResult actionContract;
 };
 
+enum class LfpTask7DesiredAction
+{
+    select,
+    focus,
+    invert
+};
+
+struct LfpTask7DesiredStateResult
+{
+    LfpWindowsUiaInvokeResult before;
+    LfpWindowsUiaInvokeResult transport;
+    LfpWindowsUiaInvokeResult after;
+    bool mutationAttempted = false;
+    bool verified = false;
+    bool completedNoChange = false;
+};
+
 LfpWindowsUiaInvokeResult
 invokeLfpWindowsUiaTask7ScopedActionFromWorker (
     HWND window,
@@ -666,6 +683,136 @@ HRESULT createLfpWindowsUiaIdCondition (
             expectedId,
             &condition);
     VariantClear (&expectedId);
+    return result;
+}
+
+LfpTask7DesiredStateResult
+setLfpWindowsUiaTask7DesiredState (
+    HWND window,
+    LfpTask7ScopedActionDescriptor
+        desiredDescriptor,
+    LfpTask7DesiredAction action,
+    bool desired)
+{
+    LfpTask7DesiredStateResult result;
+    if (action
+            == LfpTask7DesiredAction::select
+        && ! desired)
+    {
+        result.transport.invokeResult =
+            E_INVALIDARG;
+        return result;
+    }
+
+    auto oppositeDescriptor =
+        desiredDescriptor;
+    const auto hasUnavailableSuffix =
+        desiredDescriptor
+            .actionContract.value.find (
+                L"; inversion unavailable")
+        != std::wstring::npos;
+    switch (action)
+    {
+        case LfpTask7DesiredAction::select:
+            oppositeDescriptor
+                .actionContract.value =
+                L"Not selected";
+            break;
+        case LfpTask7DesiredAction::focus:
+            oppositeDescriptor
+                .actionContract.toggleState =
+                desired
+                ? ToggleState_Off
+                : ToggleState_On;
+            oppositeDescriptor
+                .actionContract.value =
+                desired
+                ? L"Not focused"
+                : L"Focused";
+            break;
+        case LfpTask7DesiredAction::invert:
+            oppositeDescriptor
+                .actionContract.toggleState =
+                desired
+                ? ToggleState_Off
+                : ToggleState_On;
+            oppositeDescriptor
+                .actionContract.value =
+                desired
+                ? L"Normal"
+                : L"Inverted";
+            if (hasUnavailableSuffix)
+            {
+                oppositeDescriptor
+                    .actionContract.value +=
+                    L"; inversion unavailable";
+            }
+            break;
+    }
+
+    result.before =
+        invokeLfpWindowsUiaTask7ScopedActionFromWorker (
+            window,
+            desiredDescriptor,
+            LfpWindowsUiaAction::queryOnly);
+    const auto alreadyDesired =
+        result.before.invokeResult == S_OK;
+    if (! alreadyDesired)
+    {
+        result.before =
+            invokeLfpWindowsUiaTask7ScopedActionFromWorker (
+                window,
+                oppositeDescriptor,
+                LfpWindowsUiaAction::queryOnly);
+        if (result.before.invokeResult
+            != S_OK)
+        {
+            return result;
+        }
+    }
+
+    if (alreadyDesired
+        && action
+               != LfpTask7DesiredAction::select)
+    {
+        result.after = result.before;
+        result.transport.invokeResult =
+            S_OK;
+        result.verified = true;
+        return result;
+    }
+
+    result.mutationAttempted = true;
+    result.transport =
+        invokeLfpWindowsUiaTask7ScopedActionFromWorker (
+            window,
+            alreadyDesired
+                ? desiredDescriptor
+                : oppositeDescriptor,
+            action
+                    == LfpTask7DesiredAction::select
+                ? LfpWindowsUiaAction::invoke
+                : LfpWindowsUiaAction::toggleOnce);
+    result.after =
+        invokeLfpWindowsUiaTask7ScopedActionFromWorker (
+            window,
+            desiredDescriptor,
+            LfpWindowsUiaAction::queryOnly);
+    result.verified =
+        result.after.invokeResult == S_OK;
+    if (! result.verified
+        && action
+               == LfpTask7DesiredAction::invert
+        && hasUnavailableSuffix)
+    {
+        result.after =
+            invokeLfpWindowsUiaTask7ScopedActionFromWorker (
+                window,
+                oppositeDescriptor,
+                LfpWindowsUiaAction::queryOnly);
+        result.completedNoChange =
+            result.after.invokeResult == S_OK;
+    }
     return result;
 }
 
@@ -1298,6 +1445,14 @@ invokeLfpWindowsUiaTask7ScopedAction (
     {
         output.invokeResult =
             FAILED (result) ? result : E_FAIL;
+        return output;
+    }
+
+    if (action
+        == LfpWindowsUiaAction::queryOnly)
+    {
+        output.invokeResult = S_OK;
+        output.matchingElementCount = 1;
         return output;
     }
 
@@ -23495,15 +23650,12 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_FALSE (
         selectBefore.runtimeId.empty());
 
-    const auto invokeScopedTask7 =
+    const auto makeScopedTask7Descriptor =
         [&] (StringRef actionId,
              const LfpWindowsUiaInvokeResult&
-                 actionContract,
-             LfpWindowsUiaAction action)
+                 actionContract)
         {
-            return invokeLfpWindowsUiaTask7ScopedActionFromWorker (
-                window,
-                {
+            return LfpTask7ScopedActionDescriptor {
                     std::wstring (
                         streamGroupId
                             .toWideCharPointer()),
@@ -23515,7 +23667,19 @@ TEST_F (LfpDisplayNodeTests,
                             .toWideCharPointer()),
                     streamGroup,
                     channelGroup,
-                    actionContract },
+                    actionContract };
+        };
+    const auto invokeScopedTask7 =
+        [&] (StringRef actionId,
+             const LfpWindowsUiaInvokeResult&
+                 actionContract,
+             LfpWindowsUiaAction action)
+        {
+            return invokeLfpWindowsUiaTask7ScopedActionFromWorker (
+                window,
+                makeScopedTask7Descriptor (
+                    actionId,
+                    actionContract),
                 action);
         };
 
@@ -23553,16 +23717,32 @@ TEST_F (LfpDisplayNodeTests,
         || selectTransport.invokeResult
                == static_cast<HRESULT> (
                       UIA_E_ELEMENTNOTENABLED));
+    auto selectedContract =
+        selectBefore;
+    selectedContract.value =
+        L"Selected";
     const auto selectAfter =
-        invokeWindowsUiaFromWorker (
-            window,
+        invokeScopedTask7 (
             selectId,
+            selectedContract,
             LfpWindowsUiaAction::queryOnly);
     EXPECT_EQ (selectAfter.invokeResult, S_OK);
     EXPECT_EQ (selectAfter.value, L"Selected");
     EXPECT_NE (
         selectBefore.runtimeId,
         selectAfter.runtimeId);
+    const auto reselectDesired =
+        setLfpWindowsUiaTask7DesiredState (
+            window,
+            makeScopedTask7Descriptor (
+                selectId,
+                selectedContract),
+            LfpTask7DesiredAction::select,
+            true);
+    EXPECT_TRUE (
+        reselectDesired.mutationAttempted);
+    EXPECT_TRUE (
+        reselectDesired.verified);
     for (int attempt = 0;
          attempt < 100
              && (eventSession
@@ -23614,28 +23794,60 @@ TEST_F (LfpDisplayNodeTests,
         || focusEnter.invokeResult
                == static_cast<HRESULT> (
                       UIA_E_ELEMENTNOTAVAILABLE));
+    auto focusedContract =
+        focusBefore;
+    focusedContract.toggleState =
+        ToggleState_On;
+    focusedContract.value = L"Focused";
     const auto focusAfter =
-        invokeWindowsUiaFromWorker (
-            window,
+        invokeScopedTask7 (
             focusId,
+            focusedContract,
             LfpWindowsUiaAction::queryOnly);
     EXPECT_EQ (focusAfter.invokeResult, S_OK);
     EXPECT_EQ (
         focusAfter.toggleState,
         ToggleState_On);
     EXPECT_EQ (focusAfter.value, L"Focused");
-    const auto focusExit =
-        invokeScopedTask7 (
-        focusId,
-        focusAfter,
-        LfpWindowsUiaAction::toggleOnce);
+    const auto focusAlreadyDesired =
+        setLfpWindowsUiaTask7DesiredState (
+            window,
+            makeScopedTask7Descriptor (
+                focusId,
+                focusedContract),
+            LfpTask7DesiredAction::focus,
+            true);
+    EXPECT_FALSE (
+        focusAlreadyDesired
+            .mutationAttempted);
     EXPECT_TRUE (
-        focusExit.invokeResult == S_OK
-        || focusExit.invokeResult
+        focusAlreadyDesired.verified);
+    const auto focusExit =
+        setLfpWindowsUiaTask7DesiredState (
+            window,
+            makeScopedTask7Descriptor (
+                focusId,
+                focusBefore),
+            LfpTask7DesiredAction::focus,
+            false);
+    EXPECT_TRUE (
+        focusExit.transport.invokeResult == S_OK
+        || focusExit.transport.invokeResult
                == static_cast<HRESULT> (
                       UIA_E_ELEMENTNOTAVAILABLE));
+    EXPECT_TRUE (
+        focusExit.mutationAttempted);
+    EXPECT_TRUE (focusExit.verified);
     EXPECT_FALSE (
         display->getSingleChannelState());
+    const auto focusRestored =
+        invokeScopedTask7 (
+            focusId,
+            focusBefore,
+            LfpWindowsUiaAction::queryOnly);
+    EXPECT_EQ (
+        focusRestored.invokeResult,
+        S_OK);
 
     const auto invertBefore =
         invokeWindowsUiaFromWorker (
@@ -23662,10 +23874,16 @@ TEST_F (LfpDisplayNodeTests,
         || invertTransport.invokeResult
                == static_cast<HRESULT> (
                       UIA_E_ELEMENTNOTAVAILABLE));
+    auto invertedContract =
+        invertBefore;
+    invertedContract.toggleState =
+        ToggleState_On;
+    invertedContract.value =
+        L"Inverted";
     const auto invertAfter =
-        invokeWindowsUiaFromWorker (
-            window,
+        invokeScopedTask7 (
             invertId,
+            invertedContract,
             LfpWindowsUiaAction::queryOnly);
     EXPECT_EQ (invertAfter.invokeResult, S_OK);
     EXPECT_EQ (
@@ -23674,6 +23892,62 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (
         invertAfter.value,
         L"Inverted");
+    const auto invertAlreadyDesired =
+        setLfpWindowsUiaTask7DesiredState (
+            window,
+            makeScopedTask7Descriptor (
+                invertId,
+                invertedContract),
+            LfpTask7DesiredAction::invert,
+            true);
+    EXPECT_FALSE (
+        invertAlreadyDesired
+            .mutationAttempted);
+    EXPECT_TRUE (
+        invertAlreadyDesired.verified);
+
+    auto* nativeTarget =
+        display->channels[0];
+    ASSERT_NE (nativeTarget, nullptr);
+    const auto invertRestored =
+        setLfpWindowsUiaTask7DesiredState (
+            window,
+            makeScopedTask7Descriptor (
+                invertId,
+                invertBefore),
+            LfpTask7DesiredAction::invert,
+            false);
+    EXPECT_TRUE (
+        invertRestored.mutationAttempted);
+    EXPECT_TRUE (
+        invertRestored.verified);
+    nativeTarget->setCanBeInverted (
+        false);
+    MessageManager::getInstance()
+        ->runDispatchLoopUntil (20);
+    auto unavailableDesired =
+        invertedContract;
+    unavailableDesired.value =
+        L"Inverted; inversion unavailable";
+    const auto unavailableInvert =
+        setLfpWindowsUiaTask7DesiredState (
+            window,
+            makeScopedTask7Descriptor (
+                invertId,
+                unavailableDesired),
+            LfpTask7DesiredAction::invert,
+            true);
+    EXPECT_TRUE (
+        unavailableInvert
+            .mutationAttempted);
+    EXPECT_FALSE (
+        unavailableInvert.verified);
+    EXPECT_TRUE (
+        unavailableInvert
+            .completedNoChange);
+    EXPECT_FALSE (
+        nativeTarget
+            ->getInputInverted());
 
     auto* messageCenter =
         tester->processorGraph
@@ -23712,9 +23986,9 @@ TEST_F (LfpDisplayNodeTests,
                == static_cast<HRESULT> (
                       UIA_E_ELEMENTNOTENABLED));
     const auto monitorAfter =
-        invokeWindowsUiaFromWorker (
-            window,
+        invokeScopedTask7 (
             monitorId,
+            monitorBefore,
             LfpWindowsUiaAction::queryOnly);
     EXPECT_EQ (monitorAfter.invokeResult, S_OK);
     const auto messages =
@@ -23732,6 +24006,93 @@ TEST_F (LfpDisplayNodeTests,
         drainLfpBroadcastMessages (
             *messageCenter)
             .isEmpty());
+
+    auto zeroEventSession =
+        std::make_unique<
+            LfpTask7WindowsEventSession> (
+            window,
+            std::wstring (
+                channelPrefix
+                    .toWideCharPointer()));
+    for (int attempt = 0;
+         attempt < 100
+             && ! zeroEventSession->isReady();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    ASSERT_TRUE (
+        zeroEventSession->isReady());
+    ASSERT_EQ (
+        zeroEventSession
+            ->getRegistrationResult(),
+        S_OK);
+    display->setNumChannels (0);
+    for (int attempt = 0;
+         attempt < 100
+             && zeroEventSession
+                        ->getStructureEventCount()
+                    == 0;
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    EXPECT_GT (
+        zeroEventSession
+            ->getStructureEventCount(),
+        0);
+    zeroEventSession.reset();
+
+    canvas->updateSettings();
+    canvas->resized();
+    ASSERT_TRUE (
+        splitter->selectStreamByKey (
+            streamKey));
+    ASSERT_GT (
+        display->getNumChannels(),
+        0);
+    auto removalEventSession =
+        std::make_unique<
+            LfpTask7WindowsEventSession> (
+            window,
+            std::wstring (
+                channelPrefix
+                    .toWideCharPointer()));
+    for (int attempt = 0;
+         attempt < 100
+             && ! removalEventSession
+                      ->isReady();
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    ASSERT_TRUE (
+        removalEventSession->isReady());
+    ASSERT_EQ (
+        removalEventSession
+            ->getRegistrationResult(),
+        S_OK);
+    canvas->removeBufferForDisplay (
+        0,
+        buffer);
+    for (int attempt = 0;
+         attempt < 100
+             && removalEventSession
+                        ->getStructureEventCount()
+                    == 0;
+         ++attempt)
+    {
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (10);
+    }
+    EXPECT_GT (
+        removalEventSession
+            ->getStructureEventCount(),
+        0);
+    removalEventSession.reset();
 }
 #endif
 
