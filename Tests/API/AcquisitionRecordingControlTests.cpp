@@ -8,6 +8,7 @@
 #include <future>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1065,6 +1066,803 @@ TEST (AcquisitionRecordingControlTests,
         Error::inconsistentState);
     EXPECT_EQ (stopInvalid.stopAcquisitionCount, 0);
 }
+
+struct FinalRecordingReadbackFailureCase
+{
+    Mode origin;
+    bool throws;
+};
+
+class FinalRecordingReadbackFailureTests
+    : public testing::TestWithParam<
+          FinalRecordingReadbackFailureCase>
+{
+};
+
+TEST_P (FinalRecordingReadbackFailureTests,
+        RollsBackWithControllerFailureInsteadOfClaimingNodeFailure)
+{
+    const auto testCase = GetParam();
+    AcquisitionRecordingControl control;
+    FakeOwner owner;
+    owner.callbacksActive =
+        testCase.origin == Mode::acquire;
+    owner.nodes = { node (71) };
+    auto actions = owner.actions();
+    const auto readback = actions.readback;
+    const auto startAcquisition =
+        actions.startAcquisition;
+    const auto stopAcquisition =
+        actions.stopAcquisition;
+    const auto startRecording =
+        actions.startRecording;
+    const auto rollbackRecording =
+        actions.rollbackRecordingStarts;
+    std::vector<std::string> observedOrder;
+
+    actions.readback =
+        [&]
+        {
+            observedOrder.push_back (
+                "read_" + std::to_string (
+                    owner.readCount + 1));
+            return readback();
+        };
+    actions.startAcquisition =
+        [&] (
+            const AcquisitionRecordingRequestOwnershipReporter&
+                ownership)
+        {
+            observedOrder.push_back ("start_acquisition");
+            return startAcquisition (ownership);
+        };
+    actions.stopAcquisition =
+        [&]
+        {
+            observedOrder.push_back ("stop_acquisition");
+            return stopAcquisition();
+        };
+    actions.startRecording =
+        [&] (
+            bool confirmation,
+            const AcquisitionRecordingRequestOwnershipReporter&
+                ownership)
+        {
+            observedOrder.push_back ("start_recording");
+            const auto result = startRecording (
+                confirmation,
+                ownership);
+            if (! testCase.throws)
+                actions.readback = {};
+            return result;
+        };
+    actions.rollbackRecordingStarts =
+        [&] (
+            const std::vector<std::uint64_t>& generations)
+        {
+            observedOrder.push_back ("rollback_recording");
+            if (! testCase.throws)
+                EXPECT_FALSE (actions.readback);
+            const auto result =
+                rollbackRecording (generations);
+            if (! testCase.throws)
+            {
+                actions.readback =
+                    [&]
+                    {
+                        observedOrder.push_back (
+                            "read_" + std::to_string (
+                                owner.readCount + 1));
+                        return readback();
+                    };
+            }
+            return result;
+        };
+
+    if (testCase.throws)
+        owner.readNumberToThrow =
+            testCase.origin == Mode::idle ? 3 : 2;
+
+    const auto result = control.applyStatusRequest (
+        request (Mode::record),
+        actions);
+
+    expectError (
+        result,
+        Mode::record,
+        Error::operationFailed);
+    ASSERT_TRUE (result.achieved.has_value());
+    EXPECT_EQ (
+        result.achieved->status.mode,
+        testCase.origin);
+    ASSERT_EQ (owner.nodes.size(), 1u);
+    EXPECT_FALSE (owner.nodes[0].recordingActive);
+    EXPECT_FALSE (owner.nodes[0].writerThreadRunning);
+    EXPECT_EQ (owner.startRecordingCount, 1);
+    EXPECT_EQ (owner.rollbackCount, 1);
+    EXPECT_EQ (
+        owner.rolledBackGenerations,
+        std::vector<std::uint64_t> { 71 });
+    EXPECT_EQ (
+        owner.stopAcquisitionCount,
+        testCase.origin == Mode::idle ? 1 : 0);
+
+    if (testCase.origin == Mode::idle)
+    {
+        EXPECT_EQ (owner.startAcquisitionCount, 1);
+        EXPECT_EQ (
+            owner.actionOrder,
+            (std::vector<std::string> {
+                "start_acquisition",
+                "start_recording",
+                "rollback_recording",
+                "stop_acquisition"
+            }));
+        EXPECT_EQ (
+            observedOrder,
+            testCase.throws
+                ? (std::vector<std::string> {
+                      "read_1",
+                      "start_acquisition",
+                      "read_2",
+                      "start_recording",
+                      "read_3",
+                      "rollback_recording",
+                      "stop_acquisition",
+                      "read_4"
+                  })
+                : (std::vector<std::string> {
+                      "read_1",
+                      "start_acquisition",
+                      "read_2",
+                      "start_recording",
+                      "rollback_recording",
+                      "stop_acquisition",
+                      "read_3"
+                  }));
+        EXPECT_EQ (
+            owner.readCount,
+            testCase.throws ? 4 : 3);
+    }
+    else
+    {
+        EXPECT_EQ (owner.startAcquisitionCount, 0);
+        EXPECT_EQ (
+            owner.actionOrder,
+            (std::vector<std::string> {
+                "start_recording",
+                "rollback_recording"
+            }));
+        EXPECT_EQ (
+            observedOrder,
+            testCase.throws
+                ? (std::vector<std::string> {
+                      "read_1",
+                      "start_recording",
+                      "read_2",
+                      "rollback_recording",
+                      "read_3"
+                  })
+                : (std::vector<std::string> {
+                      "read_1",
+                      "start_recording",
+                      "rollback_recording",
+                      "read_2"
+                  }));
+        EXPECT_EQ (
+            owner.readCount,
+            testCase.throws ? 3 : 2);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P (
+    BothOriginsAndFailureKinds,
+    FinalRecordingReadbackFailureTests,
+    testing::Values (
+        FinalRecordingReadbackFailureCase {
+            Mode::idle,
+            true
+        },
+        FinalRecordingReadbackFailureCase {
+            Mode::idle,
+            false
+        },
+        FinalRecordingReadbackFailureCase {
+            Mode::acquire,
+            true
+        },
+        FinalRecordingReadbackFailureCase {
+            Mode::acquire,
+            false
+        }),
+    [] (const testing::TestParamInfo<
+        FinalRecordingReadbackFailureCase>& info)
+    {
+        const auto origin =
+            info.param.origin == Mode::idle
+                ? "Idle"
+                : "Acquire";
+        return std::string (origin)
+               + (info.param.throws
+                      ? "Exception"
+                      : "NoValue");
+    });
+
+enum class PrimaryOwnerSeam
+{
+    startAcquisition,
+    stopAcquisition,
+    startRecording,
+    stopRecording
+};
+
+struct PrimaryOwnerSeamCase
+{
+    const char* name;
+    Mode origin;
+    Mode target;
+    PrimaryOwnerSeam seam;
+    bool presentButRejects;
+};
+
+class PrimaryOwnerSeamTests
+    : public testing::TestWithParam<
+          PrimaryOwnerSeamCase>
+{
+};
+
+TEST_P (PrimaryOwnerSeamTests,
+        DistinguishesMissingSeamFromPresentRejection)
+{
+    const auto testCase = GetParam();
+    AcquisitionRecordingControl control;
+    FakeOwner owner;
+    owner.nodes = {
+        node (
+            81,
+            testCase.origin == Mode::record,
+            testCase.origin == Mode::record)
+    };
+    owner.callbacksActive =
+        testCase.origin != Mode::idle;
+    auto actions = owner.actions();
+
+    switch (testCase.seam)
+    {
+        case PrimaryOwnerSeam::startAcquisition:
+            if (testCase.presentButRejects)
+                owner.startAcquisitionSucceeds = false;
+            else
+                actions.startAcquisition = {};
+            break;
+        case PrimaryOwnerSeam::stopAcquisition:
+            if (testCase.presentButRejects)
+                owner.stopAcquisitionSucceeds = false;
+            else
+                actions.stopAcquisition = {};
+            break;
+        case PrimaryOwnerSeam::startRecording:
+            if (testCase.presentButRejects)
+            {
+                owner.recordingStartError =
+                    Error::recordingStartFailed;
+            }
+            else
+            {
+                actions.startRecording = {};
+            }
+            break;
+        case PrimaryOwnerSeam::stopRecording:
+            if (testCase.presentButRejects)
+                owner.stopRecordingSucceeds = false;
+            else
+                actions.stopRecording = {};
+            break;
+    }
+
+    const auto result = control.applyStatusRequest (
+        request (testCase.target),
+        actions);
+
+    expectError (
+        result,
+        testCase.target,
+        testCase.presentButRejects
+            ? (testCase.seam
+                       == PrimaryOwnerSeam::startRecording
+                   ? Error::recordingStartFailed
+                   : Error::stateTransitionRejected)
+            : Error::operationFailed);
+    ASSERT_TRUE (result.achieved.has_value());
+    EXPECT_EQ (owner.rollbackCount, 0);
+
+    const auto unchanged = owner.read();
+    EXPECT_EQ (
+        unchanged.status.mode,
+        testCase.presentButRejects
+                && testCase.origin == Mode::record
+                && testCase.target == Mode::idle
+                && testCase.seam
+                       == PrimaryOwnerSeam::stopAcquisition
+            ? Mode::acquire
+            : testCase.origin);
+
+    if (! testCase.presentButRejects)
+    {
+        EXPECT_EQ (result.achieved->status.mode,
+                   testCase.origin);
+        EXPECT_EQ (owner.startAcquisitionCount, 0);
+        EXPECT_EQ (owner.stopAcquisitionCount, 0);
+        EXPECT_EQ (owner.startRecordingCount, 0);
+        EXPECT_EQ (owner.stopRecordingCount, 0);
+        EXPECT_TRUE (owner.actionOrder.empty());
+        return;
+    }
+
+    if (testCase.seam
+        == PrimaryOwnerSeam::startAcquisition)
+    {
+        EXPECT_EQ (owner.readCount, 3);
+        EXPECT_EQ (owner.startAcquisitionCount, 1);
+        EXPECT_EQ (owner.stopAcquisitionCount, 0);
+        EXPECT_EQ (owner.startRecordingCount, 0);
+        EXPECT_EQ (owner.stopRecordingCount, 0);
+        EXPECT_EQ (
+            owner.actionOrder,
+            (std::vector<std::string> {
+                "start_acquisition"
+            }));
+    }
+    else if (testCase.seam
+             == PrimaryOwnerSeam::startRecording)
+    {
+        EXPECT_EQ (
+            owner.startAcquisitionCount,
+            testCase.origin == Mode::idle ? 1 : 0);
+        EXPECT_EQ (
+            owner.stopAcquisitionCount,
+            testCase.origin == Mode::idle ? 1 : 0);
+        EXPECT_EQ (owner.startRecordingCount, 1);
+        EXPECT_EQ (owner.stopRecordingCount, 0);
+        EXPECT_EQ (
+            owner.readCount,
+            testCase.origin == Mode::idle ? 4 : 3);
+        EXPECT_EQ (
+            owner.actionOrder,
+            testCase.origin == Mode::idle
+                ? (std::vector<std::string> {
+                      "start_acquisition",
+                      "start_recording",
+                      "stop_acquisition"
+                  })
+                : (std::vector<std::string> {
+                      "start_recording"
+                  }));
+    }
+    else if (testCase.origin == Mode::record
+             && testCase.target == Mode::idle
+             && testCase.seam
+                    == PrimaryOwnerSeam::stopAcquisition)
+    {
+        EXPECT_EQ (result.achieved->status.mode,
+                   Mode::acquire);
+        EXPECT_EQ (owner.readCount, 4);
+        EXPECT_EQ (owner.startAcquisitionCount, 0);
+        EXPECT_EQ (owner.stopAcquisitionCount, 1);
+        EXPECT_EQ (owner.startRecordingCount, 0);
+        EXPECT_EQ (owner.stopRecordingCount, 1);
+        EXPECT_EQ (
+            owner.actionOrder,
+            (std::vector<std::string> {
+                "stop_recording",
+                "stop_acquisition"
+            }));
+    }
+    else
+    {
+        EXPECT_EQ (result.achieved->status.mode,
+                   testCase.origin);
+        EXPECT_EQ (owner.readCount, 3);
+        EXPECT_EQ (owner.startAcquisitionCount, 0);
+        EXPECT_EQ (
+            owner.stopAcquisitionCount,
+            testCase.seam
+                    == PrimaryOwnerSeam::stopAcquisition
+                ? 1
+                : 0);
+        EXPECT_EQ (owner.startRecordingCount, 0);
+        EXPECT_EQ (
+            owner.stopRecordingCount,
+            testCase.seam
+                    == PrimaryOwnerSeam::stopRecording
+                ? 1
+                : 0);
+        EXPECT_EQ (
+            owner.actionOrder,
+            (std::vector<std::string> {
+                testCase.seam
+                        == PrimaryOwnerSeam::stopRecording
+                    ? "stop_recording"
+                    : "stop_acquisition"
+            }));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P (
+    EveryPrimaryTransitionBranch,
+    PrimaryOwnerSeamTests,
+    testing::Values (
+        PrimaryOwnerSeamCase {
+            "IdleAcquireStartMissing",
+            Mode::idle,
+            Mode::acquire,
+            PrimaryOwnerSeam::startAcquisition,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "IdleAcquireStartPresentFalse",
+            Mode::idle,
+            Mode::acquire,
+            PrimaryOwnerSeam::startAcquisition,
+            true
+        },
+        PrimaryOwnerSeamCase {
+            "IdleRecordStartAcquisitionMissing",
+            Mode::idle,
+            Mode::record,
+            PrimaryOwnerSeam::startAcquisition,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "IdleRecordStartAcquisitionPresentFalse",
+            Mode::idle,
+            Mode::record,
+            PrimaryOwnerSeam::startAcquisition,
+            true
+        },
+        PrimaryOwnerSeamCase {
+            "AcquireIdleStopMissing",
+            Mode::acquire,
+            Mode::idle,
+            PrimaryOwnerSeam::stopAcquisition,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "AcquireIdleStopPresentFalse",
+            Mode::acquire,
+            Mode::idle,
+            PrimaryOwnerSeam::stopAcquisition,
+            true
+        },
+        PrimaryOwnerSeamCase {
+            "RecordIdleStopRecordingMissing",
+            Mode::record,
+            Mode::idle,
+            PrimaryOwnerSeam::stopRecording,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "RecordIdleStopRecordingPresentFalse",
+            Mode::record,
+            Mode::idle,
+            PrimaryOwnerSeam::stopRecording,
+            true
+        },
+        PrimaryOwnerSeamCase {
+            "RecordIdleStopAcquisitionMissing",
+            Mode::record,
+            Mode::idle,
+            PrimaryOwnerSeam::stopAcquisition,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "RecordIdleStopAcquisitionPresentFalse",
+            Mode::record,
+            Mode::idle,
+            PrimaryOwnerSeam::stopAcquisition,
+            true
+        },
+        PrimaryOwnerSeamCase {
+            "RecordAcquireStopRecordingMissing",
+            Mode::record,
+            Mode::acquire,
+            PrimaryOwnerSeam::stopRecording,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "RecordAcquireStopRecordingPresentFalse",
+            Mode::record,
+            Mode::acquire,
+            PrimaryOwnerSeam::stopRecording,
+            true
+        },
+        PrimaryOwnerSeamCase {
+            "IdleRecordStartRecordingMissing",
+            Mode::idle,
+            Mode::record,
+            PrimaryOwnerSeam::startRecording,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "IdleRecordStartRecordingPresentFailure",
+            Mode::idle,
+            Mode::record,
+            PrimaryOwnerSeam::startRecording,
+            true
+        },
+        PrimaryOwnerSeamCase {
+            "AcquireRecordStartRecordingMissing",
+            Mode::acquire,
+            Mode::record,
+            PrimaryOwnerSeam::startRecording,
+            false
+        },
+        PrimaryOwnerSeamCase {
+            "AcquireRecordStartRecordingPresentFailure",
+            Mode::acquire,
+            Mode::record,
+            PrimaryOwnerSeam::startRecording,
+            true
+        }),
+    [] (const testing::TestParamInfo<
+        PrimaryOwnerSeamCase>& info)
+    {
+        return std::string (info.param.name);
+    });
+
+TEST (AcquisitionRecordingControlTests,
+      MissingInitialReadbackIsOperationFailureWithoutMutation)
+{
+    AcquisitionRecordingControl control;
+    FakeOwner owner;
+    owner.nodes = { node (82) };
+    auto actions = owner.actions();
+    actions.readback = {};
+
+    const auto result = control.applyStatusRequest (
+        request (Mode::record),
+        actions);
+
+    expectError (
+        result,
+        Mode::record,
+        Error::operationFailed);
+    EXPECT_FALSE (result.achieved.has_value());
+    EXPECT_EQ (owner.readCount, 0);
+    EXPECT_EQ (owner.startAcquisitionCount, 0);
+    EXPECT_EQ (owner.stopAcquisitionCount, 0);
+    EXPECT_EQ (owner.startRecordingCount, 0);
+    EXPECT_EQ (owner.stopRecordingCount, 0);
+    EXPECT_EQ (owner.rollbackCount, 0);
+    EXPECT_TRUE (owner.actionOrder.empty());
+}
+
+enum class RollbackOnlyOwnerSeam
+{
+    stopAcquisition,
+    rollbackRecording
+};
+
+struct RollbackOnlyOwnerSeamCase
+{
+    const char* name;
+    Mode origin;
+    Mode target;
+    RollbackOnlyOwnerSeam seam;
+    bool presentButRejects;
+};
+
+class RollbackOnlyOwnerSeamTests
+    : public testing::TestWithParam<
+          RollbackOnlyOwnerSeamCase>
+{
+};
+
+TEST_P (RollbackOnlyOwnerSeamTests,
+        IsRequiredOnlyAfterOwnedMutationNeedsRollback)
+{
+    const auto testCase = GetParam();
+    AcquisitionRecordingControl control;
+    FakeOwner owner;
+    owner.callbacksActive =
+        testCase.origin == Mode::acquire;
+    owner.nodes = { node (91) };
+    owner.readNumberToThrow =
+        testCase.target == Mode::acquire
+            ? 2
+            : (testCase.origin == Mode::idle ? 3 : 2);
+    auto actions = owner.actions();
+
+    if (testCase.seam
+        == RollbackOnlyOwnerSeam::stopAcquisition)
+    {
+        if (testCase.presentButRejects)
+            owner.stopAcquisitionSucceeds = false;
+        else
+            actions.stopAcquisition = {};
+    }
+    else
+    {
+        if (testCase.presentButRejects)
+            owner.rollbackSucceeds = false;
+        else
+            actions.rollbackRecordingStarts = {};
+    }
+
+    const auto result = control.applyStatusRequest (
+        request (testCase.target),
+        actions);
+
+    expectError (
+        result,
+        testCase.target,
+        testCase.origin == Mode::idle
+                && testCase.target == Mode::record
+                && testCase.seam
+                       == RollbackOnlyOwnerSeam::rollbackRecording
+            ? Error::inconsistentState
+            : Error::rollbackFailed);
+    ASSERT_TRUE (result.achieved.has_value());
+    EXPECT_EQ (owner.startAcquisitionCount,
+               testCase.origin == Mode::idle ? 1 : 0);
+    EXPECT_EQ (
+        owner.startRecordingCount,
+        testCase.target == Mode::record ? 1 : 0);
+    EXPECT_EQ (owner.stopRecordingCount, 0);
+
+    if (testCase.seam
+        == RollbackOnlyOwnerSeam::stopAcquisition)
+    {
+        EXPECT_EQ (
+            owner.stopAcquisitionCount,
+            testCase.presentButRejects ? 1 : 0);
+        EXPECT_EQ (
+            owner.rollbackCount,
+            testCase.target == Mode::record ? 1 : 0);
+        EXPECT_EQ (result.achieved->status.mode,
+                   Mode::acquire);
+    }
+    else
+    {
+        EXPECT_EQ (
+            owner.rollbackCount,
+            testCase.presentButRejects ? 1 : 0);
+        EXPECT_EQ (
+            owner.stopAcquisitionCount,
+            testCase.origin == Mode::idle ? 1 : 0);
+        if (testCase.origin == Mode::idle)
+        {
+            EXPECT_FALSE (
+                result.achieved->status.mode.has_value());
+            EXPECT_FALSE (
+                result.achieved->status
+                    .recordingConsistent);
+        }
+        else
+        {
+            EXPECT_EQ (result.achieved->status.mode,
+                       Mode::record);
+        }
+    }
+
+    if (testCase.target == Mode::record)
+    {
+        EXPECT_EQ (
+            owner.rolledBackGenerations,
+            testCase.presentButRejects
+                || testCase.seam
+                       == RollbackOnlyOwnerSeam::stopAcquisition
+                ? (std::vector<std::uint64_t> { 91 })
+                : std::vector<std::uint64_t> {});
+    }
+
+    EXPECT_EQ (
+        owner.readCount,
+        testCase.target == Mode::acquire
+            ? 3
+            : (testCase.origin == Mode::idle ? 4 : 3));
+    std::vector<std::string> expectedActionOrder;
+    if (testCase.origin == Mode::idle)
+        expectedActionOrder.push_back (
+            "start_acquisition");
+    if (testCase.target == Mode::record)
+        expectedActionOrder.push_back ("start_recording");
+    if (testCase.seam
+            == RollbackOnlyOwnerSeam::rollbackRecording
+        && testCase.presentButRejects)
+    {
+        expectedActionOrder.push_back (
+            "rollback_recording");
+    }
+    else if (testCase.seam
+                 == RollbackOnlyOwnerSeam::stopAcquisition
+             && testCase.target == Mode::record)
+    {
+        expectedActionOrder.push_back (
+            "rollback_recording");
+    }
+    if (testCase.seam
+            == RollbackOnlyOwnerSeam::stopAcquisition
+        && testCase.presentButRejects)
+    {
+        expectedActionOrder.push_back (
+            "stop_acquisition");
+    }
+    else if (testCase.seam
+                 == RollbackOnlyOwnerSeam::rollbackRecording
+             && testCase.origin == Mode::idle)
+    {
+        expectedActionOrder.push_back (
+            "stop_acquisition");
+    }
+    EXPECT_EQ (owner.actionOrder, expectedActionOrder);
+}
+
+INSTANTIATE_TEST_SUITE_P (
+    ExactFailureThatNeedsTheSeam,
+    RollbackOnlyOwnerSeamTests,
+    testing::Values (
+        RollbackOnlyOwnerSeamCase {
+            "IdleAcquireStopMissing",
+            Mode::idle,
+            Mode::acquire,
+            RollbackOnlyOwnerSeam::stopAcquisition,
+            false
+        },
+        RollbackOnlyOwnerSeamCase {
+            "IdleAcquireStopPresentFalse",
+            Mode::idle,
+            Mode::acquire,
+            RollbackOnlyOwnerSeam::stopAcquisition,
+            true
+        },
+        RollbackOnlyOwnerSeamCase {
+            "IdleRecordStopMissing",
+            Mode::idle,
+            Mode::record,
+            RollbackOnlyOwnerSeam::stopAcquisition,
+            false
+        },
+        RollbackOnlyOwnerSeamCase {
+            "IdleRecordStopPresentFalse",
+            Mode::idle,
+            Mode::record,
+            RollbackOnlyOwnerSeam::stopAcquisition,
+            true
+        },
+        RollbackOnlyOwnerSeamCase {
+            "IdleRecordNodeRollbackMissing",
+            Mode::idle,
+            Mode::record,
+            RollbackOnlyOwnerSeam::rollbackRecording,
+            false
+        },
+        RollbackOnlyOwnerSeamCase {
+            "IdleRecordNodeRollbackPresentFalse",
+            Mode::idle,
+            Mode::record,
+            RollbackOnlyOwnerSeam::rollbackRecording,
+            true
+        },
+        RollbackOnlyOwnerSeamCase {
+            "AcquireRecordNodeRollbackMissing",
+            Mode::acquire,
+            Mode::record,
+            RollbackOnlyOwnerSeam::rollbackRecording,
+            false
+        },
+        RollbackOnlyOwnerSeamCase {
+            "AcquireRecordNodeRollbackPresentFalse",
+            Mode::acquire,
+            Mode::record,
+            RollbackOnlyOwnerSeam::rollbackRecording,
+            true
+        }),
+    [] (const testing::TestParamInfo<
+        RollbackOnlyOwnerSeamCase>& info)
+    {
+        return std::string (info.param.name);
+    });
 
 TEST (AcquisitionRecordingControlTests,
       ClearsConfirmationAfterSuccessRefusalRollbackAndException)

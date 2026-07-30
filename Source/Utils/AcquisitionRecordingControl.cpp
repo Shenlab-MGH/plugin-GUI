@@ -326,6 +326,33 @@ AcquisitionRecordingControl::applyStatusRequest (
             false);
     }
 
+    const auto needsStartAcquisition =
+        priorMode == Mode::idle
+        && request.mode != Mode::idle;
+    const auto needsStopAcquisition =
+        request.mode == Mode::idle
+        && priorMode != Mode::idle;
+    const auto needsStartRecording =
+        request.mode == Mode::record;
+    const auto needsStopRecording =
+        priorMode == Mode::record
+        && request.mode != Mode::record;
+
+    if ((needsStartAcquisition
+         && ! owner.startAcquisition)
+        || (needsStopAcquisition
+            && ! owner.stopAcquisition)
+        || (needsStartRecording
+            && ! owner.startRecording)
+        || (needsStopRecording
+            && ! owner.stopRecording))
+    {
+        return makeError (
+            request.mode,
+            Error::operationFailed,
+            std::move (initial));
+    }
+
     const auto readAndVerify =
         [&] (Mode expectedMode)
             -> AcquisitionRecordingControlResult
@@ -362,8 +389,15 @@ AcquisitionRecordingControl::applyStatusRequest (
         {
             if (priorMode == Mode::record)
             {
-                if (! owner.stopRecording
-                    || ! owner.stopRecording())
+                if (! owner.stopRecording)
+                {
+                    return makeError (
+                        request.mode,
+                        Error::operationFailed,
+                        readSafely (owner));
+                }
+
+                if (! owner.stopRecording())
                 {
                     return makeError (
                         request.mode,
@@ -394,8 +428,15 @@ AcquisitionRecordingControl::applyStatusRequest (
                 }
             }
 
-            if (! owner.stopAcquisition
-                || ! owner.stopAcquisition())
+            if (! owner.stopAcquisition)
+            {
+                return makeError (
+                    request.mode,
+                    Error::operationFailed,
+                    readSafely (owner));
+            }
+
+            if (! owner.stopAcquisition())
             {
                 return makeError (
                     request.mode,
@@ -420,8 +461,15 @@ AcquisitionRecordingControl::applyStatusRequest (
         {
             try
             {
-                if (! owner.stopRecording
-                    || ! owner.stopRecording())
+                if (! owner.stopRecording)
+                {
+                    return makeError (
+                        request.mode,
+                        Error::operationFailed,
+                        readSafely (owner));
+                }
+
+                if (! owner.stopRecording())
                 {
                     return makeError (
                         request.mode,
@@ -641,9 +689,10 @@ AcquisitionRecordingControl::applyStatusRequest (
     {
         try
         {
-            if (! owner.startAcquisition
-                || ! owner.startAcquisition (
-                       ownership))
+            if (! owner.startAcquisition)
+                return rollback (Error::operationFailed);
+
+            if (! owner.startAcquisition (ownership))
             {
                 return rollback (
                     Error::stateTransitionRejected);
@@ -714,15 +763,16 @@ AcquisitionRecordingControl::applyStatusRequest (
     }
 
     auto achieved = readSafely (owner);
-    if (! achieved.has_value()
-        || achieved->status.mode
-               != std::optional<Mode> (Mode::record)
-        || ! achieved->status.recordingConsistent
+    if (! achieved.has_value())
+        return rollback (Error::operationFailed);
+
+    if (! achieved->status.recordingConsistent
         || ! hasValidCopiedNodeFacts (*achieved))
-    {
-        return rollback (
-            Error::recordingStartFailed);
-    }
+        return rollback (Error::inconsistentState);
+
+    if (achieved->status.mode
+        != std::optional<Mode> (Mode::record))
+        return rollback (Error::recordingStartFailed);
 
     return makeSuccess (
         request.mode,
