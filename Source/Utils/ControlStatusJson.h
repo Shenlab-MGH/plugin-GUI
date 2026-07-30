@@ -25,16 +25,10 @@
 #define CONTROL_STATUS_JSON_H
 
 #include "../../JuceLibraryCode/JuceHeader.h"
-#include "AcquisitionRecordingStatus.h"
+#include "AcquisitionRecordingRequest.h"
 #include "../TestableExport.h"
 
 #include <optional>
-
-struct StatusRequest
-{
-    AcquisitionRecordingMode mode = AcquisitionRecordingMode::idle;
-    bool confirmUnsynchronized = false;
-};
 
 struct StatusRequestParseResult
 {

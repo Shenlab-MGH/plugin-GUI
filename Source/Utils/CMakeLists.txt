@@ -4,6 +4,9 @@
 add_sources(
   open-ephys
   OpenEphysHttpServer.h
+  AcquisitionRecordingRequest.h
+  AcquisitionRecordingControl.h
+  AcquisitionRecordingControl.cpp
   AcquisitionRecordingStatus.h
   AcquisitionRecordingStatus.cpp
   ControlCapability.h

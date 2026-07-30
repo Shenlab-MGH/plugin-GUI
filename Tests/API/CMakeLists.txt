@@ -1,5 +1,6 @@
 include(../ComponentRules.cmake)
 add_sources(${COMPONENT_NAME}_tests
+        AcquisitionRecordingControlTests.cpp
         AcquisitionRecordingStatusTests.cpp
         ControlCapabilityTests.cpp
         ControlReadTests.cpp
