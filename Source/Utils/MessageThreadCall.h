@@ -44,6 +44,53 @@ enum class MessageThreadCallStatus
     failed
 };
 
+enum class MessageThreadCallStartState
+{
+    pending,
+    started,
+    cancelled
+};
+
+class MessageThreadCallStartGate
+{
+public:
+    bool tryStart()
+    {
+        return transitionTo (
+            MessageThreadCallStartState::started);
+    }
+
+    bool tryCancel()
+    {
+        return transitionTo (
+            MessageThreadCallStartState::cancelled);
+    }
+
+    MessageThreadCallStartState state() const
+    {
+        return current.load (
+            std::memory_order_acquire);
+    }
+
+private:
+    bool transitionTo (
+        MessageThreadCallStartState desired)
+    {
+        auto expected =
+            MessageThreadCallStartState::pending;
+        return current.compare_exchange_strong (
+            expected,
+            desired,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire);
+    }
+
+    std::atomic<MessageThreadCallStartState>
+        current {
+            MessageThreadCallStartState::pending
+        };
+};
+
 template <typename Value>
 struct MessageThreadCallResult
 {
@@ -52,10 +99,14 @@ struct MessageThreadCallResult
     String error;
 };
 
+namespace MessageThreadCallDetail
+{
 template <typename Operation, typename Dispatcher>
-auto runDispatchedCall (Operation&& operation,
-                        Dispatcher&& dispatcher,
-                        std::chrono::milliseconds timeout)
+auto runDispatchedCallWithGate (
+    Operation&& operation,
+    Dispatcher&& dispatcher,
+    std::chrono::milliseconds timeout,
+    std::shared_ptr<MessageThreadCallStartGate> gate)
     -> MessageThreadCallResult<std::invoke_result_t<std::decay_t<Operation>>>
 {
     using Callable = std::decay_t<Operation>;
@@ -73,18 +124,35 @@ auto runDispatchedCall (Operation&& operation,
         std::promise<void> completion;
         std::optional<Value> value;
         String error;
-        std::atomic<bool> started { false };
-        std::atomic<bool> cancelled { false };
     };
 
     auto state = std::make_shared<SharedState> (Callable (std::forward<Operation> (operation)));
     auto completion = state->completion.get_future();
-
-    std::function<void()> dispatchedOperation = [state]
+    const auto finishStartedOperation =
+        [&]() -> MessageThreadCallResult<Value>
     {
-        state->started.store (true);
+        completion.wait();
 
-        if (! state->cancelled.load())
+        if (state->error.isNotEmpty())
+        {
+            return {
+                MessageThreadCallStatus::failed,
+                std::nullopt,
+                state->error
+            };
+        }
+
+        return {
+            MessageThreadCallStatus::completed,
+            std::move (state->value),
+            {}
+        };
+    };
+
+    std::function<void()> dispatchedOperation =
+        [state, gate]
+    {
+        if (gate->tryStart())
         {
             try
             {
@@ -110,41 +178,93 @@ auto runDispatchedCall (Operation&& operation,
     }
     catch (const std::exception& exception)
     {
-        return { MessageThreadCallStatus::dispatchFailed,
-                 std::nullopt,
-                 String::fromUTF8 (exception.what()) };
+        if (gate->tryCancel())
+        {
+            return {
+                MessageThreadCallStatus::dispatchFailed,
+                std::nullopt,
+                String::fromUTF8 (exception.what())
+            };
+        }
+
+        return finishStartedOperation();
     }
     catch (...)
     {
-        return { MessageThreadCallStatus::dispatchFailed,
-                 std::nullopt,
-                 "Unknown message-thread dispatch failure." };
+        if (gate->tryCancel())
+        {
+            return {
+                MessageThreadCallStatus::dispatchFailed,
+                std::nullopt,
+                "Unknown message-thread dispatch failure."
+            };
+        }
+
+        return finishStartedOperation();
     }
 
     if (! dispatched)
-        return { MessageThreadCallStatus::dispatchFailed,
-                 std::nullopt,
-                 "Could not dispatch the operation to the message thread." };
+    {
+        if (gate->tryCancel())
+        {
+            return {
+                MessageThreadCallStatus::dispatchFailed,
+                std::nullopt,
+                "Could not dispatch the operation to the message thread."
+            };
+        }
+
+        return finishStartedOperation();
+    }
 
     if (completion.wait_for (timeout) != std::future_status::ready)
     {
-        if (! state->started.load())
+        if (gate->tryCancel())
         {
-            state->cancelled.store (true);
             return { MessageThreadCallStatus::timedOut,
                      std::nullopt,
                      "Timed out waiting for the message-thread operation." };
         }
 
-        completion.wait();
+        return finishStartedOperation();
     }
 
-    if (state->error.isNotEmpty())
-        return { MessageThreadCallStatus::failed, std::nullopt, state->error };
-
-    return { MessageThreadCallStatus::completed,
-             std::move (state->value),
-             {} };
+    return finishStartedOperation();
 }
+} // namespace MessageThreadCallDetail
+
+template <typename Operation, typename Dispatcher>
+auto runDispatchedCall (Operation&& operation,
+                        Dispatcher&& dispatcher,
+                        std::chrono::milliseconds timeout)
+    -> MessageThreadCallResult<std::invoke_result_t<std::decay_t<Operation>>>
+{
+    return MessageThreadCallDetail::runDispatchedCallWithGate (
+        std::forward<Operation> (operation),
+        std::forward<Dispatcher> (dispatcher),
+        timeout,
+        std::make_shared<MessageThreadCallStartGate>());
+}
+
+#if defined (BUILD_TESTS)
+template <typename Operation, typename Dispatcher>
+auto runDispatchedCall (
+    Operation&& operation,
+    Dispatcher&& dispatcher,
+    std::chrono::milliseconds timeout,
+    MessageThreadCallStartGate& gate)
+    -> MessageThreadCallResult<std::invoke_result_t<std::decay_t<Operation>>>
+{
+    auto injectedGate =
+        std::shared_ptr<MessageThreadCallStartGate> (
+            &gate,
+            [] (MessageThreadCallStartGate*) {});
+    return MessageThreadCallDetail::runDispatchedCallWithGate (
+        std::forward<Operation> (operation),
+        std::forward<Dispatcher> (dispatcher),
+        timeout,
+        std::move (injectedGate));
+}
+#endif
 
 #endif
