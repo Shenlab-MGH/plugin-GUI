@@ -121,11 +121,11 @@ TEST (AcquisitionRecordingStatusTests,
 }
 
 TEST (AcquisitionRecordingStatusTests,
-      DerivesIdleAndAcquireOnlyWhenEveryRecordNodeIsInactive)
+      DerivesIdleAndAcquireWhenEveryRecordNodeAndWriterIsInactive)
 {
     const std::vector<Node> inactiveNodes {
         { false, false },
-        { false, true },
+        { false, false },
         { false, false }
     };
 
@@ -136,7 +136,7 @@ TEST (AcquisitionRecordingStatusTests,
         false,
         3,
         0,
-        1,
+        0,
         true);
 
     expectStatus (
@@ -146,8 +146,60 @@ TEST (AcquisitionRecordingStatusTests,
         false,
         3,
         0,
-        1,
+        0,
         true);
+}
+
+TEST (AcquisitionRecordingStatusTests,
+      RejectsLingeringWriterWithCallbacksActive)
+{
+    expectStatus (
+        deriveAcquisitionRecordingStatus (
+            true,
+            { { false, true } }),
+        std::nullopt,
+        true,
+        false,
+        1,
+        0,
+        1,
+        false);
+}
+
+TEST (AcquisitionRecordingStatusTests,
+      RejectsLingeringWriterWithCallbacksInactive)
+{
+    expectStatus (
+        deriveAcquisitionRecordingStatus (
+            false,
+            { { false, true } }),
+        std::nullopt,
+        false,
+        false,
+        1,
+        0,
+        1,
+        false);
+}
+
+TEST (AcquisitionRecordingStatusTests,
+      RejectsAnyLingeringWriterAcrossInactiveNodes)
+{
+    expectStatus (
+        deriveAcquisitionRecordingStatus (
+            true,
+            {
+                { false, false },
+                { false, true },
+                { false, false }
+            }),
+        std::nullopt,
+        true,
+        false,
+        3,
+        0,
+        1,
+        false);
 }
 
 TEST (AcquisitionRecordingStatusTests,

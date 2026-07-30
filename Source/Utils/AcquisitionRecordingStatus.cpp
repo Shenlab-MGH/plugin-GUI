@@ -37,8 +37,9 @@ AcquisitionRecordingStatus deriveAcquisitionRecordingStatus (
             ++status.writerThreadRunningCount;
     }
 
-    const bool noNodesAreActive =
-        status.activeRecordNodeCount == 0;
+    const bool noRecordingActivity =
+        status.activeRecordNodeCount == 0
+        && status.writerThreadRunningCount == 0;
     const bool everyNodeIsActive =
         status.recordNodeCount > 0
         && status.activeRecordNodeCount == status.recordNodeCount;
@@ -50,11 +51,11 @@ AcquisitionRecordingStatus deriveAcquisitionRecordingStatus (
         && everyNodeIsActive
         && everyWriterIsRunning;
     status.recordingConsistent =
-        noNodesAreActive || status.recordingActive;
+        noRecordingActivity || status.recordingActive;
 
     if (status.recordingActive)
         status.mode = AcquisitionRecordingMode::record;
-    else if (noNodesAreActive)
+    else if (noRecordingActivity)
         status.mode = callbacksAreActive
                         ? AcquisitionRecordingMode::acquire
                         : AcquisitionRecordingMode::idle;
