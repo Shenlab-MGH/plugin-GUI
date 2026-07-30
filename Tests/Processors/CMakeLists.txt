@@ -9,6 +9,7 @@ add_sources(${COMPONENT_NAME}_tests
 		RecordNodeRecordingStartTests.cpp
 		RecordNodeRecordingStopTests.cpp
 		RecordThreadCleanStopTests.cpp
+		ProcessorGraphRecordingStopTests.cpp
 		ProcessorGraphTests.cpp
 		ProcessorGraphAcquisitionReadinessTests.cpp
 		EventTests.cpp

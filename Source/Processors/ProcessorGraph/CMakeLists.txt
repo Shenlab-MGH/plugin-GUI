@@ -6,6 +6,7 @@ add_sources(open-ephys
 	ProcessorGraph.h
 	ProcessorGraphAcquisitionReadiness.cpp
 	ProcessorGraphAcquisitionReadiness.h
+	ProcessorGraphRecordingStop.h
 	ProcessorGraphActions.cpp
 	ProcessorGraphActions.h
 )

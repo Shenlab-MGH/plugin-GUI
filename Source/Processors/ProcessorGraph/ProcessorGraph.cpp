@@ -1978,6 +1978,52 @@ Array<RecordNode*> ProcessorGraph::getRecordNodes()
     return recordNodes;
 }
 
+ProcessorGraphRecordingStopResult
+ProcessorGraph::stopRecordNodesNonModalUntil (
+    std::chrono::steady_clock::time_point deadline)
+{
+    auto* messageManager =
+        MessageManager::getInstanceWithoutCreating();
+    jassert (
+        messageManager != nullptr
+        && messageManager->isThisTheMessageThread());
+
+    struct NonModalRecordingStopOwner
+    {
+        explicit NonModalRecordingStopOwner (ProcessorGraph& graph)
+            : recordNodes (graph.getRecordNodes())
+        {
+        }
+
+        std::size_t recordNodeCount() const
+        {
+            return static_cast<std::size_t> (recordNodes.size());
+        }
+
+        RecordNodeRecordingStopRequestResult
+        requestRecordingStopAt (std::size_t index)
+        {
+            return recordNodes[static_cast<int> (index)]
+                ->requestRecordingStopNonModal();
+        }
+
+        RecordNodeRecordingStopResult
+        waitForRecordingStopUntilAt (
+            std::size_t index,
+            const RecordNodeRecordingStopRequestResult& request,
+            std::chrono::steady_clock::time_point deadline)
+        {
+            return recordNodes[static_cast<int> (index)]
+                ->waitForRecordingStopUntil (request, deadline);
+        }
+
+        Array<RecordNode*> recordNodes;
+    };
+
+    NonModalRecordingStopOwner owner (*this);
+    return stopProcessorGraphRecordingUntil (owner, deadline);
+}
+
 MessageCenter* ProcessorGraph::getMessageCenter()
 {
     Node* node = getNodeForId (NodeID (MESSAGE_CENTER_ID));

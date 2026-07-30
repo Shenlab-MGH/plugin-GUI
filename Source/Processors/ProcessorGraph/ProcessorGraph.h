@@ -28,6 +28,7 @@
 #include "../../TestableExport.h"
 #include "../PluginManager/OpenEphysPlugin.h"
 #include "ProcessorGraphAcquisitionReadiness.h"
+#include "ProcessorGraphRecordingStop.h"
 class GenericProcessor;
 class GenericEditor;
 class RecordNode;
@@ -149,6 +150,17 @@ public:
 
     /* Returns a list of all RecordNodes in the signal chain*/
     Array<RecordNode*> getRecordNodes();
+
+    /** Cooperatively stop every RecordNode writer before one shared absolute
+        deadline, without GUI or global recording-status side effects.
+
+        This synchronous operation must run serialized on the JUCE message
+        thread. Do not mutate the graph or restart recording while it runs.
+        A timeout is non-forcing and can be retried with a later deadline.
+    */
+    ProcessorGraphRecordingStopResult
+    stopRecordNodesNonModalUntil (
+        std::chrono::steady_clock::time_point deadline);
 
     /* Returns a pointer to the AudioNode processor*/
     AudioNode* getAudioNode();
