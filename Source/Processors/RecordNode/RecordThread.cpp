@@ -27,6 +27,58 @@
 //#define EVERY_ENGINE for(int eng = 0; eng < m_engineArray.size(); eng++) m_engineArray[eng]
 #define EVERY_ENGINE m_engine;
 
+namespace
+{
+struct RecordThreadCleanStopOwner
+{
+    explicit RecordThreadCleanStopOwner (
+        RecordThread& recordThread)
+        : thread (recordThread)
+    {
+    }
+
+    bool isThreadRunning() const
+    {
+        return thread.isThreadRunning();
+    }
+
+    bool exitAlreadyRequested() const
+    {
+        return thread.threadShouldExit();
+    }
+
+    void signalThreadShouldExit()
+    {
+        thread.signalThreadShouldExit();
+    }
+
+    void notify()
+    {
+        thread.notify();
+    }
+
+    bool exitedCleanly() const
+    {
+        return thread.exitedCleanly();
+    }
+
+    std::chrono::steady_clock::time_point
+    now() const
+    {
+        return std::chrono::steady_clock::now();
+    }
+
+    bool waitForThreadToExit (
+        int milliseconds) const
+    {
+        return thread.waitForThreadToExit (
+            milliseconds);
+    }
+
+    RecordThread& thread;
+};
+} // namespace
+
 RecordThread::RecordThread (RecordNode* parentNode, RecordEngine* engine) : Thread ("Record Thread"),
                                                                             m_engine (engine),
                                                                             recordNode (parentNode),
@@ -89,6 +141,10 @@ void RecordThread::setFirstBlockFlag (bool state)
 
 void RecordThread::run()
 {
+    m_cleanExit.store (
+        false,
+        std::memory_order_release);
+
     const AudioBuffer<float>& dataBuffer = m_dataQueue->getContinuousDataBufferReference();
     const SynchronizedTimestampBuffer& ftsBuffer = m_dataQueue->getTimestampBufferReference();
 
@@ -113,7 +169,6 @@ void RecordThread::run()
     bool closeEarly = true;
 
     //1-Open Files
-    m_cleanExit = false;
     closeEarly = false;
     Array<int64> sampleNumbers;
 
@@ -149,8 +204,10 @@ void RecordThread::run()
 
         //5-Close files
         m_engine->closeFiles();
+        m_cleanExit.store (
+            true,
+            std::memory_order_release);
     }
-    m_cleanExit = true;
     m_receivedFirstBlock = false;
 
     //LOGC("RecordThread received ", spikesReceived, " spikes and wrote ", spikesWritten, ".");
@@ -274,11 +331,38 @@ void RecordThread::writeData (const AudioBuffer<float>& dataBuffer,
     }
 }
 
+void RecordThread::requestCleanStop()
+{
+    RecordThreadCleanStopOwner owner (*this);
+    requestRecordThreadCleanStop (owner);
+}
+
+RecordThreadCleanStopOutcome
+RecordThread::waitForCleanStopUntil (
+    std::chrono::steady_clock::time_point
+        deadline)
+{
+    RecordThreadCleanStopOwner owner (*this);
+    return waitForRecordThreadCleanStopUntil (
+        owner,
+        deadline);
+}
+
+bool RecordThread::exitedCleanly() const noexcept
+{
+    return m_cleanExit.load (
+        std::memory_order_acquire);
+}
+
 void RecordThread::forceCloseFiles()
 {
-    if (isThreadRunning() || m_cleanExit)
+    if (isThreadRunning()
+        || m_cleanExit.load (
+            std::memory_order_acquire))
         return;
 
     m_engine->closeFiles();
-    m_cleanExit = true;
+    m_cleanExit.store (
+        true,
+        std::memory_order_release);
 }

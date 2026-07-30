@@ -28,6 +28,7 @@
 #include "BinaryFormat/BinaryRecording.h"
 #include "DataQueue.h"
 #include "EventQueue.h"
+#include "RecordThreadCleanStop.h"
 #include <atomic>
 
 #define BLOCK_MAX_WRITE_SAMPLES 4096
@@ -65,6 +66,28 @@ public:
 
     /** Runs the thread */
     void run() override;
+
+    /** Requests a cooperative clean stop without waiting or forcing
+        termination.
+
+        Calls must be serialized by the owning message-thread workflow.
+        Do not restart this RecordThread concurrently with a request or wait.
+    */
+    void requestCleanStop();
+
+    /** Waits cooperatively until an absolute steady-clock deadline.
+
+        Calls must be serialized by the owning message-thread workflow, with
+        no concurrent restart. A timeout never forces termination and may be
+        retried with a later absolute deadline.
+    */
+    RecordThreadCleanStopOutcome
+    waitForCleanStopUntil (
+        std::chrono::steady_clock::time_point
+            deadline);
+
+    /** Returns whether the last thread exit completed file cleanup. */
+    bool exitedCleanly() const noexcept;
 
     /** Sets whether the first block is being written */
     void setFirstBlockFlag (bool state);
