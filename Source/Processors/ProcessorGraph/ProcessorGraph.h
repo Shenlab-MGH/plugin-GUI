@@ -27,6 +27,7 @@
 #include "../../../JuceLibraryCode/JuceHeader.h"
 #include "../../TestableExport.h"
 #include "../PluginManager/OpenEphysPlugin.h"
+#include "ProcessorGraphAcquisitionReadiness.h"
 class GenericProcessor;
 class GenericEditor;
 class RecordNode;
@@ -129,6 +130,10 @@ public:
 
     /* Checks if all processors are enabled*/
     bool isReady();
+
+    /** Copies acquisition-readiness issues without presenting them. */
+    ProcessorGraphAcquisitionReadiness
+    inspectAcquisitionReadiness();
 
     /* Creates connections in signal chain*/
     void updateConnections();

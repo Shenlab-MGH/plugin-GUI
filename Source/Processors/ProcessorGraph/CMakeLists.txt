@@ -4,6 +4,8 @@
 add_sources(open-ephys 
 	ProcessorGraph.cpp
 	ProcessorGraph.h
+	ProcessorGraphAcquisitionReadiness.cpp
+	ProcessorGraphAcquisitionReadiness.h
 	ProcessorGraphActions.cpp
 	ProcessorGraphActions.h
 )

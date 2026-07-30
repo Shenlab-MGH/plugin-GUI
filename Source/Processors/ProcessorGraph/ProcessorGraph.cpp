@@ -44,8 +44,240 @@
 
 #include "../../AccessClass.h"
 #include "../../Audio/AudioComponent.h"
+#include "../../CoreServices.h"
+#include "../../UI/ControlPanel.h"
 #include "../PluginManager/PluginManager.h"
 #include "../ProcessorManager/ProcessorManager.h"
+
+namespace
+{
+struct LegacyAcquisitionReadinessPresentationPort
+{
+    explicit LegacyAcquisitionReadinessPresentationPort (
+        ControlPanel& controlPanel)
+        : controlPanel (controlPanel)
+    {
+    }
+
+    void playAlertSound()
+    {
+        AccessClass::getUIComponent()
+            ->getLookAndFeel()
+            .playAlertSound();
+    }
+
+    void showBubble (const String& message)
+    {
+        AccessClass::getUIComponent()
+            ->showBubbleMessage (
+                controlPanel.getPlayButton(),
+                message);
+    }
+
+    void showModalAsync (const String& title,
+                         const String& message)
+    {
+        AlertWindow::showMessageBoxAsync (
+            AlertWindow::WarningIcon,
+            title,
+            message);
+    }
+
+    void sendStatusMessage (const String& message)
+    {
+        CoreServices::sendStatusMessage (message);
+    }
+
+    void disableCallbacks()
+    {
+        controlPanel.disableCallbacks();
+    }
+
+    void logCritical (const String& message)
+    {
+        LOGC (message);
+    }
+
+    ControlPanel& controlPanel;
+};
+
+class ProcessorGraphAcquisitionReadinessOwner
+{
+public:
+    explicit ProcessorGraphAcquisitionReadinessOwner (
+        ProcessorGraph& graph)
+    {
+        nodes.reserve (
+            static_cast<std::size_t> (
+                graph.getNumNodes()));
+        for (int index = 0;
+             index < graph.getNumNodes();
+             ++index)
+        {
+            nodes.push_back (
+                graph.getNode (index));
+        }
+        copiedBases.resize (nodes.size());
+        parameters.resize (nodes.size());
+    }
+
+    std::size_t processorCount() const
+    {
+        return static_cast<std::size_t> (
+            nodes.size());
+    }
+
+    std::size_t nodeCount() const
+    {
+        return static_cast<std::size_t> (
+            nodes.size());
+    }
+
+    ProcessorGraphAcquisitionReadinessProcessor
+    readBase (std::size_t index)
+    {
+        auto* node = nodes[index];
+        const auto outputNode =
+            node->nodeID
+            == AudioProcessorGraph::NodeID (
+                ProcessorGraph::OUTPUT_NODE_ID);
+        ProcessorGraphAcquisitionReadinessProcessor
+            copied;
+        copied.name =
+            node->getProcessor()->getName();
+        copied.outputNode = outputNode;
+
+        if (outputNode)
+        {
+            copied.id =
+                ProcessorGraph::OUTPUT_NODE_ID;
+            copiedBases[index] = copied;
+            return copied;
+        }
+
+        auto* processor =
+            static_cast<GenericProcessor*> (
+                node->getProcessor());
+        copied.id = processor->getNodeId();
+        copiedBases[index] = copied;
+        return copied;
+    }
+
+    std::size_t parameterCount (
+        std::size_t index)
+    {
+        if (copiedBases[index].outputNode)
+            return 0;
+
+        auto& copiedParameters =
+            parameters[index];
+        copiedParameters.clear();
+        for (auto* parameter :
+             processorAt (index).getParameters())
+        {
+            copiedParameters.push_back (
+                parameter);
+        }
+        return copiedParameters.size();
+    }
+
+    bool readParameterValid (
+        std::size_t processorIndex,
+        std::size_t parameterIndex)
+    {
+        return parameterAt (
+                   processorIndex,
+                   parameterIndex)
+            .isValid();
+    }
+
+    String readParameterKey (
+        std::size_t processorIndex,
+        std::size_t parameterIndex)
+    {
+        return String (
+            parameterAt (
+                processorIndex,
+                parameterIndex)
+                .getKey());
+    }
+
+    String readParameterDisplayName (
+        std::size_t processorIndex,
+        std::size_t parameterIndex)
+    {
+        return parameterAt (
+                   processorIndex,
+                   parameterIndex)
+            .getDisplayName();
+    }
+
+    bool readNwbUser (std::size_t index)
+    {
+        auto* node = nodes[index];
+        if (node->nodeID
+            == AudioProcessorGraph::NodeID (
+                ProcessorGraph::OUTPUT_NODE_ID))
+            return false;
+
+        auto* processor =
+            static_cast<GenericProcessor*> (
+                node->getProcessor());
+        const auto& name =
+            copiedBases[index].name;
+        if (name == "File Reader")
+        {
+            return File (
+                       static_cast<FileReader*> (
+                           processor)
+                           ->getFile())
+                       .getFileExtension()
+                   == ".nwb";
+        }
+        if (name == "Record Node")
+        {
+            return static_cast<RecordNode*> (
+                       processor)
+                       ->getEngineId()
+                   == "NWB2";
+        }
+        return false;
+    }
+
+    bool readEnabled (std::size_t index)
+    {
+        return processorAt (index).isEnabled;
+    }
+
+    bool readReady (std::size_t index)
+    {
+        return processorAt (index).isReady();
+    }
+
+private:
+    GenericProcessor& processorAt (
+        std::size_t index)
+    {
+        return *static_cast<GenericProcessor*> (
+            nodes[index]->getProcessor());
+    }
+
+    Parameter& parameterAt (
+        std::size_t processorIndex,
+        std::size_t parameterIndex)
+    {
+        return *parameters[processorIndex]
+                           [parameterIndex];
+    }
+
+    std::vector<ProcessorGraph::Node*> nodes;
+    std::vector<
+        ProcessorGraphAcquisitionReadinessProcessor>
+        copiedBases;
+    std::vector<std::vector<Parameter*>>
+        parameters;
+};
+} // namespace
 
 ProcessorGraph::ProcessorGraph (bool isConsoleApp_) : isConsoleApp (isConsoleApp_),
                                                       currentNodeId (100),
@@ -1608,150 +1840,39 @@ void ProcessorGraph::removeProcessor (GenericProcessor* processor)
     node.reset();
 }
 
+ProcessorGraphAcquisitionReadiness
+ProcessorGraph::inspectAcquisitionReadiness()
+{
+    ProcessorGraphAcquisitionReadinessOwner owner (
+        *this);
+    return inspectProcessorGraphAcquisitionReadinessStaged (
+        owner);
+}
+
 bool ProcessorGraph::isReady()
 {
-    LOGD ("ProcessorGraph checking for all valid parameters...");
-
-    auto* controlPanel = AccessClass::getControlPanel();
-
-    //Iterate through all the active nodes in the signal chain
-    for (int i = 0; i < getNumNodes(); i++)
-    {
-        Node* node = getNode (i);
-
-        if (node->nodeID != NodeID (OUTPUT_NODE_ID))
+    auto result = inspectAcquisitionReadiness();
+    return presentProcessorGraphAcquisitionReadinessWithLazyOwner (
+        result,
+        isConsoleApp
+            ? ProcessorGraphAcquisitionReadinessPresentationPolicy::
+                  legacyHeadless
+            : ProcessorGraphAcquisitionReadinessPresentationPolicy::
+                  legacyInteractive,
+        []
         {
-            GenericProcessor* p = (GenericProcessor*) node->getProcessor();
-
-            for (auto param : p->getParameters())
+            auto* controlPanel =
+                AccessClass::getControlPanel();
+            if (controlPanel == nullptr)
             {
-                if (! param->isValid())
-                {
-                    if (! isConsoleApp)
-                    {
-                        AccessClass::getUIComponent()->getLookAndFeel().playAlertSound();
-
-                        String msg = p->getName() + " (" + String (p->getNodeId()) + ") - "
-                                     + param->getDisplayName() + " is invalid and blocking acquisition.";
-
-                        AccessClass::getUIComponent()->showBubbleMessage (controlPanel->getPlayButton(), msg);
-                    }
-                    CoreServices::sendStatusMessage ("Parameter " + param->getKey() + " is not valid.");
-                    controlPanel->disableCallbacks();
-                    return false;
-                }
-            }
-        }
-    }
-
-    LOGD ("All parameters are valid.");
-
-    LOGD ("ProcessorGraph checking minimum number of nodes...");
-
-    if (getNumNodes() < 4)
-    {
-        if (! isConsoleApp)
-        {
-            AccessClass::getUIComponent()->getLookAndFeel().playAlertSound();
-
-            AccessClass::getUIComponent()->showBubbleMessage (controlPanel->getPlayButton(),
-                                                              "Add a source processor to the signal chain"
-                                                              " before starting acquisition");
-        }
-        CoreServices::sendStatusMessage ("Not enough processors in signal chain to acquire data.");
-        controlPanel->disableCallbacks();
-        return false;
-    }
-
-    LOGD ("Checking that all processors are enabled...");
-
-    int NWBCounter = 0;
-
-    StringArray disabledProcessors;
-
-    for (int i = 0; i < getNumNodes(); i++)
-    {
-        Node* node = getNode (i);
-
-        String name = node->getProcessor()->getName();
-
-        // 1. Check that NWB resources are only used by a single processor.
-        if (name == "File Reader")
-        {
-            FileReader* fr = static_cast<FileReader*> (node->getProcessor());
-
-            if (File (fr->getFile()).getFileExtension() == ".nwb")
-                NWBCounter += 1;
-        }
-        else if (name == "Record Node")
-        {
-            RecordNode* rn = static_cast<RecordNode*> (node->getProcessor());
-
-            if (rn->getEngineId() == "NWB2")
-                NWBCounter += 1;
-        }
-
-        if (NWBCounter > 1)
-        {
-            controlPanel->disableCallbacks();
-            if (! isConsoleApp)
-            {
-                AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon,
-                                                  "WARNING",
-                                                  "Open Ephys currently does not support multiple processors using NWB format. Please modify the signal chain accordingly to proceed with acquisition.");
+                return std::unique_ptr<
+                    LegacyAcquisitionReadinessPresentationPort> {};
             }
 
-            LOGC ("Multiple processors using NWB format is not supported. Please modify the signal chain accordingly to proceed with acquisition.");
-
-            return false;
-        }
-
-        // 2. Check that all processors are enabled and ready for acquisition.
-        if (node->nodeID != NodeID (OUTPUT_NODE_ID))
-        {
-            GenericProcessor* p = (GenericProcessor*) node->getProcessor();
-
-            const String nameAndId = p->getName() + " (" + String (p->getNodeId()) + ")";
-
-            if (! p->isEnabled)
-            {
-                disabledProcessors.add (nameAndId);
-                LOGC (nameAndId, " is disabled and blocking acquisition.");
-            }
-
-            if (! p->isReady())
-            {
-                if (! isConsoleApp)
-                {
-                    AccessClass::getUIComponent()->showBubbleMessage (controlPanel->getPlayButton(),
-                                                                      nameAndId + " is not ready and blocking acquisition");
-                }
-                CoreServices::sendStatusMessage (nameAndId + " is not ready and blocking acquisition");
-                controlPanel->disableCallbacks();
-                return false;
-            }
-        }
-    }
-
-    if (disabledProcessors.size() > 0)
-    {
-        if (! isConsoleApp)
-        {
-            String disabledProcessorList = disabledProcessors.joinIntoString ("\n");
-
-            AccessClass::getUIComponent()->getLookAndFeel().playAlertSound();
-
-            String msg = "The following processors are disabled and blocking acquisition:\n\n"
-                         + disabledProcessorList;
-
-            AccessClass::getUIComponent()->showBubbleMessage (controlPanel->getPlayButton(), msg);
-        }
-
-        controlPanel->disableCallbacks();
-        return false;
-    }
-
-    return true;
+            return std::make_unique<
+                LegacyAcquisitionReadinessPresentationPort> (
+                *controlPanel);
+        });
 }
 
 void ProcessorGraph::startAcquisition()
