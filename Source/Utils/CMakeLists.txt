@@ -4,6 +4,8 @@
 add_sources(
   open-ephys
   OpenEphysHttpServer.h
+  AcquisitionRecordingStatus.h
+  AcquisitionRecordingStatus.cpp
   ControlCapability.h
   ControlCapability.cpp
   ControlCapabilityJson.h
