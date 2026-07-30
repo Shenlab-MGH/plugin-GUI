@@ -1443,12 +1443,39 @@ TEST_F (LfpStableChannelIdentityBindingTests,
             target->getChannelNumber()));
 
     target->setCanBeInverted (false);
-    MessageManager::getInstance()
-        ->runDispatchLoopUntil (1);
-    auto* invert =
-        findIdentityTestChildByIdSuffix (
-            *info,
-            ".invert_signal");
+    Component* invert = nullptr;
+    for (int attempt = 0;
+         attempt < 100
+             && invert == nullptr;
+         ++attempt)
+    {
+        auto* candidate =
+            findIdentityTestChildByIdSuffix (
+                *info,
+                ".invert_signal");
+        if (candidate != nullptr)
+        {
+            if (auto* candidateHandler =
+                    candidate
+                        ->getAccessibilityHandler())
+            {
+                if (auto* value =
+                        candidateHandler
+                            ->getValueInterface())
+                {
+                    if (value
+                            ->getCurrentValueAsString()
+                        == "Normal; inversion unavailable")
+                    {
+                        invert = candidate;
+                        break;
+                    }
+                }
+            }
+        }
+        MessageManager::getInstance()
+            ->runDispatchLoopUntil (1);
+    }
     ASSERT_NE (invert, nullptr);
     auto* handler =
         invert->getAccessibilityHandler();
