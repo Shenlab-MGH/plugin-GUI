@@ -171,6 +171,60 @@ struct RecordNode::NonModalRecordingStartOwner
     RecordNode& node;
 };
 
+struct RecordNode::NonModalRecordingStopOwner
+{
+    explicit NonModalRecordingStopOwner (
+        RecordNode& recordNode)
+        : node (recordNode)
+    {
+    }
+
+    int nodeId() const
+    {
+        return node.getNodeId();
+    }
+
+    bool isRecordingActive() const
+    {
+        return node.isRecording;
+    }
+
+    void markRecordingInactive()
+    {
+        node.isRecording = false;
+    }
+
+    void markHasRecorded()
+    {
+        node.hasRecorded = true;
+    }
+
+    void advanceRecordingIndex()
+    {
+        ++node.recordingNumber;
+    }
+
+    bool writerAvailable() const
+    {
+        return node.recordThread != nullptr;
+    }
+
+    void requestWriterCleanStop()
+    {
+        node.recordThread->requestCleanStop();
+    }
+
+    RecordThreadCleanStopOutcome
+    waitForWriterCleanStopUntil (
+        std::chrono::steady_clock::time_point deadline)
+    {
+        return node.recordThread
+            ->waitForCleanStopUntil (deadline);
+    }
+
+    RecordNode& node;
+};
+
 EventMonitor::EventMonitor()
     : receivedEvents (0),
       receivedSpikes (0),
@@ -1064,6 +1118,42 @@ RecordNode::startRecordingNonModal()
     }
 
     return result;
+}
+
+RecordNodeRecordingStopRequestResult
+RecordNode::requestRecordingStopNonModal()
+{
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    jassert (
+        messageManager != nullptr
+        && messageManager
+               ->isThisTheMessageThread());
+
+    NonModalRecordingStopOwner owner (*this);
+    return requestRecordNodeRecordingStopFromOwner (
+        owner);
+}
+
+RecordNodeRecordingStopResult
+RecordNode::waitForRecordingStopUntil (
+    const RecordNodeRecordingStopRequestResult& request,
+    std::chrono::steady_clock::time_point deadline)
+{
+    auto* messageManager =
+        MessageManager::
+            getInstanceWithoutCreating();
+    jassert (
+        messageManager != nullptr
+        && messageManager
+               ->isThisTheMessageThread());
+
+    NonModalRecordingStopOwner owner (*this);
+    return waitForRecordNodeRecordingStopUntil (
+        request,
+        owner,
+        deadline);
 }
 
 // called by GenericProcessor::setRecording() and CoreServices::setRecordingStatus()

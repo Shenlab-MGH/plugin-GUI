@@ -38,6 +38,7 @@
 #include "DataQueue.h"
 #include "RecordNodeEditor.h"
 #include "RecordNodeRecordingStart.h"
+#include "RecordNodeRecordingStop.h"
 #include "RecordThread.h"
 
 #include "DiskMonitor/DiskSpaceChecker.h"
@@ -157,6 +158,25 @@ public:
     */
     RecordNodeRecordingStartResult
     startRecordingNonModal();
+
+    /** Starts a two-phase, non-forcing writer stop without GUI or global
+        recording-status side effects.
+
+        Both this request and waitForRecordingStopUntil() must run serialized
+        on the JUCE message thread. The returned token owns only values and
+        may be used for a later wait. It never forces a writer to terminate.
+    */
+    RecordNodeRecordingStopRequestResult
+    requestRecordingStopNonModal();
+
+    /** Waits for the previously requested cooperative stop until an absolute
+        steady-clock deadline. A timeout leaves the writer running and can be
+        retried with a later deadline; do not concurrently restart the writer.
+    */
+    RecordNodeRecordingStopResult
+    waitForRecordingStopUntil (
+        const RecordNodeRecordingStopRequestResult& request,
+        std::chrono::steady_clock::time_point deadline);
 
     /* Called at end of recording; stops the RecordThread*/
     void stopRecording() override;
@@ -281,6 +301,7 @@ public:
 
 private:
     struct NonModalRecordingStartOwner;
+    struct NonModalRecordingStopOwner;
 
     void prepareRecordingStart();
     void persistRecordingSettings (
