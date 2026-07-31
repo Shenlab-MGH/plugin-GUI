@@ -8,6 +8,7 @@ add_sources(${COMPONENT_NAME}_tests
         MessageThreadCallTests.cpp
         RecordingOptionsControlTests.cpp
         StatusControlTests.cpp
+        StatusHttpAdapterTests.cpp
         StatusRequestParserTests.cpp
 )
 target_include_directories(${COMPONENT_NAME}_tests PRIVATE "${SOURCE_DIRECTORY}")

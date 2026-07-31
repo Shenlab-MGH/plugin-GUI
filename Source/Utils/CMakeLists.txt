@@ -21,6 +21,8 @@ add_sources(
   RecordingOptionsControl.h
   StatusControl.h
   StatusControl.cpp
+  StatusHttpAdapter.h
+  StatusHttpAdapter.cpp
   ListSliceParser.h
   ListSliceParser.cpp
   BroadcastParser.h
