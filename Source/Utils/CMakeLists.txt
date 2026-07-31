@@ -19,6 +19,8 @@ add_sources(
   ControlStatusJson.cpp
   MessageThreadCall.h
   RecordingOptionsControl.h
+  StatusControl.h
+  StatusControl.cpp
   ListSliceParser.h
   ListSliceParser.cpp
   BroadcastParser.h

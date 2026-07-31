@@ -150,6 +150,12 @@ std::vector<std::uint64_t> intersectGenerations (
 }
 } // namespace
 
+bool isValidAcquisitionRecordingControlSnapshot (
+    const Snapshot& snapshot)
+{
+    return hasValidCopiedNodeFacts (snapshot);
+}
+
 const char* acquisitionRecordingControlErrorCode (Error error)
 {
     switch (error)

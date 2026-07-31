@@ -67,6 +67,13 @@ struct AcquisitionRecordingControlSnapshot
     bool processorGraphReady = false;
 };
 
+/**
+    Validates that the copied per-node facts exactly reproduce the aggregate
+    status and that every node generation is non-zero and unique.
+*/
+TESTABLE bool isValidAcquisitionRecordingControlSnapshot (
+    const AcquisitionRecordingControlSnapshot& snapshot);
+
 struct AcquisitionRecordingReadinessResult
 {
     std::optional<AcquisitionRecordingControlError> error;
