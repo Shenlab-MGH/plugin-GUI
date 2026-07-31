@@ -100,8 +100,20 @@ class LoopbackStatusServer
 
 public:
     explicit LoopbackStatusServer (StatusHttpHandlers handlers)
+        : LoopbackStatusServer (
+            [handlers = std::move (handlers)] (
+                httplib::Server& server) mutable
+            {
+                registerStatusHttpRoutes (
+                    server, std::move (handlers));
+            })
     {
-        registerStatusHttpRoutes (server, std::move (handlers));
+    }
+
+    explicit LoopbackStatusServer (
+        std::function<void (httplib::Server&)> registerRoutes)
+    {
+        registerRoutes (server);
         port = server.bind_to_any_port ("127.0.0.1");
         if (port <= 0)
             throw std::runtime_error (
@@ -234,6 +246,63 @@ void expectInvalidStatusRequestBody (const std::string& requestBody)
 }
 
 } // namespace
+
+TEST (StatusHttpAdapterTests,
+      GetOnlyRegistrarPreservesLegacyPutAndExactRoutes)
+{
+    std::atomic<int> getCount { 0 };
+    std::atomic<int> legacyPutCount { 0 };
+    LoopbackStatusServer server (
+        [&] (httplib::Server& httpServer)
+        {
+            registerStatusHttpGetRoute (
+                httpServer,
+                [&]
+                {
+                    ++getCount;
+                    return getSuccess (Mode::acquire);
+                });
+
+            httpServer.Put (
+                "/api/status",
+                [&] (const httplib::Request&,
+                     httplib::Response& response)
+                {
+                    ++legacyPutCount;
+                    response.status = 202;
+                    response.set_content (
+                        "legacy-put-sentinel", "text/plain");
+                });
+        });
+
+    auto client = server.client();
+    const auto getResponse = client.Get ("/api/status");
+    const auto putResponse = client.Put (
+        "/api/status", "legacy-body", "text/plain");
+    const auto postResponse = client.Post (
+        "/api/status", "{}", "application/json");
+    const auto trailingSlashResponse =
+        client.Get ("/api/status/");
+    const auto suffixResponse =
+        client.Get ("/api/status/extra");
+
+    ASSERT_TRUE (getResponse);
+    EXPECT_EQ (getResponse->status, 200);
+    EXPECT_EQ (parseBody (getResponse)["mode"], "ACQUIRE");
+    EXPECT_EQ (getCount.load(), 1);
+
+    ASSERT_TRUE (putResponse);
+    EXPECT_EQ (putResponse->status, 202);
+    EXPECT_EQ (putResponse->body, "legacy-put-sentinel");
+    EXPECT_EQ (legacyPutCount.load(), 1);
+
+    ASSERT_TRUE (postResponse);
+    EXPECT_EQ (postResponse->status, 404);
+    ASSERT_TRUE (trailingSlashResponse);
+    EXPECT_EQ (trailingSlashResponse->status, 404);
+    ASSERT_TRUE (suffixResponse);
+    EXPECT_EQ (suffixResponse->status, 404);
+}
 
 TEST (StatusHttpAdapterTests,
       GetReturnsTheExactStatusJsonOverLoopback)

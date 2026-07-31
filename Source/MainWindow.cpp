@@ -285,7 +285,8 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
         }
     }
 
-    http_server_thread = std::make_unique<OpenEphysHttpServer> (processorGraph.get());
+    http_server_thread = std::make_unique<OpenEphysHttpServer> (
+        *audioComponent, *processorGraph);
 
     if (shouldEnableHttpServer)
     {
@@ -313,6 +314,12 @@ MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleA
 
 MainWindow::~MainWindow()
 {
+    if (http_server_thread)
+    {
+        http_server_thread->stop();
+        http_server_thread.reset();
+    }
+
     if (audioComponent->callbacksAreActive())
     {
         audioComponent->endCallbacks();
@@ -343,11 +350,6 @@ MainWindow::~MainWindow()
     File recoveryConfig = configsDir.getChildFile ("recoveryConfig.xml");
     saveProcessorGraph (lastConfig);
     saveProcessorGraph (recoveryConfig);
-
-    if (http_server_thread)
-    {
-        disableHttpServer();
-    }
 }
 
 void MainWindow::enableHttpServer()

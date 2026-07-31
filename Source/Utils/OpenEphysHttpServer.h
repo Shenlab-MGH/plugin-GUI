@@ -37,9 +37,11 @@
 #include "../MainWindow.h"
 #include "../UI/ProcessorList.h"
 
+#include "AcquisitionRecordingRuntime.h"
 #include "ControlCapabilityJson.h"
 #include "ControlRead.h"
 #include "RecordingOptionsControl.h"
+#include "StatusHttpAdapter.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
@@ -171,8 +173,13 @@ inline void setControlErrorResponse (httplib::Response& response,
 class OpenEphysHttpServer : juce::Thread
 {
 public:
-    explicit OpenEphysHttpServer (ProcessorGraph* graph) : graph_ (graph),
-                                                           juce::Thread ("HttpServer") {}
+    OpenEphysHttpServer (AudioComponent& audio,
+                         ProcessorGraph& graph)
+        : juce::Thread ("HttpServer"),
+          audio_ (audio),
+          graph_ (&graph)
+    {
+    }
 
     void run() override
     {
@@ -190,11 +197,18 @@ public:
             ret["info"] = xmlElement.get()->toString().toStdString();
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/status", [this] (const httplib::Request&, httplib::Response& res)
-                   {
-            json ret;
-            status_to_json(graph_, &ret);
-            res.set_content(ret.dump(), "application/json"); });
+        registerStatusHttpGetRoute (
+            *svr_,
+            [this]
+            {
+                return handleStatusGet (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this]
+                    {
+                        return captureAcquisitionRecordingControlSnapshot (
+                            audio_, *graph_);
+                    });
+            });
 
         svr_->Put ("/api/status", [this] (const httplib::Request& req, httplib::Response& res)
                    {
@@ -1451,6 +1465,7 @@ public:
 private:
     std::unique_ptr<httplib::Server> svr_;
     MainWindow* main_;
+    AudioComponent& audio_;
     ProcessorGraph* graph_;
 
     var json_to_var (const json& value)

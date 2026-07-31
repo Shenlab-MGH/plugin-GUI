@@ -175,13 +175,13 @@ void handleRequest (
 }
 } // namespace
 
-void registerStatusHttpRoutes (
+void registerStatusHttpGetRoute (
     httplib::Server& server,
-    StatusHttpHandlers handlers)
+    std::function<StatusControlResult()> get)
 {
     server.Get (
         "/api/status",
-        [get = std::move (handlers.get)] (
+        [get = std::move (get)] (
             const httplib::Request&,
             httplib::Response& response)
         {
@@ -194,6 +194,14 @@ void registerStatusHttpRoutes (
                 },
                 statusGetResultToJson);
         });
+}
+
+void registerStatusHttpRoutes (
+    httplib::Server& server,
+    StatusHttpHandlers handlers)
+{
+    registerStatusHttpGetRoute (
+        server, std::move (handlers.get));
 
     server.Put (
         "/api/status",

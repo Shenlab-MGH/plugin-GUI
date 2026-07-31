@@ -36,6 +36,11 @@ struct StatusHttpHandlers
     std::function<StatusControlResult (StringRef)> put;
 };
 
+/** Registers the GET transport adapter for the shared /api/status contract. */
+TESTABLE void registerStatusHttpGetRoute (
+    httplib::Server& server,
+    std::function<StatusControlResult()> get);
+
 /** Registers the transport adapter for the shared /api/status contract. */
 TESTABLE void registerStatusHttpRoutes (
     httplib::Server& server,
