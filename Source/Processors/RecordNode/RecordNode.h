@@ -25,7 +25,9 @@
 #define RECORDNODE_H_DEFINED
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <map>
 #include <math.h>
 #include <memory>
@@ -52,6 +54,14 @@
 #define NPX_BIT_VOLTS 0.195f
 #define MAX_BUFFER_SIZE 40960
 #define CHANNELS_PER_THREAD 384
+
+namespace RecordNodeRuntimeGenerationDetail
+{
+/** Claims one non-zero generation, leaving zero as a permanent exhausted sentinel. */
+TESTABLE bool tryClaim (
+    std::atomic<std::uint64_t>& nextGeneration,
+    std::uint64_t& claimedGeneration) noexcept;
+} // namespace RecordNodeRuntimeGenerationDetail
 
 /**
 	Class used internally by the RecordNode to count the number of incoming events
@@ -96,6 +106,9 @@ class TESTABLE RecordNode : public GenericProcessor,
                             public SynchronizingProcessor,
                             public Timer
 {
+private:
+    const std::uint64_t runtimeGeneration;
+
 public:
     /** Constructor
       - Creates: DataQueue, EventQueue, SpikeQueue, Synchronizer,
@@ -228,6 +241,15 @@ public:
 
     /** Returns true if this Record Node is writing data*/
     bool getRecordingStatus() const;
+
+    /** Returns this instance's process-lifetime runtime identity. */
+    std::uint64_t getRuntimeGeneration() const noexcept;
+
+    /** Returns true while this Record Node's writer thread is running. */
+    bool isWriterThreadRunning() const;
+
+    /** Returns true when the effective recording path is valid. */
+    bool isRecordingPathValid();
 
     /** Called by handleEvent() */
     void writeSpike (const Spike* spike, const SpikeChannel* spikeElectrode);

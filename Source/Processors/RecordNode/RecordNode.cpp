@@ -34,12 +34,64 @@
 #include "../Settings/DataStream.h"
 #include "../Settings/DeviceInfo.h"
 
+#include <exception>
+#include <limits>
+
 using namespace std::chrono;
 
 #define CONTINUOUS_CHANNELS_ON_BY_DEFAULT true
 #define RECEIVED_SOFTWARE_TIME (event.getVelocity() == 136)
 
 bool RecordNode::overrideTimestampWarningShown = false;
+
+bool RecordNodeRuntimeGenerationDetail::tryClaim (
+    std::atomic<std::uint64_t>& nextGeneration,
+    std::uint64_t& claimedGeneration) noexcept
+{
+    auto observed = nextGeneration.load (
+        std::memory_order_relaxed);
+    for (;;)
+    {
+        if (observed == 0)
+            return false;
+
+        constexpr auto maximumGeneration =
+            std::numeric_limits<
+                std::uint64_t>::max();
+        const auto desired =
+            observed == maximumGeneration
+                ? 0
+                : observed + 1;
+        if (nextGeneration.compare_exchange_weak (
+                observed,
+                desired,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed))
+        {
+            claimedGeneration = observed;
+            return true;
+        }
+    }
+}
+
+namespace
+{
+std::uint64_t nextRecordNodeRuntimeGeneration()
+{
+    static std::atomic<std::uint64_t>
+        nextGeneration { 1 };
+    std::uint64_t generation = 0;
+    if (! RecordNodeRuntimeGenerationDetail::
+              tryClaim (
+                  nextGeneration,
+                  generation))
+    {
+        jassertfalse;
+        std::terminate();
+    }
+    return generation;
+}
+} // namespace
 
 struct RecordNode::NonModalRecordingStartOwner
 {
@@ -252,6 +304,8 @@ void EventMonitor::displayStatus()
 
 RecordNode::RecordNode()
     : GenericProcessor ("Record Node"),
+      runtimeGeneration (
+          nextRecordNodeRuntimeGeneration()),
       newDirectoryNeeded (true),
       setFirstBlock (false),
       samplesWritten (0),
@@ -1212,6 +1266,33 @@ void RecordNode::stopRecording()
 bool RecordNode::getRecordingStatus() const
 {
     return isRecording;
+}
+
+std::uint64_t RecordNode::getRuntimeGeneration() const noexcept
+{
+    return runtimeGeneration;
+}
+
+bool RecordNode::isWriterThreadRunning() const
+{
+    return recordThread != nullptr
+           && recordThread->isThreadRunning();
+}
+
+bool RecordNode::isRecordingPathValid()
+{
+    auto* pathParameter =
+        getParameter ("directory");
+    if (pathParameter == nullptr)
+        return true;
+
+    const bool defaultDirectoryMissing =
+        pathParameter->getValue().toString()
+            == "None"
+        && ! CoreServices::getRecordingParentDirectory()
+                  .exists();
+    return pathParameter->isValid()
+           && ! defaultDirectoryMissing;
 }
 
 void RecordNode::setRecordEvents (bool recordEvents)

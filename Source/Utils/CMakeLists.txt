@@ -7,6 +7,8 @@ add_sources(
   AcquisitionRecordingRequest.h
   AcquisitionRecordingControl.h
   AcquisitionRecordingControl.cpp
+  AcquisitionRecordingRuntime.h
+  AcquisitionRecordingRuntime.cpp
   AcquisitionRecordingStatus.h
   AcquisitionRecordingStatus.cpp
   ControlCapability.h

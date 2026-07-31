@@ -1346,13 +1346,10 @@ bool ProcessorGraph::allRecordNodeDirectoriesAreValid()
     {
         if (p->isRecordNode())
         {
-            auto* pathParam = p->getParameter ("directory");
-            if (pathParam != nullptr)
-            {
-                bool isDefaultAndInvalid = (pathParam->getValue().toString() == "None" && ! CoreServices::getRecordingParentDirectory().exists());
-                if (! pathParam->isValid() || isDefaultAndInvalid)
-                    return false;
-            }
+            auto* recordNode =
+                static_cast<RecordNode*> (p);
+            if (! recordNode->isRecordingPathValid())
+                return false;
         }
     }
     return true;
