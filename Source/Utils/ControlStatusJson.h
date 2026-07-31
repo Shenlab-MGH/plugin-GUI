@@ -26,9 +26,12 @@
 
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "AcquisitionRecordingRequest.h"
+#include "json.hpp"
 #include "../TestableExport.h"
 
 #include <optional>
+
+struct StatusControlResult;
 
 struct StatusRequestParseResult
 {
@@ -38,6 +41,12 @@ struct StatusRequestParseResult
 };
 
 TESTABLE StatusRequestParseResult parseStatusRequest (StringRef requestBody);
+
+TESTABLE nlohmann::json statusGetResultToJson (
+    const StatusControlResult& result);
+
+TESTABLE nlohmann::json statusPutResultToJson (
+    const StatusControlResult& result);
 
 struct RecordingOptionsUpdate
 {

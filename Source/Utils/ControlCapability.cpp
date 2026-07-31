@@ -24,17 +24,40 @@
 #include "ControlCapability.h"
 #include <algorithm>
 
+namespace
+{
+const StringArray statusGetResponseFields {
+    "ok", "capabilities", "mode", "acquisition_active",
+    "recording_active", "record_node_count",
+    "active_record_node_count", "writer_thread_running_count",
+    "recording_consistent", "record_nodes", "audio_device_available",
+    "audio_sample_rate", "processor_graph_ready"
+};
+
+const StringArray statusPutResponseFields {
+    "ok", "capabilities", "mode", "acquisition_active",
+    "recording_active", "record_node_count",
+    "active_record_node_count", "writer_thread_running_count",
+    "recording_consistent", "record_nodes", "audio_device_available",
+    "audio_sample_rate", "processor_graph_ready", "requested_mode",
+    "changed", "unsynchronized_confirmed"
+};
+} // namespace
+
 const std::vector<ControlCapability>& getCoreControlCapabilities()
 {
     static const std::vector<ControlCapability> capabilities {
         { "oe.control.acquisition", "Acquisition", "Start or stop data acquisition.",
           ControlCapabilityKind::toggle, "oe.control.acquisition",
-          { { "read", "GET", "/api/status", {}, { "mode" } },
-            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } } },
+          { { "read", "GET", "/api/status", {}, statusGetResponseFields },
+            { "set", "PUT", "/api/status", { "mode" },
+              statusPutResponseFields } } },
         { "oe.control.recording", "Recording", "Start or stop writing data to disk.",
           ControlCapabilityKind::toggle, "oe.control.recording",
-          { { "read", "GET", "/api/status", {}, { "mode" } },
-            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } } },
+          { { "read", "GET", "/api/status", {}, statusGetResponseFields },
+            { "set", "PUT", "/api/status",
+              { "mode", "confirm_unsynchronized" },
+              statusPutResponseFields } } },
         { "oe.control.recording.options", "Recording options", "Show or hide recording options.",
           ControlCapabilityKind::toggle, "oe.control.recording.options",
           { { "read", "GET", "/api/recording/options", {}, { "expanded" } },

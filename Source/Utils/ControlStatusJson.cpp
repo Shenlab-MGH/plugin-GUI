@@ -22,14 +22,101 @@
 */
 
 #include "ControlStatusJson.h"
-#include "json.hpp"
+#include "StatusControl.h"
 
+#include <cmath>
 #include <map>
 #include <set>
 
 namespace
 {
 using json = nlohmann::json;
+using Mode = AcquisitionRecordingMode;
+
+const json statusCapabilities = json::array ({
+    "oe.control.acquisition",
+    "oe.control.recording"
+});
+
+const char* modeToString (Mode mode)
+{
+    switch (mode)
+    {
+        case Mode::idle:
+            return "IDLE";
+        case Mode::acquire:
+            return "ACQUIRE";
+        case Mode::record:
+            return "RECORD";
+    }
+
+    jassertfalse;
+    return "IDLE";
+}
+
+void addEnvelope (
+    const StatusControlResult& result,
+    json& document)
+{
+    const auto ok = result.httpStatus >= 200
+                    && result.httpStatus < 300
+                    && result.errorCode.isEmpty()
+                    && result.errorMessage.isEmpty();
+    document["ok"] = ok;
+    document["capabilities"] = statusCapabilities;
+
+    if (! ok)
+    {
+        document["error"] = {
+            { "code", result.errorCode.toStdString() },
+            { "message", result.errorMessage.toStdString() }
+        };
+    }
+}
+
+void addSnapshot (
+    const AcquisitionRecordingControlSnapshot& snapshot,
+    json& document)
+{
+    if (snapshot.status.mode.has_value())
+        document["mode"] = modeToString (*snapshot.status.mode);
+    else
+        document["mode"] = nullptr;
+
+    document["acquisition_active"] =
+        snapshot.status.acquisitionActive;
+    document["recording_active"] =
+        snapshot.status.recordingActive;
+    document["record_node_count"] =
+        snapshot.status.recordNodeCount;
+    document["active_record_node_count"] =
+        snapshot.status.activeRecordNodeCount;
+    document["writer_thread_running_count"] =
+        snapshot.status.writerThreadRunningCount;
+    document["recording_consistent"] =
+        snapshot.status.recordingConsistent;
+    document["record_nodes"] = json::array();
+
+    for (const auto& node : snapshot.recordNodes)
+    {
+        document["record_nodes"].push_back ({
+            { "generation", node.generation },
+            { "recording_active", node.recordingActive },
+            { "writer_thread_running", node.writerThreadRunning },
+            { "recording_path_valid", node.recordingPathValid },
+            { "synchronized", node.synchronized }
+        });
+    }
+
+    document["audio_device_available"] =
+        snapshot.audioDeviceAvailable;
+    if (std::isfinite (snapshot.audioSampleRate))
+        document["audio_sample_rate"] = snapshot.audioSampleRate;
+    else
+        document["audio_sample_rate"] = nullptr;
+    document["processor_graph_ready"] =
+        snapshot.processorGraphReady;
+}
 
 StatusRequestParseResult invalidStatusRequest (const String& error)
 {
@@ -68,6 +155,35 @@ bool readOptionalBoolean (const json& document,
     return true;
 }
 } // namespace
+
+nlohmann::json statusGetResultToJson (
+    const StatusControlResult& result)
+{
+    json document;
+    addEnvelope (result, document);
+
+    if (result.achieved.has_value())
+        addSnapshot (*result.achieved, document);
+
+    return document;
+}
+
+nlohmann::json statusPutResultToJson (
+    const StatusControlResult& result)
+{
+    auto document = statusGetResultToJson (result);
+
+    if (result.requestedMode.has_value())
+    {
+        document["requested_mode"] =
+            modeToString (*result.requestedMode);
+        document["changed"] = result.changed;
+        document["unsynchronized_confirmed"] =
+            result.unsynchronizedConfirmed;
+    }
+
+    return document;
+}
 
 StatusRequestParseResult parseStatusRequest (StringRef requestBody)
 {
