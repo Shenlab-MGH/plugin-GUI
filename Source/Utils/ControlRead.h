@@ -40,16 +40,25 @@ struct ControlReadResult
     String errorMessage;
 };
 
+namespace ControlReadDetail
+{
 template <typename Dispatcher, typename ReadState>
-auto handleControlRead (Dispatcher&& dispatcher,
-                        ReadState&& readState,
-                        std::chrono::milliseconds timeout)
+auto handleControlReadImpl (Dispatcher&& dispatcher,
+                            ReadState&& readState,
+                            std::chrono::milliseconds timeout,
+                            MessageThreadCallGeneration* generation)
     -> ControlReadResult<std::invoke_result_t<std::decay_t<ReadState>>>
 {
-    auto operationResult = runDispatchedCall (
-        std::forward<ReadState> (readState),
-        std::forward<Dispatcher> (dispatcher),
-        timeout);
+    auto operationResult = generation != nullptr
+        ? runDispatchedCall (
+            std::forward<ReadState> (readState),
+            std::forward<Dispatcher> (dispatcher),
+            timeout,
+            *generation)
+        : runDispatchedCall (
+            std::forward<ReadState> (readState),
+            std::forward<Dispatcher> (dispatcher),
+            timeout);
 
     using Value = std::invoke_result_t<std::decay_t<ReadState>>;
     switch (operationResult.status)
@@ -84,6 +93,34 @@ auto handleControlRead (Dispatcher&& dispatcher,
                                       std::nullopt,
                                       "operation_failed",
                                       "Unknown control read result." };
+}
+} // namespace ControlReadDetail
+
+template <typename Dispatcher, typename ReadState>
+auto handleControlRead (Dispatcher&& dispatcher,
+                        ReadState&& readState,
+                        std::chrono::milliseconds timeout)
+    -> ControlReadResult<std::invoke_result_t<std::decay_t<ReadState>>>
+{
+    return ControlReadDetail::handleControlReadImpl (
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<ReadState> (readState),
+        timeout,
+        nullptr);
+}
+
+template <typename Dispatcher, typename ReadState>
+auto handleControlRead (Dispatcher&& dispatcher,
+                        ReadState&& readState,
+                        std::chrono::milliseconds timeout,
+                        MessageThreadCallGeneration& generation)
+    -> ControlReadResult<std::invoke_result_t<std::decay_t<ReadState>>>
+{
+    return ControlReadDetail::handleControlReadImpl (
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<ReadState> (readState),
+        timeout,
+        &generation);
 }
 
 template <typename Dispatcher, typename ReadDirectory, typename MeasureUsage>
