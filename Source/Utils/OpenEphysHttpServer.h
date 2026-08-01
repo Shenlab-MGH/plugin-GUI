@@ -43,6 +43,7 @@
 #include "ControlRead.h"
 #include "HttpServerLifecycle.h"
 #include "RecordingOptionsControl.h"
+#include "SettingsDispatch.h"
 #include "StatusHttpAdapter.h"
 #include "Utils.h"
 
@@ -481,50 +482,15 @@ private:
                     return;
                 }
 
-                try {
-                    std::string device_type = request_json["device_type"];
-                    LOGD("Found 'device_type': ", device_type);
-                    const MessageManagerLock mml;
-                    AccessClass::getAudioComponent()->setDeviceType(String(device_type));
-                }
-                catch (json::exception& e) {
-                    LOGD("'device_type' not specified'");
-                }
-
-                try {
-                    std::string device_name = request_json["device_name"];
-                    LOGD("Found 'device_name': ", device_name);
-                    const MessageManagerLock mml;
-                    AccessClass::getAudioComponent()->setDeviceName(String(device_name));
-                }
-                catch (json::exception& e) {
-                    LOGD("'device_name' not specified'");
-                }
-
-                try {
-                    int sample_rate = request_json["sample_rate"];
-                    LOGD("Found 'sample_rate': ", sample_rate);
-                    const MessageManagerLock mml;
-                    AccessClass::getAudioComponent()->setSampleRate(sample_rate);
-                }
-                catch (json::exception& e) {
-                    LOGD("'sample_rate' not specified'");
-                }
-
-                try {
-                    int buffer_size = request_json["buffer_size"];
-                    LOGD("Found 'buffer_size': ", buffer_size);
-                    const MessageManagerLock mml;
-                    AccessClass::getAudioComponent()->setBufferSize(buffer_size);
-                    graph_->updateBufferSize();
-                }
-                catch (json::exception& e) {
-                    LOGD("'buffer_size' not specified'");
-                }
-
-                json ret;
-                audio_device_info_to_json(&ret);
-                res.set_content(ret.dump(), "application/json"); });
+                AudioSettingsUpdate update;
+                try { update.deviceType = request_json["device_type"].get<std::string>(); } catch (json::exception&) {}
+                try { update.deviceName = request_json["device_name"].get<std::string>(); } catch (json::exception&) {}
+                try { update.sampleRate = request_json["sample_rate"].get<int>(); } catch (json::exception&) {}
+                try { update.bufferSize = request_json["buffer_size"].get<int>(); } catch (json::exception&) {}
+                const auto result = handleControlDispatch (OpenEphysHttpDetail::dispatchToMessageThread, [this, update]
+                    { return applyAudioSettingsUpdate (update, { [] (const String& value) { AccessClass::getAudioComponent()->setDeviceType (value); }, [] (const String& value) { AccessClass::getAudioComponent()->setDeviceName (value); }, [] (int value) { AccessClass::getAudioComponent()->setSampleRate (value); }, [] (int value) { AccessClass::getAudioComponent()->setBufferSize (value); }, [this] { graph_->updateBufferSize(); }, [this] { json ret; audio_device_info_to_json (&ret); return ret; } }); }, std::chrono::seconds (2));
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
+                res.set_content(result.value->dump(), "application/json"); });
 
         svr_->Get ("/api/recording", [this] (const httplib::Request&, httplib::Response& res)
                    {
@@ -553,70 +519,17 @@ private:
                     return;
                 }
                
-                try {
-                    std::string parent_directory = request_json["parent_directory"];
-                    LOGD("Found 'parent_directory': ", parent_directory);
-                    const MessageManagerLock mml;
-                    CoreServices::setRecordingParentDirectory(String(parent_directory));
-                }
-                catch (json::exception& e) {
-                    LOGD("'parent_directory' not specified'");
-                }
-
-                try {
-                    std::string prepend_text = request_json["prepend_text"];
-                    LOGD("Found 'prepend_text': ", prepend_text);
-                    const MessageManagerLock mml;
-                    CoreServices::setRecordingDirectoryPrependText(String(prepend_text));
-                }
-                catch (json::exception& e) {
-                    LOGD("'prepend_text' not specified'");
-                }
-
-                try {
-                    std::string base_text = request_json["base_text"];
-                    LOGD("Found 'base_text': ", base_text);
-                    const MessageManagerLock mml;
-                    CoreServices::setRecordingDirectoryBaseText(String(base_text));
-                }
-                catch (json::exception& e) {
-                    LOGD("'base_text' not specified'");
-                }
-
-                try {
-                    std::string append_text = request_json["append_text"];
-                    LOGD("Found 'append_text': ", append_text);
-                    const MessageManagerLock mml;
-                    CoreServices::setRecordingDirectoryAppendText(String(append_text));
-                }
-                catch (json::exception& e) {
-                    LOGD("'append_text' not specified'");
-                }
-
-                try {
-                    std::string default_record_engine = request_json["default_record_engine"];
-                    LOGD("Found 'default_record_engine': ", default_record_engine);
-                    const MessageManagerLock mml;
-                    CoreServices::setDefaultRecordEngine(String(default_record_engine));
-                }
-                catch (json::exception& e) {
-                    LOGD("'default_record_engine' not specified'");
-                }
-
-                try {
-                    std::string start_new_directory = request_json["start_new_directory"];
-                    LOGD("Found 'start_new_directory': ", start_new_directory);
-                    const MessageManagerLock mml;
-                    if (start_new_directory == "true")
-                        CoreServices::createNewRecordingDirectory();
-                }
-                catch (json::exception& e) {
-                    LOGD("'start_new_directory' not specified'");
-                }
-
-                json ret;
-                recording_info_to_json(graph_, &ret);
-                res.set_content(ret.dump(), "application/json"); });
+                RecordingSettingsUpdate update;
+                try { update.parentDirectory = request_json["parent_directory"].get<std::string>(); } catch (json::exception&) {}
+                try { update.prependText = request_json["prepend_text"].get<std::string>(); } catch (json::exception&) {}
+                try { update.baseText = request_json["base_text"].get<std::string>(); } catch (json::exception&) {}
+                try { update.appendText = request_json["append_text"].get<std::string>(); } catch (json::exception&) {}
+                try { update.defaultRecordEngine = request_json["default_record_engine"].get<std::string>(); } catch (json::exception&) {}
+                try { update.startNewDirectory = request_json["start_new_directory"].get<std::string>(); } catch (json::exception&) {}
+                const auto result = handleControlDispatch (OpenEphysHttpDetail::dispatchToMessageThread, [this, update]
+                    { return applyRecordingSettingsUpdate (update, { [] (const String& value) { CoreServices::setRecordingParentDirectory (value); }, [] (const String& value) { CoreServices::setRecordingDirectoryPrependText (value); }, [] (const String& value) { CoreServices::setRecordingDirectoryBaseText (value); }, [] (const String& value) { CoreServices::setRecordingDirectoryAppendText (value); }, [] (const String& value) { return CoreServices::setDefaultRecordEngine (value); }, [] { CoreServices::createNewRecordingDirectory(); }, [this] { json ret; recording_info_to_json (graph_, &ret); return ret; } }); }, std::chrono::seconds (2));
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
+                res.set_content(result.value->dump(), "application/json"); });
 
         svr_->Put ("/api/recording/([0-9]+)", [this] (const httplib::Request& req, httplib::Response& res)
                    {
@@ -641,29 +554,13 @@ private:
                     return;
                 }
 
-                try {
-                    std::string parent_directory = request_json["parent_directory"];
-                    LOGD("Found 'parent_directory': ", parent_directory);
-                    const MessageManagerLock mml;
-                    CoreServices::RecordNode::setRecordingDirectory(String(parent_directory), id);
-                }
-                catch (json::exception& e) {
-                    LOGD("'parent_directory' not specified'");
-                }
-
-                try {
-                    std::string record_engine = request_json["record_engine"];
-                    LOGD("Found 'record_engine': ", record_engine);
-                    const MessageManagerLock mml;
-                    CoreServices::RecordNode::setRecordEngine(String(record_engine), id);
-                }
-                catch (json::exception& e) {
-                    LOGD("'record_engine' not specified'");
-                }
-                
-                json ret;
-                recording_info_to_json(graph_, &ret);
-                res.set_content(ret.dump(), "application/json"); });
+                RecordNodeSettingsUpdate update { id };
+                try { update.parentDirectory = request_json["parent_directory"].get<std::string>(); } catch (json::exception&) {}
+                try { update.recordEngine = request_json["record_engine"].get<std::string>(); } catch (json::exception&) {}
+                const auto result = handleControlDispatch (OpenEphysHttpDetail::dispatchToMessageThread, [this, update]
+                    { return applyRecordNodeSettingsUpdate (update, { [] (const String& value, int nodeId) { CoreServices::RecordNode::setRecordingDirectory (value, nodeId); }, [] (const String& value, int nodeId) { CoreServices::RecordNode::setRecordEngine (value, nodeId); }, [this] { json ret; recording_info_to_json (graph_, &ret); return ret; } }); }, std::chrono::seconds (2));
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
+                res.set_content(result.value->dump(), "application/json"); });
 
         svr_->Put ("/api/message", [this] (const httplib::Request& req, httplib::Response& res)
                    {

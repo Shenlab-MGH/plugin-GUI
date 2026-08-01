@@ -10,6 +10,7 @@ add_sources(${COMPONENT_NAME}_tests
         HttpServerLifecycleTests.cpp
         MessageThreadCallTests.cpp
         RecordingOptionsControlTests.cpp
+        SettingsDispatchTests.cpp
         StatusControlTests.cpp
         StatusHttpAdapterTests.cpp
         StatusRequestParserTests.cpp

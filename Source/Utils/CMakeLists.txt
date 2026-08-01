@@ -23,6 +23,7 @@ add_sources(
   ControlStatusJson.cpp
   MessageThreadCall.h
   RecordingOptionsControl.h
+  SettingsDispatch.h
   StatusControl.h
   StatusControl.cpp
   StatusHttpAdapter.h
