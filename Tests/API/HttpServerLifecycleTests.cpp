@@ -176,17 +176,19 @@ TEST (HttpServerLifecycleTests, RunningListenerStopsAndJoinsBoundedly)
 TEST (HttpServerLifecycleTests, RestartCreatesFreshGenerationAndRegistersRoutesOnce)
 {
     std::vector<std::unique_ptr<BlockingFakeListener>> generations;
-    std::atomic<int> registrations { 0 };
+    std::vector<int> registrations;
 
     HttpServerLifecycle lifecycle (
         [&]
         {
+            const auto generationIndex = generations.size();
             auto fake = std::make_unique<BlockingFakeListener>();
             auto* fakePointer = fake.get();
             generations.push_back (std::move (fake));
+            registrations.push_back (0);
 
             auto listener = fakePointer->makeListener();
-            listener->registerRoutes = [&] { ++registrations; };
+            listener->registerRoutes = [&, generationIndex] { ++registrations[generationIndex]; };
             return listener;
         });
 
@@ -199,7 +201,9 @@ TEST (HttpServerLifecycleTests, RestartCreatesFreshGenerationAndRegistersRoutesO
     ASSERT_TRUE (generations[1]->waitUntilRunning (1s));
     lifecycle.stop();
 
-    EXPECT_EQ (registrations.load(), 2);
+    ASSERT_EQ (registrations.size(), 2u);
+    EXPECT_EQ (registrations[0], 1);
+    EXPECT_EQ (registrations[1], 1);
     EXPECT_EQ (generations[0]->stopCalls, 1);
     EXPECT_EQ (generations[1]->stopCalls, 1);
 }
@@ -228,13 +232,177 @@ TEST (HttpServerLifecycleTests, ListenFailureIsRestartableAndRepeatedStopIsSafe)
 
     lifecycle.start();
     firstListenReturned.get_future().wait();
-    lifecycle.stop();
-    lifecycle.stop();
-
+    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
     lifecycle.start();
     secondListenReturned.get_future().wait();
+    lifecycle.stop();
     lifecycle.stop();
 
     EXPECT_EQ (generations.load(), 2);
     EXPECT_EQ (listens.load(), 2);
+}
+
+TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerExits)
+{
+    std::promise<void> running;
+    std::promise<void> release;
+    auto releaseFuture = release.get_future().share();
+    std::atomic<int> generations { 0 };
+    std::atomic<bool> isRunning { false };
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            ++generations;
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [&]
+            {
+                isRunning = true;
+                running.set_value();
+                releaseFuture.wait();
+                isRunning = false;
+                return true;
+            };
+            listener->isRunning = [&] { return isRunning.load(); };
+            listener->stop = [] {};
+            return listener;
+        },
+        50ms);
+
+    lifecycle.start();
+    ASSERT_EQ (running.get_future().wait_for (1s), std::future_status::ready);
+
+    EXPECT_FALSE (lifecycle.stop());
+    lifecycle.start();
+    EXPECT_EQ (generations.load(), 1);
+
+    release.set_value();
+    EXPECT_TRUE (lifecycle.stop());
+}
+
+TEST (HttpServerLifecycleTests, FactoryAndRegistrarFailuresDoNotWedgeLaterStarts)
+{
+    std::atomic<int> factoryCalls { 0 };
+    std::atomic<int> registrarCalls { 0 };
+    std::promise<void> listened;
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            const auto call = ++factoryCalls;
+            if (call == 1)
+                throw std::runtime_error ("factory failed");
+
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->registerRoutes = [&, call]
+            {
+                ++registrarCalls;
+                if (call == 2)
+                    throw std::runtime_error ("registrar failed");
+            };
+            listener->listen = [&]
+            {
+                listened.set_value();
+                return false;
+            };
+            return listener;
+        });
+
+    EXPECT_THROW (lifecycle.start(), std::runtime_error);
+    EXPECT_THROW (lifecycle.start(), std::runtime_error);
+    lifecycle.start();
+    EXPECT_EQ (listened.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_TRUE (lifecycle.stop());
+    EXPECT_EQ (factoryCalls.load(), 3);
+    EXPECT_EQ (registrarCalls.load(), 2);
+}
+
+TEST (HttpServerLifecycleTests, ConcurrentStartAndStopTransitionsAreLinearized)
+{
+    std::vector<std::unique_ptr<BlockingFakeListener>> generations;
+    std::vector<int> registrations;
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            const auto generationIndex = generations.size();
+            auto fake = std::make_unique<BlockingFakeListener>();
+            auto* fakePointer = fake.get();
+            generations.push_back (std::move (fake));
+            registrations.push_back (0);
+
+            auto listener = fakePointer->makeListener();
+            listener->registerRoutes = [&, generationIndex] { ++registrations[generationIndex]; };
+            return listener;
+        });
+
+    lifecycle.start();
+    ASSERT_TRUE (generations[0]->waitUntilRunning (1s));
+
+    std::promise<void> go;
+    auto goFuture = go.get_future().share();
+    auto starter = std::async (std::launch::async, [&]
+                               {
+                                   goFuture.wait();
+                                   lifecycle.start();
+                               });
+    auto stopper = std::async (std::launch::async, [&]
+                               {
+                                   goFuture.wait();
+                                   return lifecycle.stop();
+                               });
+    go.set_value();
+
+    EXPECT_EQ (starter.wait_for (1s), std::future_status::ready);
+    EXPECT_EQ (stopper.wait_for (1s), std::future_status::ready);
+    EXPECT_TRUE (stopper.get());
+    ASSERT_TRUE (generations.size() == 1u || generations.size() == 2u);
+    ASSERT_EQ (registrations.size(), generations.size());
+    for (auto calls : registrations)
+        EXPECT_EQ (calls, 1);
+
+    if (generations.size() == 2u)
+    {
+        EXPECT_TRUE (generations[1]->waitUntilRunning (1s));
+        EXPECT_TRUE (lifecycle.stop());
+    }
+}
+
+TEST (HttpServerLifecycleTests, HandshakeAndWorkerExitShareOneDeadline)
+{
+    const auto base = std::chrono::steady_clock::now();
+    std::atomic<int> clockCalls { 0 };
+    std::promise<void> listenerRunning;
+    std::promise<void> listenerStopped;
+    auto listenerStoppedFuture = listenerStopped.get_future().share();
+    std::promise<int> workerWaitBudget;
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [&]
+            {
+                listenerRunning.set_value();
+                listenerStoppedFuture.wait();
+                return true;
+            };
+            listener->isRunning = [] { return true; };
+            listener->stop = [&] { listenerStopped.set_value(); };
+            listener->onWorkerExitWait = [&] (int remainingMilliseconds)
+            {
+                workerWaitBudget.set_value (remainingMilliseconds);
+            };
+            return listener;
+        },
+        50ms,
+        [&]
+        {
+            return clockCalls.fetch_add (1) == 0 ? base : base + 30ms;
+        });
+
+    lifecycle.start();
+    ASSERT_EQ (listenerRunning.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_TRUE (lifecycle.stop());
+    EXPECT_LE (workerWaitBudget.get_future().get(), 20);
 }

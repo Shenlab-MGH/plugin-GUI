@@ -1450,9 +1450,12 @@ public:
         lifecycle_.start();
     }
 
-    void stop()
+    bool stop()
     {
-        lifecycle_.stop();
+        const auto stoppedCleanly = lifecycle_.stop();
+        if (! stoppedCleanly)
+            LOGC ("HTTP server shutdown timed out; retaining listener generation for safe teardown");
+        return stoppedCleanly;
     }
 
 private:

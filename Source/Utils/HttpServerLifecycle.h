@@ -93,21 +93,25 @@ public:
         std::function<bool()> isRunning = [] { return false; };
         std::function<void()> stop = [] {};
         std::function<void()> registerRoutes = [] {};
+        std::function<void(int)> onWorkerExitWait = [] (int) {};
     };
 
     using ListenerPtr = std::shared_ptr<Listener>;
     using Factory = std::function<ListenerPtr()>;
+    using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
     explicit HttpServerLifecycle (Factory factory,
-                                  std::chrono::milliseconds shutdownTimeout = std::chrono::seconds (5))
+                                  std::chrono::milliseconds shutdownTimeout = std::chrono::seconds (5),
+                                  Clock clock = [] { return std::chrono::steady_clock::now(); })
         : factory_ (std::move (factory)),
-          shutdownTimeout_ (shutdownTimeout)
+          shutdownTimeout_ (shutdownTimeout),
+          clock_ (std::move (clock))
     {
     }
 
     ~HttpServerLifecycle()
     {
-        stop();
+        stopUntilWorkerExits();
     }
 
     void start()
@@ -124,32 +128,51 @@ public:
             return;
         }
 
-        auto completedCycle = std::move (cycle_);
-        transitionLock.unlock();
+        try
+        {
+            auto completedCycle = std::move (cycle_);
+            transitionLock.unlock();
 
-        if (completedCycle != nullptr)
-            completedCycle->worker->stopThread (static_cast<int> (shutdownTimeout_.count()));
+            const auto completed = completedCycle == nullptr
+                || completedCycle->worker->waitForThreadToExit (static_cast<int> (shutdownTimeout_.count()));
 
-        transitionLock.lock();
+            transitionLock.lock();
+            if (! completed)
+            {
+                cycle_ = std::move (completedCycle);
+                finishTransition();
+                return;
+            }
 
-        auto listener = factory_();
-        listener->registerRoutes();
+            auto listener = factory_();
+            listener->registerRoutes();
 
-        cycle_ = std::make_shared<Cycle>();
-        cycle_->listener = std::move (listener);
-        cycle_->gate = std::make_shared<ListenerStartGate>();
+            auto newCycle = std::make_shared<Cycle>();
+            newCycle->listener = std::move (listener);
+            newCycle->gate = std::make_shared<ListenerStartGate>();
+            newCycle->worker = std::make_unique<Worker> (newCycle->listener, newCycle->gate);
+            if (! newCycle->worker->startThread())
+                newCycle->gate->markFinished();
 
-        const auto listenerForWorker = cycle_->listener;
-        const auto gateForWorker = cycle_->gate;
-        cycle_->worker = std::make_unique<Worker> (listenerForWorker, gateForWorker);
-        if (! cycle_->worker->startThread())
-            gateForWorker->markFinished();
-
-        transitionInProgress_ = false;
-        transitionCondition_.notify_all();
+            cycle_ = std::move (newCycle);
+            finishTransition();
+        }
+        catch (...)
+        {
+            if (! transitionLock.owns_lock())
+                transitionLock.lock();
+            finishTransition();
+            throw;
+        }
     }
 
-    void stop()
+    bool stop()
+    {
+        return stopImpl (true);
+    }
+
+private:
+    bool stopImpl (bool bounded)
     {
         std::shared_ptr<Cycle> cycle;
         {
@@ -162,25 +185,42 @@ public:
         if (cycle == nullptr)
         {
             std::lock_guard<std::mutex> transitionLock (transitionMutex_);
-            transitionInProgress_ = false;
-            transitionCondition_.notify_all();
-            return;
+            finishTransition();
+            return true;
         }
 
-        const auto deadline = std::chrono::steady_clock::now() + shutdownTimeout_;
+        const auto deadline = now() + shutdownTimeout_;
         if (! cycle->gate->tryCancel())
         {
             // cpp-httplib ignores stop() until listen() has published its
             // running state. Polling is intentional: the minimal listener seam
             // exposes no running-state notification, and no lifecycle lock is
             // held while waiting, stopping, or joining.
-            while (std::chrono::steady_clock::now() < deadline
+            while ((! bounded || now() < deadline)
                    && cycle->gate->state() != ListenerStartGate::State::finished)
             {
-                if (cycle->listener->isRunning())
+                bool running = false;
+                try
+                {
+                    running = cycle->listener->isRunning();
+                }
+                catch (...)
+                {
+                }
+
+                if (running)
                 {
                     if (! cycle->listenerStopIssued.exchange (true))
-                        cycle->listener->stop();
+                    {
+                        try
+                        {
+                            cycle->listener->stop();
+                        }
+                        catch (...)
+                        {
+                            cycle->listenerStopIssued = false;
+                        }
+                    }
                     break;
                 }
 
@@ -188,18 +228,29 @@ public:
             }
         }
 
-        cycle->gate->waitUntilFinished (deadline);
+        const auto finished = cycle->gate->waitUntilFinished (
+            bounded ? deadline : std::chrono::steady_clock::time_point::max());
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds> (
-            deadline - std::chrono::steady_clock::now()).count();
-        cycle->worker->stopThread (remaining > 0 ? static_cast<int> (remaining) : 0);
+            deadline - now()).count();
+        const auto workerWaitMilliseconds = bounded ? (remaining > 0 ? static_cast<int> (remaining) : 0) : -1;
+        try
+        {
+            cycle->listener->onWorkerExitWait (workerWaitMilliseconds);
+        }
+        catch (...)
+        {
+        }
+        const auto workerExited = finished && cycle->worker->waitForThreadToExit (
+            workerWaitMilliseconds);
 
         std::lock_guard<std::mutex> transitionLock (transitionMutex_);
-        if (cycle_ == cycle)
+        if (workerExited && cycle_ == cycle)
             cycle_.reset();
-        transitionInProgress_ = false;
-        transitionCondition_.notify_all();
+        finishTransition();
+        return workerExited;
     }
 
+public:
     bool waitForState (ListenerStartGate::State expected,
                        std::chrono::milliseconds timeout) const
     {
@@ -213,6 +264,42 @@ public:
     }
 
 private:
+    void finishTransition()
+    {
+        transitionInProgress_ = false;
+        transitionCondition_.notify_all();
+    }
+
+    std::chrono::steady_clock::time_point now() const noexcept
+    {
+        try
+        {
+            return clock_();
+        }
+        catch (...)
+        {
+            return std::chrono::steady_clock::now();
+        }
+    }
+
+    void stopUntilWorkerExits() noexcept
+    {
+        // Public stop is bounded, but destruction must retain the Cycle until
+        // its worker is gone. Legacy request handlers may therefore extend
+        // final teardown; making those handlers cancellable is separate work.
+        for (;;)
+        {
+            try
+            {
+                if (stopImpl (false))
+                    return;
+            }
+            catch (...)
+            {
+                // Retrying is safer than destroying a live listener/server.
+            }
+        }
+    }
     class Worker final : public juce::Thread
     {
     public:
@@ -258,6 +345,7 @@ private:
 
     Factory factory_;
     const std::chrono::milliseconds shutdownTimeout_;
+    Clock clock_;
     mutable std::mutex transitionMutex_;
     std::condition_variable transitionCondition_;
     bool transitionInProgress_ = false;
