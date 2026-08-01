@@ -8,6 +8,16 @@
 
 using namespace std::chrono_literals;
 
+class ScopeExit
+{
+public:
+    explicit ScopeExit (std::function<void()> operation) : operation_ (std::move (operation)) {}
+    ~ScopeExit() { operation_(); }
+
+private:
+    std::function<void()> operation_;
+};
+
 class BlockingFakeListener
 {
 public:
@@ -87,12 +97,20 @@ TEST (HttpServerLifecycleTests, CancellationBeforeCommitPreventsListen)
         });
 
     lifecycle.start();
-    workerReachedCommit.get_future().wait();
+    ScopeExit releaseCommit ([&]
+                             {
+                                 try { allowCommit.set_value(); } catch (...) {}
+                             });
+    const auto reachedCommit = workerReachedCommit.get_future().wait_for (1s);
+    EXPECT_EQ (reachedCommit, std::future_status::ready);
+    if (reachedCommit != std::future_status::ready)
+        return;
 
     auto stopped = std::async (std::launch::async, [&] { lifecycle.stop(); });
-    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::cancelled, 1s));
+    const auto cancelled = lifecycle.waitForState (ListenerStartGate::State::cancelled, 1s);
 
     allowCommit.set_value();
+    EXPECT_TRUE (cancelled);
     EXPECT_EQ (stopped.wait_for (1s), std::future_status::ready);
     EXPECT_EQ (listenCalls.load(), 0);
 }
@@ -370,8 +388,8 @@ TEST (HttpServerLifecycleTests, ConcurrentStartAndStopTransitionsAreLinearized)
 
 TEST (HttpServerLifecycleTests, HandshakeAndWorkerExitShareOneDeadline)
 {
-    const auto base = std::chrono::steady_clock::now();
     std::atomic<int> clockCalls { 0 };
+    std::chrono::steady_clock::time_point firstStopClockRead;
     std::promise<void> listenerRunning;
     std::promise<void> listenerStopped;
     auto listenerStoppedFuture = listenerStopped.get_future().share();
@@ -395,14 +413,122 @@ TEST (HttpServerLifecycleTests, HandshakeAndWorkerExitShareOneDeadline)
             };
             return listener;
         },
-        50ms,
+        500ms,
         [&]
         {
-            return clockCalls.fetch_add (1) == 0 ? base : base + 30ms;
+            if (clockCalls.fetch_add (1) == 0)
+            {
+                firstStopClockRead = std::chrono::steady_clock::now();
+                return firstStopClockRead;
+            }
+
+            return firstStopClockRead + 300ms;
         });
 
     lifecycle.start();
     ASSERT_EQ (listenerRunning.get_future().wait_for (1s), std::future_status::ready);
     EXPECT_TRUE (lifecycle.stop());
-    EXPECT_LE (workerWaitBudget.get_future().get(), 20);
+    EXPECT_LE (workerWaitBudget.get_future().get(), 200);
+}
+
+TEST (HttpServerLifecycleTests, TransientTransportStopFailureIsRetriedByFinalTeardown)
+{
+    std::promise<void> running;
+    std::promise<void> release;
+    auto releaseFuture = release.get_future().share();
+    std::atomic<int> stopCalls { 0 };
+
+    auto lifecycle = std::make_unique<HttpServerLifecycle> (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [&]
+            {
+                running.set_value();
+                releaseFuture.wait();
+                return true;
+            };
+            listener->isRunning = [] { return true; };
+            listener->stop = [&]
+            {
+                if (++stopCalls == 1)
+                    throw std::runtime_error ("transient stop failure");
+                release.set_value();
+            };
+            return listener;
+        },
+        50ms);
+
+    lifecycle->start();
+    const auto listenerRunning = running.get_future().wait_for (1s);
+    EXPECT_EQ (listenerRunning, std::future_status::ready);
+    if (listenerRunning != std::future_status::ready)
+    {
+        try { release.set_value(); } catch (...) {}
+        return;
+    }
+
+    std::future<void> destroyed;
+    ScopeExit releaseOnFailure ([&]
+                                {
+                                    try { release.set_value(); } catch (...) {}
+                                });
+    destroyed = std::async (std::launch::async, [&] { lifecycle.reset(); });
+
+    auto completed = destroyed.wait_for (1s);
+    if (completed != std::future_status::ready)
+    {
+        try { release.set_value(); } catch (...) {}
+        completed = destroyed.wait_for (1s);
+    }
+
+    EXPECT_EQ (completed, std::future_status::ready);
+    EXPECT_EQ (stopCalls.load(), 2);
+}
+
+TEST (HttpServerLifecycleTests, DestructorCompletesAfterAPublicTimeoutAndControlledRelease)
+{
+    std::promise<void> running;
+    std::promise<void> release;
+    auto releaseFuture = release.get_future().share();
+    std::atomic<bool> listenerRunning { false };
+
+    auto lifecycle = std::make_unique<HttpServerLifecycle> (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [&]
+            {
+                listenerRunning = true;
+                running.set_value();
+                releaseFuture.wait();
+                listenerRunning = false;
+                return true;
+            };
+            listener->isRunning = [&] { return listenerRunning.load(); };
+            listener->stop = [] {};
+            return listener;
+        },
+        50ms);
+
+    lifecycle->start();
+    const auto started = running.get_future().wait_for (1s);
+    EXPECT_EQ (started, std::future_status::ready);
+    if (started != std::future_status::ready)
+    {
+        try { release.set_value(); } catch (...) {}
+        return;
+    }
+
+    EXPECT_FALSE (lifecycle->stop());
+    std::future<void> destroyed;
+    ScopeExit releaseOnFailure ([&]
+                                {
+                                    try { release.set_value(); } catch (...) {}
+                                });
+    destroyed = std::async (std::launch::async, [&] { lifecycle.reset(); });
+
+    EXPECT_EQ (destroyed.wait_for (50ms), std::future_status::timeout);
+    release.set_value();
+    EXPECT_EQ (destroyed.wait_for (1s), std::future_status::ready);
 }

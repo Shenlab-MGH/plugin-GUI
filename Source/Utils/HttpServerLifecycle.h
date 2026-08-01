@@ -210,18 +210,23 @@ private:
 
                 if (running)
                 {
+                    auto transportStopIssued = cycle->listenerStopIssued.load();
                     if (! cycle->listenerStopIssued.exchange (true))
                     {
                         try
                         {
                             cycle->listener->stop();
+                            transportStopIssued = true;
                         }
                         catch (...)
                         {
                             cycle->listenerStopIssued = false;
+                            transportStopIssued = false;
                         }
                     }
-                    break;
+
+                    if (transportStopIssued)
+                        break;
                 }
 
                 juce::Thread::yield();
