@@ -14,11 +14,14 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+
+#include "MessageThreadCall.h"
 
 class ListenerStartGate
 {
@@ -94,7 +97,7 @@ public:
         std::function<bool()> listen = [] { return false; };
         std::function<bool()> isRunning = [] { return false; };
         std::function<void()> stop = [] {};
-        std::function<void()> registerRoutes = [] {};
+        std::function<void(MessageThreadCallGeneration&)> registerRoutes = [] (MessageThreadCallGeneration&) {};
         std::function<void(int)> onWorkerExitWait = [] (int) {};
     };
 
@@ -146,11 +149,25 @@ public:
                 return;
             }
 
-            auto listener = factory_();
-            listener->registerRoutes();
-
             auto newCycle = std::make_shared<Cycle>();
-            newCycle->listener = std::move (listener);
+            newCycle->listener = factory_();
+            try
+            {
+                newCycle->listener->registerRoutes (newCycle->generation);
+            }
+            catch (...)
+            {
+                const auto registrarFailure = std::current_exception();
+                try
+                {
+                    newCycle->generation.quiesce();
+                }
+                catch (...)
+                {
+                }
+                std::rethrow_exception (registrarFailure);
+            }
+
             newCycle->gate = std::make_shared<ListenerStartGate>();
             newCycle->worker = std::make_unique<Worker> (newCycle->listener, newCycle->gate);
             if (! newCycle->worker->startThread())
@@ -387,6 +404,10 @@ private:
 
     struct Cycle
     {
+        // Members are destroyed in reverse declaration order. Keep the
+        // generation first so listener-owned route closures and the worker
+        // disappear before the shared call-generation state they reference.
+        MessageThreadCallGeneration generation;
         ListenerPtr listener;
         std::shared_ptr<ListenerStartGate> gate;
         std::unique_ptr<Worker> worker;

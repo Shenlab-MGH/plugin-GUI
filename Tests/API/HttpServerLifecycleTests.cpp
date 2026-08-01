@@ -1,10 +1,12 @@
 #include "../../Source/Utils/HttpServerLifecycle.h"
+#include "../../Source/Utils/MessageThreadCall.h"
 #include "gtest/gtest.h"
 
 #include <atomic>
 #include <chrono>
 #include <future>
 #include <memory>
+#include <thread>
 
 using namespace std::chrono_literals;
 
@@ -92,7 +94,7 @@ TEST (HttpServerLifecycleTests, CancellationBeforeCommitPreventsListen)
             };
             listener->isRunning = [] { return false; };
             listener->stop = [] {};
-            listener->registerRoutes = [] {};
+            listener->registerRoutes = [] (MessageThreadCallGeneration&) {};
             return listener;
         });
 
@@ -153,7 +155,7 @@ TEST (HttpServerLifecycleTests, StopAfterCommitBeforeRunningWaitsThenStopsOnce)
                 ++stopCalls;
                 transportStopped.set_value();
             };
-            listener->registerRoutes = [] {};
+            listener->registerRoutes = [] (MessageThreadCallGeneration&) {};
             return listener;
         });
 
@@ -176,7 +178,7 @@ TEST (HttpServerLifecycleTests, RunningListenerStopsAndJoinsBoundedly)
     HttpServerLifecycle lifecycle ([&]
                                    {
                                        auto listener = fake.makeListener();
-                                       listener->registerRoutes = [] {};
+                                       listener->registerRoutes = [] (MessageThreadCallGeneration&) {};
                                        return listener;
                                    });
 
@@ -193,37 +195,74 @@ TEST (HttpServerLifecycleTests, RunningListenerStopsAndJoinsBoundedly)
 
 TEST (HttpServerLifecycleTests, RestartCreatesFreshGenerationAndRegistersRoutesOnce)
 {
-    std::vector<std::unique_ptr<BlockingFakeListener>> generations;
+    std::vector<std::unique_ptr<BlockingFakeListener>> listeners;
+    std::vector<MessageThreadCallGeneration> generations;
+    std::vector<MessageThreadCallResult<int>> registrationResults;
     std::vector<int> registrations;
 
     HttpServerLifecycle lifecycle (
         [&]
         {
-            const auto generationIndex = generations.size();
+            const auto generationIndex = listeners.size();
             auto fake = std::make_unique<BlockingFakeListener>();
             auto* fakePointer = fake.get();
-            generations.push_back (std::move (fake));
+            listeners.push_back (std::move (fake));
             registrations.push_back (0);
 
             auto listener = fakePointer->makeListener();
-            listener->registerRoutes = [&, generationIndex] { ++registrations[generationIndex]; };
+            listener->registerRoutes = [&, generationIndex] (MessageThreadCallGeneration& generation)
+            {
+                ++registrations[generationIndex];
+                generations.push_back (generation);
+                registrationResults.push_back (runDispatchedCall (
+                    [generationIndex] { return static_cast<int> (generationIndex + 1); },
+                    [] (std::function<void()> callback)
+                    {
+                        callback();
+                        return true;
+                    },
+                    100ms,
+                    generation));
+            };
             return listener;
         });
 
     lifecycle.start();
-    ASSERT_TRUE (generations[0]->waitUntilRunning (1s));
+    ASSERT_TRUE (listeners[0]->waitUntilRunning (1s));
+    ASSERT_EQ (generations.size(), 1u);
+    generations[0].quiesce();
+    bool oldDispatcherCalled = false;
+    const auto explicitlyQuiescedResult = runDispatchedCall (
+        [] { return 99; },
+        [&] (std::function<void()>)
+        {
+            oldDispatcherCalled = true;
+            return true;
+        },
+        100ms,
+        generations[0]);
     lifecycle.stop();
 
     lifecycle.start();
-    ASSERT_EQ (generations.size(), 2u);
-    ASSERT_TRUE (generations[1]->waitUntilRunning (1s));
+    ASSERT_EQ (listeners.size(), 2u);
+    ASSERT_TRUE (listeners[1]->waitUntilRunning (1s));
     lifecycle.stop();
 
     ASSERT_EQ (registrations.size(), 2u);
+    ASSERT_EQ (registrationResults.size(), 2u);
+    ASSERT_EQ (generations.size(), 2u);
     EXPECT_EQ (registrations[0], 1);
     EXPECT_EQ (registrations[1], 1);
-    EXPECT_EQ (generations[0]->stopCalls, 1);
-    EXPECT_EQ (generations[1]->stopCalls, 1);
+    EXPECT_EQ (registrationResults[0].status, MessageThreadCallStatus::completed);
+    ASSERT_TRUE (registrationResults[0].value.has_value());
+    EXPECT_EQ (*registrationResults[0].value, 1);
+    EXPECT_EQ (registrationResults[1].status, MessageThreadCallStatus::completed);
+    ASSERT_TRUE (registrationResults[1].value.has_value());
+    EXPECT_EQ (*registrationResults[1].value, 2);
+    EXPECT_EQ (explicitlyQuiescedResult.status, MessageThreadCallStatus::dispatchFailed);
+    EXPECT_FALSE (oldDispatcherCalled);
+    EXPECT_EQ (listeners[0]->stopCalls, 1);
+    EXPECT_EQ (listeners[1]->stopCalls, 1);
 }
 
 TEST (HttpServerLifecycleTests, ListenFailureIsRestartableAndRepeatedStopIsSafe)
@@ -244,7 +283,7 @@ TEST (HttpServerLifecycleTests, ListenFailureIsRestartableAndRepeatedStopIsSafe)
                 (generation == 1 ? firstListenReturned : secondListenReturned).set_value();
                 return false;
             };
-            listener->registerRoutes = [] {};
+            listener->registerRoutes = [] (MessageThreadCallGeneration&) {};
             return listener;
         });
 
@@ -324,9 +363,35 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
 
 TEST (HttpServerLifecycleTests, FactoryAndRegistrarFailuresDoNotWedgeLaterStarts)
 {
+    struct RegistrarFailureProbe
+    {
+        MessageThreadCallGeneration generation;
+        MessageThreadCallGeneration::Registration retirementRegistration;
+        std::promise<void> queued;
+        std::shared_future<void> queuedFuture = queued.get_future().share();
+        std::promise<void> finished;
+        std::shared_future<void> finishedFuture = finished.get_future().share();
+        std::function<void()> lateCallback;
+        std::atomic<bool> retirementObserved { false };
+        std::atomic<int> operationCount { 0 };
+        MessageThreadCallResult<int> result;
+    };
+
     std::atomic<int> factoryCalls { 0 };
     std::atomic<int> registrarCalls { 0 };
+    auto failedRegistrar = std::make_shared<RegistrarFailureProbe>();
+    std::thread pendingCaller;
+    MessageThreadCallResult<int> freshGenerationResult;
+    bool freshGenerationDispatcherCalled = false;
     std::promise<void> listened;
+    ScopeExit joinPendingCaller ([&]
+                                 {
+                                     if (pendingCaller.joinable())
+                                     {
+                                         failedRegistrar->generation.quiesce();
+                                         pendingCaller.join();
+                                     }
+                                 });
 
     HttpServerLifecycle lifecycle (
         [&]
@@ -336,11 +401,54 @@ TEST (HttpServerLifecycleTests, FactoryAndRegistrarFailuresDoNotWedgeLaterStarts
                 throw std::runtime_error ("factory failed");
 
             auto listener = std::make_shared<HttpServerLifecycle::Listener>();
-            listener->registerRoutes = [&, call]
+            listener->registerRoutes = [&, call] (MessageThreadCallGeneration& generation)
             {
                 ++registrarCalls;
                 if (call == 2)
+                {
+                    failedRegistrar->generation = generation;
+                    failedRegistrar->retirementRegistration = generation.registerCancellation (
+                        [failedRegistrar] { failedRegistrar->retirementObserved = true; });
+                    pendingCaller = std::thread (
+                        [failedRegistrar]
+                        {
+                            failedRegistrar->result = runDispatchedCall (
+                                [failedRegistrar]
+                                {
+                                    ++failedRegistrar->operationCount;
+                                    return 42;
+                                },
+                                [failedRegistrar] (std::function<void()> callback)
+                                {
+                                    failedRegistrar->lateCallback = std::move (callback);
+                                    failedRegistrar->queued.set_value();
+                                    return true;
+                                },
+                                5s,
+                                failedRegistrar->generation);
+                            failedRegistrar->finished.set_value();
+                        });
+
+                    if (failedRegistrar->queuedFuture.wait_for (1s) != std::future_status::ready)
+                    {
+                        failedRegistrar->generation.quiesce();
+                        pendingCaller.join();
+                        throw std::runtime_error ("registrar queue handshake failed");
+                    }
+
                     throw std::runtime_error ("registrar failed");
+                }
+
+                freshGenerationResult = runDispatchedCall (
+                    [] { return 7; },
+                    [&] (std::function<void()> callback)
+                    {
+                        freshGenerationDispatcherCalled = true;
+                        callback();
+                        return true;
+                    },
+                    100ms,
+                    generation);
             };
             listener->listen = [&]
             {
@@ -351,10 +459,38 @@ TEST (HttpServerLifecycleTests, FactoryAndRegistrarFailuresDoNotWedgeLaterStarts
         });
 
     EXPECT_THROW (lifecycle.start(), std::runtime_error);
-    EXPECT_THROW (lifecycle.start(), std::runtime_error);
+    try
+    {
+        lifecycle.start();
+        FAIL() << "Expected registrar failure";
+    }
+    catch (const std::runtime_error& exception)
+    {
+        EXPECT_STREQ (exception.what(), "registrar failed");
+    }
+
+    EXPECT_TRUE (failedRegistrar->retirementObserved.load());
+    const auto retiredBeforeTestCleanup =
+        failedRegistrar->finishedFuture.wait_for (1s) == std::future_status::ready;
+    if (! retiredBeforeTestCleanup)
+        failedRegistrar->generation.quiesce();
+    ASSERT_EQ (failedRegistrar->finishedFuture.wait_for (1s), std::future_status::ready);
+    pendingCaller.join();
+
+    EXPECT_TRUE (retiredBeforeTestCleanup);
+    EXPECT_EQ (failedRegistrar->result.status, MessageThreadCallStatus::dispatchFailed);
+    EXPECT_EQ (failedRegistrar->operationCount.load(), 0);
+    ASSERT_TRUE (failedRegistrar->lateCallback);
+    failedRegistrar->lateCallback();
+    EXPECT_EQ (failedRegistrar->operationCount.load(), 0);
+
     lifecycle.start();
     EXPECT_EQ (listened.get_future().wait_for (1s), std::future_status::ready);
     EXPECT_TRUE (lifecycle.stop());
+    EXPECT_TRUE (freshGenerationDispatcherCalled);
+    EXPECT_EQ (freshGenerationResult.status, MessageThreadCallStatus::completed);
+    ASSERT_TRUE (freshGenerationResult.value.has_value());
+    EXPECT_EQ (*freshGenerationResult.value, 7);
     EXPECT_EQ (factoryCalls.load(), 3);
     EXPECT_EQ (registrarCalls.load(), 2);
 }
@@ -374,7 +510,10 @@ TEST (HttpServerLifecycleTests, ConcurrentStartAndStopTransitionsAreLinearized)
             registrations.push_back (0);
 
             auto listener = fakePointer->makeListener();
-            listener->registerRoutes = [&, generationIndex] { ++registrations[generationIndex]; };
+            listener->registerRoutes = [&, generationIndex] (MessageThreadCallGeneration&)
+            {
+                ++registrations[generationIndex];
+            };
             return listener;
         });
 

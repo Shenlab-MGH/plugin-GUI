@@ -1429,7 +1429,10 @@ private:
             LOGC ("Shutting down HTTP server");
             server->stop();
         };
-        listener->registerRoutes = [this, server] { registerRoutes (*server); };
+        listener->registerRoutes = [this, server] (MessageThreadCallGeneration&)
+        {
+            registerRoutes (*server);
+        };
         return listener;
     }
 
