@@ -203,7 +203,7 @@ public:
     }
 
 private:
-    void registerRoutes (httplib::Server& server, MessageThreadCallGeneration&)
+    void registerRoutes (httplib::Server& server, MessageThreadCallGeneration& generation)
     {
         auto* svr_ = &server;
         svr_->Get ("/api/capabilities", [] (const httplib::Request&, httplib::Response& res)
@@ -222,7 +222,7 @@ private:
 
         registerStatusHttpGetRoute (
             *svr_,
-            [this]
+            [this, &generation]
             {
                 return handleStatusGet (
                     OpenEphysHttpDetail::dispatchToMessageThread,
@@ -230,10 +230,12 @@ private:
                     {
                         return captureAcquisitionRecordingControlSnapshot (
                             audio_, *graph_);
-                    });
+                    },
+                    statusControlQueueStartTimeout,
+                    generation);
             });
 
-        svr_->Put ("/api/status", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put ("/api/status", [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
             std::string desired_mode;
 
@@ -261,7 +263,8 @@ private:
                     CoreServices::setRecordingStatus(true);
                     return true;
                     },
-                    std::chrono::seconds (2));
+                    std::chrono::seconds (2),
+                    generation);
 
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                     return;
@@ -275,7 +278,8 @@ private:
                     CoreServices::setAcquisitionStatus(true);
                     return true;
                     },
-                    std::chrono::seconds (2));
+                    std::chrono::seconds (2),
+                    generation);
 
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                     return;
@@ -289,7 +293,8 @@ private:
                     CoreServices::setAcquisitionStatus(false);
                     return true;
                     },
-                    std::chrono::seconds (2));
+                    std::chrono::seconds (2),
+                    generation);
 
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                     return;
@@ -305,7 +310,7 @@ private:
             ret["usage"] = AccessClass::getAudioComponent()->deviceManager.getCpuUsage();
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/disk", [] (const httplib::Request&, httplib::Response& res)
+        svr_->Get ("/api/disk", [&generation] (const httplib::Request&, httplib::Response& res)
                    {
             const auto readResult = handleRecordingDiskUsageRead (
                 OpenEphysHttpDetail::dispatchToMessageThread,
@@ -316,7 +321,8 @@ private:
                         directory.getBytesFreeOnVolume(),
                         directory.getVolumeTotalSize());
                 },
-                std::chrono::seconds (2));
+                std::chrono::seconds (2),
+                generation);
 
             if (! readResult.value.has_value())
             {
@@ -337,12 +343,13 @@ private:
             ret["read_only"] = true;
             res.set_content (ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/time", [] (const httplib::Request&, httplib::Response& res)
+        svr_->Get ("/api/time", [&generation] (const httplib::Request&, httplib::Response& res)
                    {
             const auto readResult = handleControlRead (
                 OpenEphysHttpDetail::dispatchToMessageThread,
                 [] { return CoreServices::getClockStatus(); },
-                std::chrono::seconds (2));
+                std::chrono::seconds (2),
+                generation);
 
             if (! readResult.value.has_value())
             {
@@ -367,12 +374,13 @@ private:
             ret["read_only"] = true;
             res.set_content (ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/recording/options", [] (const httplib::Request&, httplib::Response& res)
+        svr_->Get ("/api/recording/options", [&generation] (const httplib::Request&, httplib::Response& res)
                    {
             const auto readResult = handleControlRead (
                 OpenEphysHttpDetail::dispatchToMessageThread,
                 [] { return CoreServices::getRecordingOptionsStatus(); },
-                std::chrono::seconds (2));
+                std::chrono::seconds (2),
+                generation);
 
             if (! readResult.value.has_value())
             {
@@ -395,7 +403,7 @@ private:
             ret["recording"] = status.recording;
             res.set_content (ret.dump(), "application/json"); });
 
-        svr_->Put ("/api/recording/options", [] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put ("/api/recording/options", [&generation] (const httplib::Request& req, httplib::Response& res)
                    {
             const auto controlResult = handleRecordingOptionsPut (
                 String::fromUTF8 (req.body.data(), static_cast<int> (req.body.size())),
@@ -412,7 +420,8 @@ private:
                         [] (bool newDirectoryRequested)
                         { CoreServices::setNewDirectoryRequested (newDirectoryRequested); });
                 },
-                std::chrono::seconds (2));
+                std::chrono::seconds (2),
+                generation);
 
             if (! controlResult.status.has_value())
             {
