@@ -36,6 +36,16 @@ struct StartedReadState
     std::promise<ControlReadResult<int>> resultPromise;
     std::atomic<int> readCount { 0 };
 };
+
+struct PendingDiskUsageState
+{
+    MessageThreadCallGeneration generation;
+    std::function<void()> pendingOperation;
+    std::promise<void> queuedPromise;
+    std::promise<ControlReadResult<float>> resultPromise;
+    std::atomic<int> directoryReadCount { 0 };
+    std::atomic<int> measurementCount { 0 };
+};
 } // namespace
 
 TEST (ControlReadTests, ReturnsStateReadThroughTheDispatcher)
@@ -251,4 +261,81 @@ TEST (ControlReadTests, ReadsTheDirectoryOnTheMessageThreadButMeasuresDiskUsageO
     EXPECT_FLOAT_EQ (*result.value, 0.7f);
     EXPECT_TRUE (directoryReadOnMessageThread);
     EXPECT_FALSE (measurementRanOnMessageThread);
+}
+
+TEST (ControlReadTests, DiskUsageReadPropagatesGenerationToDirectoryRead)
+{
+    auto state = std::make_shared<PendingDiskUsageState>();
+    const auto weakState = std::weak_ptr<PendingDiskUsageState> (state);
+    auto queued = state->queuedPromise.get_future();
+    auto resultFuture = state->resultPromise.get_future();
+
+    std::thread caller (
+        [state, weakState]
+        {
+            try
+            {
+                state->resultPromise.set_value (handleRecordingDiskUsageRead (
+                    [state] (std::function<void()> operation)
+                    {
+                        state->pendingOperation = std::move (operation);
+                        state->queuedPromise.set_value();
+                        return true;
+                    },
+                    [weakState]
+                    {
+                        if (auto lockedState = weakState.lock())
+                            ++lockedState->directoryReadCount;
+
+                        return 7;
+                    },
+                    [weakState] (int directory)
+                    {
+                        if (auto lockedState = weakState.lock())
+                            ++lockedState->measurementCount;
+
+                        return static_cast<float> (directory) / 10.0f;
+                    },
+                    5s,
+                    state->generation));
+            }
+            catch (...)
+            {
+                state->resultPromise.set_exception (std::current_exception());
+            }
+        });
+
+    const auto queuedInTime = queued.wait_for (1s) == std::future_status::ready;
+    state->generation.quiesce();
+    const auto resultReady = resultFuture.wait_for (1s) == std::future_status::ready;
+
+    EXPECT_TRUE (queuedInTime);
+    EXPECT_TRUE (resultReady);
+
+    if (! resultReady)
+    {
+        caller.detach();
+        return;
+    }
+
+    caller.join();
+    const auto result = resultFuture.get();
+    EXPECT_EQ (result.httpStatus, 503);
+    EXPECT_EQ (result.errorCode, "operation_unavailable");
+    EXPECT_EQ (state->directoryReadCount.load(), 0);
+    EXPECT_EQ (state->measurementCount.load(), 0);
+
+    if (! queuedInTime)
+        return;
+
+    auto lateOperation = std::move (state->pendingOperation);
+    EXPECT_TRUE (lateOperation);
+    EXPECT_FALSE (state->pendingOperation);
+
+    if (lateOperation)
+    {
+        lateOperation();
+        EXPECT_EQ (state->directoryReadCount.load(), 0);
+        EXPECT_EQ (state->measurementCount.load(), 0);
+    }
 }

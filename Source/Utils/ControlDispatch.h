@@ -41,4 +41,18 @@ auto handleControlDispatch (Dispatcher&& dispatcher,
         timeout);
 }
 
+template <typename Dispatcher, typename Operation>
+auto handleControlDispatch (Dispatcher&& dispatcher,
+                            Operation&& operation,
+                            std::chrono::milliseconds timeout,
+                            MessageThreadCallGeneration& generation)
+    -> ControlDispatchResult<std::invoke_result_t<std::decay_t<Operation>>>
+{
+    return handleControlRead (
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<Operation> (operation),
+        timeout,
+        generation);
+}
+
 #endif

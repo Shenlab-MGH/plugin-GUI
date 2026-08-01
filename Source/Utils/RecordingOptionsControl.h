@@ -77,12 +77,15 @@ RecordingOptionsApplyResult applyRecordingOptionsUpdate (
     return { readStatus(), {}, {} };
 }
 
+namespace RecordingOptionsControlDetail
+{
 template <typename Dispatcher, typename ApplyUpdate>
-RecordingOptionsControlResult handleRecordingOptionsPut (
+RecordingOptionsControlResult handleRecordingOptionsPutImpl (
     StringRef requestBody,
     Dispatcher&& dispatcher,
     ApplyUpdate&& applyUpdate,
-    std::chrono::milliseconds timeout)
+    std::chrono::milliseconds timeout,
+    MessageThreadCallGeneration* generation)
 {
     auto parsed = parseRecordingOptionsUpdate (requestBody);
     if (! parsed.update.has_value())
@@ -94,14 +97,21 @@ RecordingOptionsControlResult handleRecordingOptionsPut (
     }
 
     auto update = std::move (*parsed.update);
-    auto operationResult = runDispatchedCall (
-        [update = std::move (update),
-         apply = std::forward<ApplyUpdate> (applyUpdate)]() mutable
-        {
-            return apply (update);
-        },
-        std::forward<Dispatcher> (dispatcher),
-        timeout);
+    auto operation = [update = std::move (update),
+                      apply = std::forward<ApplyUpdate> (applyUpdate)]() mutable
+    {
+        return apply (update);
+    };
+    auto operationResult = generation != nullptr
+        ? runDispatchedCall (
+            std::move (operation),
+            std::forward<Dispatcher> (dispatcher),
+            timeout,
+            *generation)
+        : runDispatchedCall (
+            std::move (operation),
+            std::forward<Dispatcher> (dispatcher),
+            timeout);
 
     switch (operationResult.status)
     {
@@ -141,6 +151,38 @@ RecordingOptionsControlResult handleRecordingOptionsPut (
              std::nullopt,
              "operation_failed",
              "Unknown recording options operation result." };
+}
+} // namespace RecordingOptionsControlDetail
+
+template <typename Dispatcher, typename ApplyUpdate>
+RecordingOptionsControlResult handleRecordingOptionsPut (
+    StringRef requestBody,
+    Dispatcher&& dispatcher,
+    ApplyUpdate&& applyUpdate,
+    std::chrono::milliseconds timeout)
+{
+    return RecordingOptionsControlDetail::handleRecordingOptionsPutImpl (
+        requestBody,
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<ApplyUpdate> (applyUpdate),
+        timeout,
+        nullptr);
+}
+
+template <typename Dispatcher, typename ApplyUpdate>
+RecordingOptionsControlResult handleRecordingOptionsPut (
+    StringRef requestBody,
+    Dispatcher&& dispatcher,
+    ApplyUpdate&& applyUpdate,
+    std::chrono::milliseconds timeout,
+    MessageThreadCallGeneration& generation)
+{
+    return RecordingOptionsControlDetail::handleRecordingOptionsPutImpl (
+        requestBody,
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<ApplyUpdate> (applyUpdate),
+        timeout,
+        &generation);
 }
 
 #endif

@@ -123,11 +123,14 @@ auto handleControlRead (Dispatcher&& dispatcher,
         &generation);
 }
 
+namespace ControlReadDetail
+{
 template <typename Dispatcher, typename ReadDirectory, typename MeasureUsage>
-auto handleRecordingDiskUsageRead (Dispatcher&& dispatcher,
-                                   ReadDirectory&& readDirectory,
-                                   MeasureUsage&& measureUsage,
-                                   std::chrono::milliseconds timeout)
+auto handleRecordingDiskUsageReadImpl (Dispatcher&& dispatcher,
+                                       ReadDirectory&& readDirectory,
+                                       MeasureUsage&& measureUsage,
+                                       std::chrono::milliseconds timeout,
+                                       MessageThreadCallGeneration* generation)
     -> ControlReadResult<std::invoke_result_t<
         std::decay_t<MeasureUsage>,
         std::invoke_result_t<std::decay_t<ReadDirectory>>>>
@@ -136,10 +139,16 @@ auto handleRecordingDiskUsageRead (Dispatcher&& dispatcher,
         std::decay_t<MeasureUsage>,
         std::invoke_result_t<std::decay_t<ReadDirectory>>>;
 
-    auto directoryResult = handleControlRead (
-        std::forward<Dispatcher> (dispatcher),
-        std::forward<ReadDirectory> (readDirectory),
-        timeout);
+    auto directoryResult = generation != nullptr
+        ? handleControlRead (
+            std::forward<Dispatcher> (dispatcher),
+            std::forward<ReadDirectory> (readDirectory),
+            timeout,
+            *generation)
+        : handleControlRead (
+            std::forward<Dispatcher> (dispatcher),
+            std::forward<ReadDirectory> (readDirectory),
+            timeout);
 
     if (! directoryResult.value.has_value())
         return { directoryResult.httpStatus,
@@ -169,6 +178,42 @@ auto handleRecordingDiskUsageRead (Dispatcher&& dispatcher,
                  "operation_failed",
                  "Unknown disk usage operation failure." };
     }
+}
+} // namespace ControlReadDetail
+
+template <typename Dispatcher, typename ReadDirectory, typename MeasureUsage>
+auto handleRecordingDiskUsageRead (Dispatcher&& dispatcher,
+                                   ReadDirectory&& readDirectory,
+                                   MeasureUsage&& measureUsage,
+                                   std::chrono::milliseconds timeout)
+    -> ControlReadResult<std::invoke_result_t<
+        std::decay_t<MeasureUsage>,
+        std::invoke_result_t<std::decay_t<ReadDirectory>>>>
+{
+    return ControlReadDetail::handleRecordingDiskUsageReadImpl (
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<ReadDirectory> (readDirectory),
+        std::forward<MeasureUsage> (measureUsage),
+        timeout,
+        nullptr);
+}
+
+template <typename Dispatcher, typename ReadDirectory, typename MeasureUsage>
+auto handleRecordingDiskUsageRead (Dispatcher&& dispatcher,
+                                   ReadDirectory&& readDirectory,
+                                   MeasureUsage&& measureUsage,
+                                   std::chrono::milliseconds timeout,
+                                   MessageThreadCallGeneration& generation)
+    -> ControlReadResult<std::invoke_result_t<
+        std::decay_t<MeasureUsage>,
+        std::invoke_result_t<std::decay_t<ReadDirectory>>>>
+{
+    return ControlReadDetail::handleRecordingDiskUsageReadImpl (
+        std::forward<Dispatcher> (dispatcher),
+        std::forward<ReadDirectory> (readDirectory),
+        std::forward<MeasureUsage> (measureUsage),
+        timeout,
+        &generation);
 }
 
 #endif

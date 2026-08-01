@@ -2,9 +2,26 @@
 #include "gtest/gtest.h"
 
 #include <chrono>
+#include <atomic>
+#include <exception>
 #include <functional>
+#include <future>
+#include <memory>
+#include <thread>
 
 using namespace std::chrono_literals;
+
+namespace
+{
+struct PendingRecordingOptionsState
+{
+    MessageThreadCallGeneration generation;
+    std::function<void()> pendingOperation;
+    std::promise<void> queuedPromise;
+    std::promise<RecordingOptionsControlResult> resultPromise;
+    std::atomic<int> applyCount { 0 };
+};
+} // namespace
 
 TEST (RecordingOptionsControlTests, AppliesValidatedUpdatesThroughTheDispatcher)
 {
@@ -118,4 +135,76 @@ TEST (RecordingOptionsControlTests, RejectsNewDirectoryChangesWhenTheGuiControlI
     EXPECT_EQ (result.errorCode, "operation_not_available");
     EXPECT_FALSE (result.status.has_value());
     EXPECT_FALSE (newDirectorySetterCalled);
+}
+
+TEST (RecordingOptionsControlTests, GenerationQuiesceCancelsPendingRecordingOptionsUpdate)
+{
+    auto state = std::make_shared<PendingRecordingOptionsState>();
+    const auto weakState = std::weak_ptr<PendingRecordingOptionsState> (state);
+    auto queued = state->queuedPromise.get_future();
+    auto resultFuture = state->resultPromise.get_future();
+
+    std::thread caller (
+        [state, weakState]
+        {
+            try
+            {
+                state->resultPromise.set_value (handleRecordingOptionsPut (
+                    R"({"expanded":true,"force_new_directory":false})",
+                    [state] (std::function<void()> operation)
+                    {
+                        state->pendingOperation = std::move (operation);
+                        state->queuedPromise.set_value();
+                        return true;
+                    },
+                    [weakState] (const RecordingOptionsUpdate& update)
+                    {
+                        if (auto lockedState = weakState.lock())
+                            ++lockedState->applyCount;
+
+                        RecordingOptionsStatus status;
+                        status.expanded = *update.expanded;
+                        status.forceNewDirectory = *update.forceNewDirectory;
+                        return RecordingOptionsApplyResult { status, {}, {} };
+                    },
+                    5s,
+                    state->generation));
+            }
+            catch (...)
+            {
+                state->resultPromise.set_exception (std::current_exception());
+            }
+        });
+
+    const auto queuedInTime = queued.wait_for (1s) == std::future_status::ready;
+    state->generation.quiesce();
+    const auto resultReady = resultFuture.wait_for (1s) == std::future_status::ready;
+
+    EXPECT_TRUE (queuedInTime);
+    EXPECT_TRUE (resultReady);
+
+    if (! resultReady)
+    {
+        caller.detach();
+        return;
+    }
+
+    caller.join();
+    const auto result = resultFuture.get();
+    EXPECT_EQ (result.httpStatus, 503);
+    EXPECT_EQ (result.errorCode, "operation_unavailable");
+    EXPECT_EQ (state->applyCount.load(), 0);
+
+    if (! queuedInTime)
+        return;
+
+    auto lateOperation = std::move (state->pendingOperation);
+    EXPECT_TRUE (lateOperation);
+    EXPECT_FALSE (state->pendingOperation);
+
+    if (lateOperation)
+    {
+        lateOperation();
+        EXPECT_EQ (state->applyCount.load(), 0);
+    }
 }
