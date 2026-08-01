@@ -487,8 +487,20 @@ private:
                 update.deviceName = optionalSettingsField<std::string> (request_json, "device_name");
                 update.sampleRate = optionalSettingsField<int> (request_json, "sample_rate");
                 update.bufferSize = optionalSettingsField<int> (request_json, "buffer_size");
-                const auto result = handleControlDispatch (OpenEphysHttpDetail::dispatchToMessageThread, [this, update]
-                    { return applyAudioSettingsUpdate (update, { [] (const String& value) { AccessClass::getAudioComponent()->setDeviceType (value); }, [] (const String& value) { AccessClass::getAudioComponent()->setDeviceName (value); }, [] (int value) { AccessClass::getAudioComponent()->setSampleRate (value); }, [] (int value) { AccessClass::getAudioComponent()->setBufferSize (value); }, [this] { graph_->updateBufferSize(); }, [this] { json ret; audio_device_info_to_json (&ret); return ret; } }); }, std::chrono::seconds (2));
+                const auto result = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this, update]
+                    {
+                        return applyAudioSettingsUpdate (update, {
+                            [] (const String& value) { AccessClass::getAudioComponent()->setDeviceType (value); },
+                            [] (const String& value) { AccessClass::getAudioComponent()->setDeviceName (value); },
+                            [] (int value) { AccessClass::getAudioComponent()->setSampleRate (value); },
+                            [] (int value) { AccessClass::getAudioComponent()->setBufferSize (value); },
+                            [this] { graph_->updateBufferSize(); },
+                            [this] { json ret; audio_device_info_to_json (&ret); return ret; }
+                        });
+                    },
+                    std::chrono::seconds (2));
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
                 res.set_content(result.value->dump(), "application/json"); });
 
@@ -526,8 +538,21 @@ private:
                 update.appendText = optionalSettingsField<std::string> (request_json, "append_text");
                 update.defaultRecordEngine = optionalSettingsField<std::string> (request_json, "default_record_engine");
                 update.startNewDirectory = optionalSettingsField<std::string> (request_json, "start_new_directory");
-                const auto result = handleControlDispatch (OpenEphysHttpDetail::dispatchToMessageThread, [this, update]
-                    { return applyRecordingSettingsUpdate (update, { [] (const String& value) { CoreServices::setRecordingParentDirectory (value); }, [] (const String& value) { CoreServices::setRecordingDirectoryPrependText (value); }, [] (const String& value) { CoreServices::setRecordingDirectoryBaseText (value); }, [] (const String& value) { CoreServices::setRecordingDirectoryAppendText (value); }, [] (const String& value) { return CoreServices::setDefaultRecordEngine (value); }, [] { CoreServices::createNewRecordingDirectory(); }, [this] { json ret; recording_info_to_json (graph_, &ret); return ret; } }); }, std::chrono::seconds (2));
+                const auto result = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this, update]
+                    {
+                        return applyRecordingSettingsUpdate (update, {
+                            [] (const String& value) { CoreServices::setRecordingParentDirectory (value); },
+                            [] (const String& value) { CoreServices::setRecordingDirectoryPrependText (value); },
+                            [] (const String& value) { CoreServices::setRecordingDirectoryBaseText (value); },
+                            [] (const String& value) { CoreServices::setRecordingDirectoryAppendText (value); },
+                            [] (const String& value) { return CoreServices::setDefaultRecordEngine (value); },
+                            [] { CoreServices::createNewRecordingDirectory(); },
+                            [this] { json ret; recording_info_to_json (graph_, &ret); return ret; }
+                        });
+                    },
+                    std::chrono::seconds (2));
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
                 res.set_content(result.value->dump(), "application/json"); });
 
@@ -557,8 +582,17 @@ private:
                 RecordNodeSettingsUpdate update { id };
                 update.parentDirectory = optionalSettingsField<std::string> (request_json, "parent_directory");
                 update.recordEngine = optionalSettingsField<std::string> (request_json, "record_engine");
-                const auto result = handleControlDispatch (OpenEphysHttpDetail::dispatchToMessageThread, [this, update]
-                    { return applyRecordNodeSettingsUpdate (update, { [] (const String& value, int nodeId) { CoreServices::RecordNode::setRecordingDirectory (value, nodeId); }, [] (const String& value, int nodeId) { CoreServices::RecordNode::setRecordEngine (value, nodeId); }, [this] { json ret; recording_info_to_json (graph_, &ret); return ret; } }); }, std::chrono::seconds (2));
+                const auto result = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this, update]
+                    {
+                        return applyRecordNodeSettingsUpdate (update, {
+                            [] (const String& value, int nodeId) { CoreServices::RecordNode::setRecordingDirectory (value, nodeId); },
+                            [] (const String& value, int nodeId) { CoreServices::RecordNode::setRecordEngine (value, nodeId); },
+                            [this] { json ret; recording_info_to_json (graph_, &ret); return ret; }
+                        });
+                    },
+                    std::chrono::seconds (2));
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
                 res.set_content(result.value->dump(), "application/json"); });
 
