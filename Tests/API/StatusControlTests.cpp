@@ -1,10 +1,14 @@
 #include "../../Source/Utils/StatusControl.h"
+#include "../../Source/Utils/MessageThreadCall.h"
 
 #include "gtest/gtest.h"
 
+#include <atomic>
 #include <chrono>
+#include <exception>
 #include <functional>
 #include <future>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -17,6 +21,24 @@ namespace
 using Error = AcquisitionRecordingControlError;
 using Mode = AcquisitionRecordingMode;
 using Snapshot = AcquisitionRecordingControlSnapshot;
+
+struct PendingStatusGetState
+{
+    MessageThreadCallGeneration generation;
+    std::function<void()> pendingOperation;
+    std::promise<void> queuedPromise;
+    std::promise<StatusControlResult> resultPromise;
+    std::atomic<int> readCount { 0 };
+};
+
+struct PendingStatusPutState
+{
+    MessageThreadCallGeneration generation;
+    std::function<void()> pendingOperation;
+    std::promise<void> queuedPromise;
+    std::promise<StatusControlResult> resultPromise;
+    std::atomic<int> applyCount { 0 };
+};
 
 Snapshot snapshot (Mode mode)
 {
@@ -222,6 +244,75 @@ TEST (StatusControlTests,
 }
 
 TEST (StatusControlTests,
+      GenerationQuiesceCancelsPendingStatusGet)
+{
+    auto state = std::make_shared<PendingStatusGetState>();
+    const auto weakState = std::weak_ptr<PendingStatusGetState> (state);
+    auto queued = state->queuedPromise.get_future();
+    auto resultFuture = state->resultPromise.get_future();
+
+    std::thread caller (
+        [state, weakState]
+        {
+            try
+            {
+                state->resultPromise.set_value (handleStatusGet (
+                    [state] (std::function<void()> operation)
+                    {
+                        state->pendingOperation = std::move (operation);
+                        state->queuedPromise.set_value();
+                        return true;
+                    },
+                    [weakState]
+                    {
+                        if (auto lockedState = weakState.lock())
+                            ++lockedState->readCount;
+
+                        return snapshot (Mode::idle);
+                    },
+                    5s,
+                    state->generation));
+            }
+            catch (...)
+            {
+                state->resultPromise.set_exception (std::current_exception());
+            }
+        });
+
+    const auto queuedInTime = queued.wait_for (1s) == std::future_status::ready;
+    state->generation.quiesce();
+    const auto resultReady = resultFuture.wait_for (1s) == std::future_status::ready;
+
+    EXPECT_TRUE (queuedInTime);
+    EXPECT_TRUE (resultReady);
+
+    if (! resultReady)
+    {
+        caller.detach();
+        return;
+    }
+
+    caller.join();
+    const auto result = resultFuture.get();
+    EXPECT_EQ (result.httpStatus, 503);
+    EXPECT_EQ (result.errorCode, "operation_unavailable");
+    EXPECT_EQ (state->readCount.load(), 0);
+
+    if (! queuedInTime)
+        return;
+
+    auto lateOperation = std::move (state->pendingOperation);
+    EXPECT_TRUE (lateOperation);
+    EXPECT_FALSE (state->pendingOperation);
+
+    if (lateOperation)
+    {
+        lateOperation();
+        EXPECT_EQ (state->readCount.load(), 0);
+    }
+}
+
+TEST (StatusControlTests,
       PutStrictlyParsesBeforeDispatch)
 {
     int dispatchCount = 0;
@@ -250,6 +341,108 @@ TEST (StatusControlTests,
     EXPECT_FALSE (result.achieved.has_value());
     EXPECT_EQ (dispatchCount, 0);
     EXPECT_EQ (applyCount, 0);
+}
+
+TEST (StatusControlTests,
+      MalformedStatusPutStillReturns400BeforeGenerationDispatch)
+{
+    MessageThreadCallGeneration generation;
+    generation.quiesce();
+    int dispatchCount = 0;
+    int applyCount = 0;
+
+    const auto result = handleStatusPut (
+        R"({"mode":"idle"})",
+        [&] (std::function<void()>)
+        {
+            ++dispatchCount;
+            return true;
+        },
+        [&] (const StatusRequest& request)
+        {
+            ++applyCount;
+            return success (request.mode, snapshot (request.mode));
+        },
+        50ms,
+        generation);
+
+    EXPECT_EQ (result.httpStatus, 400);
+    EXPECT_EQ (result.errorCode, "invalid_request");
+    EXPECT_TRUE (result.errorMessage.isNotEmpty());
+    EXPECT_FALSE (result.requestedMode.has_value());
+    EXPECT_FALSE (result.achieved.has_value());
+    EXPECT_EQ (dispatchCount, 0);
+    EXPECT_EQ (applyCount, 0);
+}
+
+TEST (StatusControlTests,
+      GenerationQuiesceCancelsPendingStatusPut)
+{
+    auto state = std::make_shared<PendingStatusPutState>();
+    const auto weakState = std::weak_ptr<PendingStatusPutState> (state);
+    auto queued = state->queuedPromise.get_future();
+    auto resultFuture = state->resultPromise.get_future();
+
+    std::thread caller (
+        [state, weakState]
+        {
+            try
+            {
+                state->resultPromise.set_value (handleStatusPut (
+                    R"({"mode":"RECORD","confirm_unsynchronized":true})",
+                    [state] (std::function<void()> operation)
+                    {
+                        state->pendingOperation = std::move (operation);
+                        state->queuedPromise.set_value();
+                        return true;
+                    },
+                    [weakState] (const StatusRequest& request)
+                    {
+                        if (auto lockedState = weakState.lock())
+                            ++lockedState->applyCount;
+
+                        return success (request.mode, snapshot (request.mode));
+                    },
+                    5s,
+                    state->generation));
+            }
+            catch (...)
+            {
+                state->resultPromise.set_exception (std::current_exception());
+            }
+        });
+
+    const auto queuedInTime = queued.wait_for (1s) == std::future_status::ready;
+    state->generation.quiesce();
+    const auto resultReady = resultFuture.wait_for (1s) == std::future_status::ready;
+
+    EXPECT_TRUE (queuedInTime);
+    EXPECT_TRUE (resultReady);
+
+    if (! resultReady)
+    {
+        caller.detach();
+        return;
+    }
+
+    caller.join();
+    const auto result = resultFuture.get();
+    EXPECT_EQ (result.httpStatus, 503);
+    EXPECT_EQ (result.errorCode, "operation_unavailable");
+    EXPECT_EQ (state->applyCount.load(), 0);
+
+    if (! queuedInTime)
+        return;
+
+    auto lateOperation = std::move (state->pendingOperation);
+    EXPECT_TRUE (lateOperation);
+    EXPECT_FALSE (state->pendingOperation);
+
+    if (lateOperation)
+    {
+        lateOperation();
+        EXPECT_EQ (state->applyCount.load(), 0);
+    }
 }
 
 TEST (StatusControlTests,

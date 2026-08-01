@@ -154,17 +154,23 @@ bool isCanonicalSnapshot (const Snapshot& snapshot)
            && isValidAcquisitionRecordingControlSnapshot (
                snapshot);
 }
-} // namespace
 
-StatusControlResult handleStatusGet (
+StatusControlResult handleStatusGetImpl (
     StatusControlDispatcher dispatcher,
     StatusControlReadback readback,
-    std::chrono::milliseconds queueStartTimeout)
+    std::chrono::milliseconds queueStartTimeout,
+    MessageThreadCallGeneration* generation)
 {
-    auto call = runDispatchedCall (
-        std::move (readback),
-        std::move (dispatcher),
-        queueStartTimeout);
+    auto call = generation != nullptr
+        ? runDispatchedCall (
+            std::move (readback),
+            std::move (dispatcher),
+            queueStartTimeout,
+            *generation)
+        : runDispatchedCall (
+            std::move (readback),
+            std::move (dispatcher),
+            queueStartTimeout);
 
     if (const auto failure = mapCallFailure (call))
         return *failure;
@@ -186,11 +192,12 @@ StatusControlResult handleStatusGet (
     return result;
 }
 
-StatusControlResult handleStatusPut (
+StatusControlResult handleStatusPutImpl (
     StringRef requestBody,
     StatusControlDispatcher dispatcher,
     StatusControlApply apply,
-    std::chrono::milliseconds queueStartTimeout)
+    std::chrono::milliseconds queueStartTimeout,
+    MessageThreadCallGeneration* generation)
 {
     const auto parsed = parseStatusRequest (requestBody);
     if (! parsed.request.has_value())
@@ -202,13 +209,21 @@ StatusControlResult handleStatusPut (
     }
 
     const auto request = *parsed.request;
-    auto call = runDispatchedCall (
+    auto operation =
         [request, apply = std::move (apply)]
         {
             return apply (request);
-        },
-        std::move (dispatcher),
-        queueStartTimeout);
+        };
+    auto call = generation != nullptr
+        ? runDispatchedCall (
+            std::move (operation),
+            std::move (dispatcher),
+            queueStartTimeout,
+            *generation)
+        : runDispatchedCall (
+            std::move (operation),
+            std::move (dispatcher),
+            queueStartTimeout);
 
     if (const auto failure = mapCallFailure (
             call,
@@ -287,4 +302,59 @@ StatusControlResult handleStatusPut (
     result.unsynchronizedConfirmed =
         control.unsynchronizedConfirmed;
     return result;
+}
+} // namespace
+
+StatusControlResult handleStatusGet (
+    StatusControlDispatcher dispatcher,
+    StatusControlReadback readback,
+    std::chrono::milliseconds queueStartTimeout)
+{
+    return handleStatusGetImpl (
+        std::move (dispatcher),
+        std::move (readback),
+        queueStartTimeout,
+        nullptr);
+}
+
+StatusControlResult handleStatusGet (
+    StatusControlDispatcher dispatcher,
+    StatusControlReadback readback,
+    std::chrono::milliseconds queueStartTimeout,
+    MessageThreadCallGeneration& generation)
+{
+    return handleStatusGetImpl (
+        std::move (dispatcher),
+        std::move (readback),
+        queueStartTimeout,
+        &generation);
+}
+
+StatusControlResult handleStatusPut (
+    StringRef requestBody,
+    StatusControlDispatcher dispatcher,
+    StatusControlApply apply,
+    std::chrono::milliseconds queueStartTimeout)
+{
+    return handleStatusPutImpl (
+        requestBody,
+        std::move (dispatcher),
+        std::move (apply),
+        queueStartTimeout,
+        nullptr);
+}
+
+StatusControlResult handleStatusPut (
+    StringRef requestBody,
+    StatusControlDispatcher dispatcher,
+    StatusControlApply apply,
+    std::chrono::milliseconds queueStartTimeout,
+    MessageThreadCallGeneration& generation)
+{
+    return handleStatusPutImpl (
+        requestBody,
+        std::move (dispatcher),
+        std::move (apply),
+        queueStartTimeout,
+        &generation);
 }

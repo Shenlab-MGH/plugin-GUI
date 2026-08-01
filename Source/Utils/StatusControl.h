@@ -34,6 +34,8 @@
 #include <functional>
 #include <optional>
 
+class MessageThreadCallGeneration;
+
 /**
     Maximum time allowed for a queued status operation to begin on the JUCE
     message thread. Once the operation begins, the caller waits for its
@@ -76,6 +78,12 @@ TESTABLE StatusControlResult handleStatusGet (
     std::chrono::milliseconds queueStartTimeout =
         statusControlQueueStartTimeout);
 
+TESTABLE StatusControlResult handleStatusGet (
+    StatusControlDispatcher dispatcher,
+    StatusControlReadback readback,
+    std::chrono::milliseconds queueStartTimeout,
+    MessageThreadCallGeneration& generation);
+
 /**
     Strictly parses a status request before dispatching one controller call to
     the JUCE message thread.
@@ -90,5 +98,12 @@ TESTABLE StatusControlResult handleStatusPut (
     StatusControlApply apply,
     std::chrono::milliseconds queueStartTimeout =
         statusControlQueueStartTimeout);
+
+TESTABLE StatusControlResult handleStatusPut (
+    StringRef requestBody,
+    StatusControlDispatcher dispatcher,
+    StatusControlApply apply,
+    std::chrono::milliseconds queueStartTimeout,
+    MessageThreadCallGeneration& generation);
 
 #endif
