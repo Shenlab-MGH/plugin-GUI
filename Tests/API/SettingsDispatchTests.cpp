@@ -42,6 +42,14 @@ TEST (SettingsDispatchTests, AppliesSparseRecordingFieldsAndOnlyExactTrueRequest
     EXPECT_EQ (snapshot, json ({ { "prepend_text", "pre" } }));
 }
 
+TEST (SettingsDispatchTests, AppliesAllRecordingFieldsInLegacyOrderBeforeSnapshot)
+{
+    std::vector<std::string> events;
+    applyRecordingSettingsUpdate ({ "parent", "prepend", "base", "append", "engine", "true" },
+                                  { [&] (const String&) { events.push_back ("parent"); }, [&] (const String&) { events.push_back ("prepend"); }, [&] (const String&) { events.push_back ("base"); }, [&] (const String&) { events.push_back ("append"); }, [&] (const String&) { events.push_back ("engine"); return false; }, [&] { events.push_back ("new"); }, [&] { events.push_back ("snapshot"); return json::object(); } });
+    EXPECT_EQ (events, (std::vector<std::string> { "parent", "prepend", "base", "append", "engine", "new", "snapshot" }));
+}
+
 TEST (SettingsDispatchTests, ForwardsTheParsedRecordNodeIdAndCapturesGlobalSnapshotLast)
 {
     std::vector<std::string> events;
@@ -89,4 +97,30 @@ TEST (SettingsDispatchTests, DoesNotRequestNewDirectoryForNonExactTrue)
     applyRecordingSettingsUpdate ({ {}, {}, {}, {}, {}, "True" },
                                   { [] (const String&) {}, [] (const String&) {}, [] (const String&) {}, [] (const String&) {}, [] (const String&) { return false; }, [&] { ++requests; }, [] { return json::object(); } });
     EXPECT_EQ (requests, 0);
+}
+
+TEST (SettingsDispatchTests, TreatsOnlyStringTrueAsANewDirectoryRequest)
+{
+    for (const auto& value : { "True", "false", "1" })
+    {
+        int requests = 0;
+        applyRecordingSettingsUpdate ({ {}, {}, {}, {}, {}, value }, { [] (const String&) {}, [] (const String&) {}, [] (const String&) {}, [] (const String&) {}, [] (const String&) { return false; }, [&] { ++requests; }, [] { return json::object(); } });
+        EXPECT_EQ (requests, 0) << value;
+    }
+    EXPECT_FALSE (optionalSettingsField<std::string> (json ({ { "start_new_directory", true } }), "start_new_directory").has_value());
+}
+
+TEST (SettingsDispatchTests, PreservesEarlierSetterWhenALaterSetterThrows)
+{
+    std::vector<std::string> events;
+    EXPECT_THROW (applyAudioSettingsUpdate ({ "type", "name", {}, {} }, { [&] (const String&) { events.push_back ("type"); }, [&] (const String&) { events.push_back ("name"); throw std::runtime_error ("name failure"); }, [] (int) {}, [] (int) {}, [] {}, [&] { events.push_back ("snapshot"); return json::object(); } }), std::runtime_error);
+    EXPECT_EQ (events, (std::vector<std::string> { "type", "name" }));
+}
+
+TEST (SettingsDispatchTests, UnknownNodeControlHelperStillReturnsTheGlobalSnapshot)
+{
+    int forwardedId = 0;
+    const auto snapshot = applyRecordNodeSettingsUpdate ({ 999, "path", {} }, { [&] (const String&, int id) { forwardedId = id; }, [] (const String&, int) {}, [] { return json ({ { "parent_directory", "current" } }); } });
+    EXPECT_EQ (forwardedId, 999);
+    EXPECT_EQ (snapshot, json ({ { "parent_directory", "current" } }));
 }
