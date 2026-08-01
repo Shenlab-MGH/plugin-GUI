@@ -267,6 +267,7 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
     auto releaseFuture = release.get_future().share();
     std::atomic<int> generations { 0 };
     std::atomic<bool> isRunning { false };
+    std::vector<int> workerWaitBudgets;
 
     HttpServerLifecycle lifecycle (
         [&]
@@ -283,9 +284,17 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
             };
             listener->isRunning = [&] { return isRunning.load(); };
             listener->stop = [] {};
+            listener->onWorkerExitWait = [&] (int remainingMilliseconds)
+            {
+                workerWaitBudgets.push_back (remainingMilliseconds);
+            };
             return listener;
         },
         50ms);
+    ScopeExit releaseOnFailure ([&]
+                                {
+                                    try { release.set_value(); } catch (...) {}
+                                });
 
     lifecycle.start();
     ASSERT_EQ (running.get_future().wait_for (1s), std::future_status::ready);
@@ -295,7 +304,22 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
     EXPECT_EQ (generations.load(), 1);
 
     release.set_value();
-    EXPECT_TRUE (lifecycle.stop());
+    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
+
+    auto workerReaped = false;
+    const auto reapWatchdog = std::chrono::steady_clock::now() + 1s;
+    do
+    {
+        workerReaped = lifecycle.stop();
+        if (! workerReaped)
+            juce::Thread::yield();
+    }
+    while (! workerReaped && std::chrono::steady_clock::now() < reapWatchdog);
+
+    ASSERT_TRUE (workerReaped);
+    ASSERT_GE (workerWaitBudgets.size(), 2u);
+    for (size_t index = 1; index < workerWaitBudgets.size(); ++index)
+        EXPECT_EQ (workerWaitBudgets[index], 0);
 }
 
 TEST (HttpServerLifecycleTests, FactoryAndRegistrarFailuresDoNotWedgeLaterStarts)
@@ -429,6 +453,214 @@ TEST (HttpServerLifecycleTests, HandshakeAndWorkerExitShareOneDeadline)
     ASSERT_EQ (listenerRunning.get_future().wait_for (1s), std::future_status::ready);
     EXPECT_TRUE (lifecycle.stop());
     EXPECT_LE (workerWaitBudget.get_future().get(), 200);
+}
+
+TEST (HttpServerLifecycleTests, RepeatedStopCannotExtendOneListenerGenerationDeadline)
+{
+    std::promise<void> listenerRunning;
+    std::promise<void> releaseListener;
+    auto releaseListenerFuture = releaseListener.get_future().share();
+    std::vector<int> workerWaitBudgets;
+    auto fakeNow = std::chrono::steady_clock::now() - 1s;
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [&]
+            {
+                listenerRunning.set_value();
+                releaseListenerFuture.wait();
+                return true;
+            };
+            listener->isRunning = [] { return true; };
+            listener->stop = [] {};
+            listener->onWorkerExitWait = [&] (int remainingMilliseconds)
+            {
+                workerWaitBudgets.push_back (remainingMilliseconds);
+            };
+            return listener;
+        },
+        10ms,
+        [&] { return fakeNow; });
+    ScopeExit releaseOnFailure ([&]
+                                {
+                                    try { releaseListener.set_value(); } catch (...) {}
+                                });
+
+    lifecycle.start();
+    ASSERT_EQ (listenerRunning.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_FALSE (lifecycle.stop());
+    ASSERT_EQ (workerWaitBudgets.size(), 1u);
+    EXPECT_EQ (workerWaitBudgets[0], 10);
+
+    fakeNow += 10ms;
+    releaseListener.set_value();
+    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
+
+    auto workerReaped = false;
+    const auto reapWatchdog = std::chrono::steady_clock::now() + 1s;
+    do
+    {
+        workerReaped = lifecycle.stop();
+        if (! workerReaped)
+            juce::Thread::yield();
+    }
+    while (! workerReaped && std::chrono::steady_clock::now() < reapWatchdog);
+
+    ASSERT_TRUE (workerReaped);
+    ASSERT_GE (workerWaitBudgets.size(), 2u);
+    for (size_t index = 1; index < workerWaitBudgets.size(); ++index)
+        EXPECT_EQ (workerWaitBudgets[index], 0);
+}
+
+TEST (HttpServerLifecycleTests, FreshListenerGenerationGetsFreshDeadlineOnlyAfterPriorWorkerRetires)
+{
+    struct Generation
+    {
+        std::promise<void> running;
+        std::promise<void> release;
+        std::shared_future<void> releaseFuture = release.get_future().share();
+        std::vector<int> workerWaitBudgets;
+    };
+
+    std::vector<std::unique_ptr<Generation>> generations;
+    auto fakeNow = std::chrono::steady_clock::now() - 1s;
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto generation = std::make_unique<Generation>();
+            auto* generationPointer = generation.get();
+            generations.push_back (std::move (generation));
+
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [generationPointer]
+            {
+                generationPointer->running.set_value();
+                generationPointer->releaseFuture.wait();
+                return true;
+            };
+            listener->isRunning = [] { return true; };
+            listener->stop = [] {};
+            listener->onWorkerExitWait = [generationPointer] (int remainingMilliseconds)
+            {
+                generationPointer->workerWaitBudgets.push_back (remainingMilliseconds);
+            };
+            return listener;
+        },
+        10ms,
+        [&] { return fakeNow; });
+    ScopeExit releaseOnFailure ([&]
+                                {
+                                    for (auto& generation : generations)
+                                        try { generation->release.set_value(); } catch (...) {}
+                                });
+
+    lifecycle.start();
+    ASSERT_EQ (generations.size(), 1u);
+    ASSERT_EQ (generations[0]->running.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_FALSE (lifecycle.stop());
+    ASSERT_EQ (generations[0]->workerWaitBudgets.size(), 1u);
+    EXPECT_EQ (generations[0]->workerWaitBudgets[0], 10);
+
+    lifecycle.start();
+    EXPECT_EQ (generations.size(), 1u);
+
+    fakeNow += 10ms;
+    generations[0]->release.set_value();
+    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
+
+    auto firstWorkerReaped = false;
+    const auto firstReapWatchdog = std::chrono::steady_clock::now() + 1s;
+    do
+    {
+        firstWorkerReaped = lifecycle.stop();
+        if (! firstWorkerReaped)
+            juce::Thread::yield();
+    }
+    while (! firstWorkerReaped && std::chrono::steady_clock::now() < firstReapWatchdog);
+
+    ASSERT_TRUE (firstWorkerReaped);
+    ASSERT_GE (generations[0]->workerWaitBudgets.size(), 2u);
+    for (size_t index = 1; index < generations[0]->workerWaitBudgets.size(); ++index)
+        EXPECT_EQ (generations[0]->workerWaitBudgets[index], 0);
+
+    lifecycle.start();
+
+    ASSERT_EQ (generations.size(), 2u);
+    ASSERT_EQ (generations[1]->running.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_FALSE (lifecycle.stop());
+    ASSERT_EQ (generations[1]->workerWaitBudgets.size(), 1u);
+    EXPECT_EQ (generations[1]->workerWaitBudgets[0], 10);
+
+    fakeNow += 10ms;
+    generations[1]->release.set_value();
+    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
+
+    auto secondWorkerReaped = false;
+    const auto secondReapWatchdog = std::chrono::steady_clock::now() + 1s;
+    do
+    {
+        secondWorkerReaped = lifecycle.stop();
+        if (! secondWorkerReaped)
+            juce::Thread::yield();
+    }
+    while (! secondWorkerReaped && std::chrono::steady_clock::now() < secondReapWatchdog);
+
+    ASSERT_TRUE (secondWorkerReaped);
+    ASSERT_GE (generations[1]->workerWaitBudgets.size(), 2u);
+    for (size_t index = 1; index < generations[1]->workerWaitBudgets.size(); ++index)
+        EXPECT_EQ (generations[1]->workerWaitBudgets[index], 0);
+}
+
+TEST (HttpServerLifecycleTests, SaturatedDeadlineClampsWorkerWaitBudgetToIntMaximum)
+{
+    std::promise<int> workerWaitBudget;
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [] { return false; };
+            listener->onWorkerExitWait = [&] (int remainingMilliseconds)
+            {
+                workerWaitBudget.set_value (remainingMilliseconds);
+            };
+            return listener;
+        },
+        std::chrono::milliseconds::max(),
+        [] { return std::chrono::steady_clock::time_point::min(); });
+
+    lifecycle.start();
+    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
+    EXPECT_TRUE (lifecycle.stop());
+    EXPECT_EQ (workerWaitBudget.get_future().get(), std::numeric_limits<int>::max());
+}
+
+TEST (HttpServerLifecycleTests, NearMaximumClockPreservesExactWorkerWaitBudget)
+{
+    std::promise<int> workerWaitBudget;
+    const auto fakeNow = std::chrono::steady_clock::time_point::max() - 20ms;
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->listen = [] { return false; };
+            listener->onWorkerExitWait = [&] (int remainingMilliseconds)
+            {
+                workerWaitBudget.set_value (remainingMilliseconds);
+            };
+            return listener;
+        },
+        10ms,
+        [&] { return fakeNow; });
+
+    lifecycle.start();
+    ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
+    EXPECT_TRUE (lifecycle.stop());
+    EXPECT_EQ (workerWaitBudget.get_future().get(), 10);
 }
 
 TEST (HttpServerLifecycleTests, TransientTransportStopFailureIsRetriedByFinalTeardown)

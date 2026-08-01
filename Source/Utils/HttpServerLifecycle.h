@@ -15,8 +15,10 @@
 #include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 class ListenerStartGate
 {
@@ -189,7 +191,7 @@ private:
             return true;
         }
 
-        const auto deadline = now() + shutdownTimeout_;
+        const auto deadline = bounded ? deadlineFor (*cycle) : std::chrono::steady_clock::time_point::max();
         if (! cycle->gate->tryCancel())
         {
             // cpp-httplib ignores stop() until listen() has published its
@@ -235,9 +237,9 @@ private:
 
         const auto finished = cycle->gate->waitUntilFinished (
             bounded ? deadline : std::chrono::steady_clock::time_point::max());
-        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds> (
-            deadline - now()).count();
-        const auto workerWaitMilliseconds = bounded ? (remaining > 0 ? static_cast<int> (remaining) : 0) : -1;
+        const auto workerWaitMilliseconds = bounded
+            ? remainingMilliseconds (deadline, now())
+            : -1;
         try
         {
             cycle->listener->onWorkerExitWait (workerWaitMilliseconds);
@@ -285,6 +287,49 @@ private:
         {
             return std::chrono::steady_clock::now();
         }
+    }
+
+    static std::chrono::steady_clock::time_point makeDeadline (
+        std::chrono::steady_clock::time_point start,
+        std::chrono::milliseconds timeout) noexcept
+    {
+        using Duration = std::chrono::steady_clock::duration;
+        using FloatingSeconds = std::chrono::duration<long double>;
+
+        if (timeout <= std::chrono::milliseconds::zero())
+            return start;
+
+        if (FloatingSeconds (timeout) >= FloatingSeconds (Duration::max()))
+            return std::chrono::steady_clock::time_point::max();
+
+        const auto duration = std::chrono::duration_cast<Duration> (timeout);
+        const auto latestSafeStart = std::chrono::steady_clock::time_point::max() - duration;
+        return start >= latestSafeStart
+            ? std::chrono::steady_clock::time_point::max()
+            : start + duration;
+    }
+
+    static int remainingMilliseconds (
+        std::chrono::steady_clock::time_point deadline,
+        std::chrono::steady_clock::time_point current) noexcept
+    {
+        if (current >= deadline)
+            return 0;
+
+        const auto maximum = std::numeric_limits<int>::max();
+        const auto maximumWaitThreshold = makeDeadline (current, std::chrono::milliseconds (maximum));
+        if (maximumWaitThreshold != std::chrono::steady_clock::time_point::max()
+            && deadline >= maximumWaitThreshold)
+        {
+            return maximum;
+        }
+
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds> (
+            deadline - current).count();
+        if (remaining <= 0)
+            return 0;
+
+        return remaining >= maximum ? maximum : static_cast<int> (remaining);
     }
 
     void stopUntilWorkerExits() noexcept
@@ -346,7 +391,16 @@ private:
         std::shared_ptr<ListenerStartGate> gate;
         std::unique_ptr<Worker> worker;
         std::atomic<bool> listenerStopIssued { false };
+        std::optional<std::chrono::steady_clock::time_point> shutdownDeadline;
     };
+
+    std::chrono::steady_clock::time_point deadlineFor (Cycle& cycle) noexcept
+    {
+        if (! cycle.shutdownDeadline.has_value())
+            cycle.shutdownDeadline = makeDeadline (now(), shutdownTimeout_);
+
+        return *cycle.shutdownDeadline;
+    }
 
     Factory factory_;
     const std::chrono::milliseconds shutdownTimeout_;
