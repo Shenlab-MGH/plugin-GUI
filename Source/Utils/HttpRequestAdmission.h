@@ -10,7 +10,9 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 
+#include "HttpServerLifecycle.h"
 #include "httplib.h"
 
 class HttpRequestAdmission
@@ -43,3 +45,16 @@ public:
 private:
     std::atomic<bool> open_ { true };
 };
+
+inline void bindHttpRequestAdmission (
+    httplib::Server& server,
+    HttpServerLifecycle::Listener& listener)
+{
+    const auto admission = std::make_shared<HttpRequestAdmission>();
+    server.set_pre_routing_handler (
+        [admission] (const httplib::Request& request, httplib::Response& response)
+        {
+            return admission->handle (request, response);
+        });
+    listener.closeAdmission = [admission] { admission->close(); };
+}
