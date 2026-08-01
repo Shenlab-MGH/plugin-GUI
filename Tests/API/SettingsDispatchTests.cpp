@@ -74,3 +74,19 @@ TEST (SettingsDispatchTests, PropagatesSetterExceptionsWithoutApplyingLaterField
         std::runtime_error);
     EXPECT_EQ (events, (std::vector<std::string> { "type" }));
 }
+
+TEST (SettingsDispatchTests, IgnoresMissingUnknownAndWrongTypeFieldsIndependently)
+{
+    const json document = { { "device_type", "ASIO" }, { "sample_rate", "wrong" }, { "unknown", 12 } };
+    EXPECT_EQ (*optionalSettingsField<std::string> (document, "device_type"), "ASIO");
+    EXPECT_FALSE (optionalSettingsField<int> (document, "sample_rate").has_value());
+    EXPECT_FALSE (optionalSettingsField<int> (document, "missing").has_value());
+}
+
+TEST (SettingsDispatchTests, DoesNotRequestNewDirectoryForNonExactTrue)
+{
+    int requests = 0;
+    applyRecordingSettingsUpdate ({ {}, {}, {}, {}, {}, "True" },
+                                  { [] (const String&) {}, [] (const String&) {}, [] (const String&) {}, [] (const String&) {}, [] (const String&) { return false; }, [&] { ++requests; }, [] { return json::object(); } });
+    EXPECT_EQ (requests, 0);
+}

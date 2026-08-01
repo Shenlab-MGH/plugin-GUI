@@ -1,3 +1,17 @@
+/*
+    ------------------------------------------------------------------
+
+    This file is part of the Open Ephys GUI
+    Copyright (C) 2024 Open Ephys
+
+    ------------------------------------------------------------------
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+*/
+
 #ifndef SETTINGS_DISPATCH_H
 #define SETTINGS_DISPATCH_H
 
@@ -9,6 +23,20 @@
 #include <string>
 
 using json = nlohmann::json;
+
+template <typename Value>
+std::optional<Value> optionalSettingsField (const json& document,
+                                            const char* key)
+{
+    try
+    {
+        return document.at (key).get<Value>();
+    }
+    catch (const json::exception&)
+    {
+        return std::nullopt;
+    }
+}
 
 struct AudioSettingsUpdate
 {
