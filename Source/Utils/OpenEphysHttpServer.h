@@ -41,6 +41,7 @@
 #include "ControlCapabilityJson.h"
 #include "ControlDispatch.h"
 #include "ControlRead.h"
+#include "HttpRequestAdmission.h"
 #include "HttpServerLifecycle.h"
 #include "RecordingOptionsControl.h"
 #include "SettingsDispatch.h"
@@ -202,7 +203,7 @@ public:
     }
 
 private:
-    void registerRoutes (httplib::Server& server)
+    void registerRoutes (httplib::Server& server, MessageThreadCallGeneration&)
     {
         auto* svr_ = &server;
         svr_->Get ("/api/capabilities", [] (const httplib::Request&, httplib::Response& res)
@@ -1418,6 +1419,7 @@ private:
     {
         auto server = std::make_shared<httplib::Server>();
         auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+        bindHttpRequestAdmission (*server, *listener);
         listener->listen = [server]
         {
             LOGC ("Beginning HTTP server on port ", PORT);
@@ -1429,9 +1431,9 @@ private:
             LOGC ("Shutting down HTTP server");
             server->stop();
         };
-        listener->registerRoutes = [this, server] (MessageThreadCallGeneration&)
+        listener->registerRoutes = [this, server] (MessageThreadCallGeneration& generation)
         {
-            registerRoutes (*server);
+            registerRoutes (*server, generation);
         };
         return listener;
     }
