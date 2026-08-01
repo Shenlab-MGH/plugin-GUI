@@ -7,6 +7,7 @@ add_sources(${COMPONENT_NAME}_tests
         ControlDispatchTests.cpp
         ControlReadTests.cpp
         ControlStatusJsonTests.cpp
+        HttpRequestAdmissionTests.cpp
         HttpServerLifecycleTests.cpp
         MessageThreadCallTests.cpp
         RecordingOptionsControlTests.cpp
