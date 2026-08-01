@@ -97,6 +97,7 @@ public:
         std::function<bool()> listen = [] { return false; };
         std::function<bool()> isRunning = [] { return false; };
         std::function<void()> stop = [] {};
+        std::function<void()> closeAdmission = [] {};
         std::function<void(MessageThreadCallGeneration&)> registerRoutes = [] (MessageThreadCallGeneration&) {};
         std::function<void(int)> onWorkerExitWait = [] (int) {};
     };
@@ -126,27 +127,35 @@ public:
         transitionCondition_.wait (transitionLock, [this] { return ! transitionInProgress_; });
         transitionInProgress_ = true;
 
-        if (cycle_ != nullptr && cycle_->gate->state() != ListenerStartGate::State::finished)
+        auto completedCycle = cycle_;
+        if (completedCycle != nullptr
+            && completedCycle->gate->state() != ListenerStartGate::State::finished)
         {
-            transitionInProgress_ = false;
-            transitionCondition_.notify_all();
+            finishTransition();
             return;
         }
 
+        transitionLock.unlock();
         try
         {
-            auto completedCycle = std::move (cycle_);
-            transitionLock.unlock();
-
-            const auto completed = completedCycle == nullptr
-                || completedCycle->worker->waitForThreadToExit (static_cast<int> (shutdownTimeout_.count()));
-
-            transitionLock.lock();
-            if (! completed)
+            if (completedCycle != nullptr)
             {
-                cycle_ = std::move (completedCycle);
-                finishTransition();
-                return;
+                if (! retireCycle (*completedCycle))
+                {
+                    transitionLock.lock();
+                    finishTransition();
+                    transitionLock.unlock();
+                    return;
+                }
+
+                if (! completedCycle->worker->waitForThreadToExit (
+                        static_cast<int> (shutdownTimeout_.count())))
+                {
+                    transitionLock.lock();
+                    finishTransition();
+                    transitionLock.unlock();
+                    return;
+                }
             }
 
             auto newCycle = std::make_shared<Cycle>();
@@ -173,14 +182,17 @@ public:
             if (! newCycle->worker->startThread())
                 newCycle->gate->markFinished();
 
+            transitionLock.lock();
             cycle_ = std::move (newCycle);
             finishTransition();
+            transitionLock.unlock();
         }
         catch (...)
         {
             if (! transitionLock.owns_lock())
                 transitionLock.lock();
             finishTransition();
+            transitionLock.unlock();
             throw;
         }
     }
@@ -209,6 +221,13 @@ private:
         }
 
         const auto deadline = bounded ? deadlineFor (*cycle) : std::chrono::steady_clock::time_point::max();
+        if (! retireCycle (*cycle))
+        {
+            std::lock_guard<std::mutex> transitionLock (transitionMutex_);
+            finishTransition();
+            return false;
+        }
+
         if (! cycle->gate->tryCancel())
         {
             // cpp-httplib ignores stop() until listen() has published its
@@ -365,6 +384,8 @@ private:
             {
                 // Retrying is safer than destroying a live listener/server.
             }
+
+            juce::Thread::yield();
         }
     }
     class Worker final : public juce::Thread
@@ -411,9 +432,45 @@ private:
         ListenerPtr listener;
         std::shared_ptr<ListenerStartGate> gate;
         std::unique_ptr<Worker> worker;
+        // Lifecycle transitions are serialized even while their mutex is
+        // released around external callbacks, so these once-flags need no
+        // independent synchronization.
+        bool admissionClosed = false;
+        bool generationQuiesced = false;
         std::atomic<bool> listenerStopIssued { false };
         std::optional<std::chrono::steady_clock::time_point> shutdownDeadline;
     };
+
+    static bool retireCycle (Cycle& cycle) noexcept
+    {
+        if (! cycle.admissionClosed)
+        {
+            try
+            {
+                cycle.listener->closeAdmission();
+                cycle.admissionClosed = true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        if (! cycle.generationQuiesced)
+        {
+            try
+            {
+                cycle.generation.quiesce();
+                cycle.generationQuiesced = true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     std::chrono::steady_clock::time_point deadlineFor (Cycle& cycle) noexcept
     {

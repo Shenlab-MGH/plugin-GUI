@@ -193,6 +193,180 @@ TEST (HttpServerLifecycleTests, RunningListenerStopsAndJoinsBoundedly)
     EXPECT_LT (elapsed, 1s);
 }
 
+TEST (HttpServerLifecycleTests, StopClosesAdmissionAndQuiescesPendingCallBeforeTransportStop)
+{
+    struct Probe
+    {
+        MessageThreadCallGeneration generation;
+        MessageThreadCallGeneration::Registration orderingRegistration;
+        std::promise<void> queued;
+        std::shared_future<void> queuedFuture = queued.get_future().share();
+        std::promise<void> callerFinished;
+        std::shared_future<void> callerFinishedFuture = callerFinished.get_future().share();
+        std::function<void()> lateCallback;
+        std::vector<int> order;
+        std::atomic<int> operationCalls { 0 };
+        MessageThreadCallResult<int> pendingResult;
+        MessageThreadCallResult<int> rejectedDuringTransportStop;
+        bool rejectedDispatcherCalled = false;
+    };
+
+    auto probe = std::make_shared<Probe>();
+    std::thread pendingCaller;
+    std::promise<void> listenerRunning;
+    std::promise<void> transportStopped;
+    auto transportStoppedFuture = transportStopped.get_future().share();
+    std::atomic<bool> running { false };
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->registerRoutes = [&, probe] (MessageThreadCallGeneration& generation)
+            {
+                probe->generation = generation;
+                probe->orderingRegistration = generation.registerCancellation (
+                    [probe] { probe->order.push_back (2); });
+                pendingCaller = std::thread (
+                    [probe]
+                    {
+                        probe->pendingResult = runDispatchedCall (
+                            [probe]
+                            {
+                                ++probe->operationCalls;
+                                return 42;
+                            },
+                            [probe] (std::function<void()> callback)
+                            {
+                                probe->lateCallback = std::move (callback);
+                                probe->queued.set_value();
+                                return true;
+                            },
+                            5s,
+                            probe->generation);
+                        probe->callerFinished.set_value();
+                    });
+
+                if (probe->queuedFuture.wait_for (1s) != std::future_status::ready)
+                    throw std::runtime_error ("pending call queue handshake failed");
+            };
+            listener->closeAdmission = [probe] { probe->order.push_back (1); };
+            listener->listen = [&]
+            {
+                running = true;
+                listenerRunning.set_value();
+                transportStoppedFuture.wait();
+                running = false;
+                return true;
+            };
+            listener->isRunning = [&] { return running.load(); };
+            listener->stop = [&, probe]
+            {
+                probe->order.push_back (3);
+                probe->rejectedDuringTransportStop = runDispatchedCall (
+                    [] { return 7; },
+                    [probe] (std::function<void()>)
+                    {
+                        probe->rejectedDispatcherCalled = true;
+                        return true;
+                    },
+                    100ms,
+                    probe->generation);
+                transportStopped.set_value();
+            };
+            return listener;
+        });
+    ScopeExit cleanup ([&]
+                       {
+                           probe->generation.quiesce();
+                           try { transportStopped.set_value(); } catch (...) {}
+                           if (pendingCaller.joinable())
+                               pendingCaller.join();
+                       });
+
+    lifecycle.start();
+    ASSERT_EQ (listenerRunning.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_TRUE (lifecycle.stop());
+    ASSERT_EQ (probe->callerFinishedFuture.wait_for (1s), std::future_status::ready);
+    pendingCaller.join();
+
+    EXPECT_EQ (probe->order, (std::vector<int> { 1, 2, 3 }));
+    EXPECT_EQ (probe->pendingResult.status, MessageThreadCallStatus::dispatchFailed);
+    EXPECT_EQ (probe->rejectedDuringTransportStop.status, MessageThreadCallStatus::dispatchFailed);
+    EXPECT_FALSE (probe->rejectedDispatcherCalled);
+    EXPECT_EQ (probe->operationCalls.load(), 0);
+    ASSERT_TRUE (probe->lateCallback);
+    probe->lateCallback();
+    EXPECT_EQ (probe->operationCalls.load(), 0);
+}
+
+TEST (HttpServerLifecycleTests, PendingBeforeListenStillClosesAdmissionAndQuiesces)
+{
+    struct Probe
+    {
+        MessageThreadCallGeneration::Registration cancellationRegistration;
+        std::vector<int> order;
+    };
+
+    auto probe = std::make_shared<Probe>();
+    std::promise<void> workerBeforeCommit;
+    std::promise<void> allowCommit;
+    auto allowCommitFuture = allowCommit.get_future().share();
+    std::promise<void> admissionClosed;
+    std::promise<void> generationQuiesced;
+    std::atomic<int> listenCalls { 0 };
+    std::atomic<int> transportStopCalls { 0 };
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->registerRoutes = [probe, &generationQuiesced] (MessageThreadCallGeneration& generation)
+            {
+                probe->cancellationRegistration = generation.registerCancellation (
+                    [probe, &generationQuiesced]
+                    {
+                        probe->order.push_back (2);
+                        generationQuiesced.set_value();
+                    });
+            };
+            listener->closeAdmission = [probe, &admissionClosed]
+            {
+                probe->order.push_back (1);
+                admissionClosed.set_value();
+            };
+            listener->beforeCommit = [&]
+            {
+                workerBeforeCommit.set_value();
+                allowCommitFuture.wait();
+            };
+            listener->listen = [&]
+            {
+                ++listenCalls;
+                return true;
+            };
+            listener->stop = [&] { ++transportStopCalls; };
+            return listener;
+        });
+    ScopeExit releaseCommit ([&]
+                             {
+                                 try { allowCommit.set_value(); } catch (...) {}
+                             });
+
+    lifecycle.start();
+    ASSERT_EQ (workerBeforeCommit.get_future().wait_for (1s), std::future_status::ready);
+    auto stopped = std::async (std::launch::async, [&] { return lifecycle.stop(); });
+
+    EXPECT_EQ (admissionClosed.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_EQ (generationQuiesced.get_future().wait_for (1s), std::future_status::ready);
+    allowCommit.set_value();
+    ASSERT_EQ (stopped.wait_for (1s), std::future_status::ready);
+    EXPECT_TRUE (stopped.get());
+    EXPECT_EQ (probe->order, (std::vector<int> { 1, 2 }));
+    EXPECT_EQ (listenCalls.load(), 0);
+    EXPECT_EQ (transportStopCalls.load(), 0);
+}
+
 TEST (HttpServerLifecycleTests, RestartCreatesFreshGenerationAndRegistersRoutesOnce)
 {
     std::vector<std::unique_ptr<BlockingFakeListener>> listeners;
@@ -265,38 +439,127 @@ TEST (HttpServerLifecycleTests, RestartCreatesFreshGenerationAndRegistersRoutesO
     EXPECT_EQ (listeners[1]->stopCalls, 1);
 }
 
-TEST (HttpServerLifecycleTests, ListenFailureIsRestartableAndRepeatedStopIsSafe)
+TEST (HttpServerLifecycleTests, NaturalFinishRetriesAdmissionCloseBeforeCreatingFreshGeneration)
 {
-    std::atomic<int> generations { 0 };
+    struct Probe
+    {
+        MessageThreadCallGeneration::Registration cancellationRegistration;
+        std::vector<int> order;
+        std::atomic<int> closeAttempts { 0 };
+        std::thread waitForStateHelper;
+        std::promise<bool> helperFinished;
+        std::shared_future<bool> helperFinishedFuture = helperFinished.get_future().share();
+        std::atomic<bool> enableLockProbe { false };
+        bool transitionMutexAvailableDuringClose = false;
+    };
+
+    auto probe = std::make_shared<Probe>();
+    ScopeExit joinHelper ([probe]
+                          {
+                              if (probe->waitForStateHelper.joinable())
+                                  probe->waitForStateHelper.join();
+                          });
+    std::atomic<int> factoryCalls { 0 };
     std::atomic<int> listens { 0 };
     std::promise<void> firstListenReturned;
     std::promise<void> secondListenReturned;
+    MessageThreadCallResult<int> freshGenerationResult;
+    bool freshGenerationDispatcherCalled = false;
+    HttpServerLifecycle* lifecyclePointer = nullptr;
 
     HttpServerLifecycle lifecycle (
         [&]
         {
-            const auto generation = ++generations;
+            const auto generationNumber = ++factoryCalls;
+            if (generationNumber == 2)
+                probe->order.push_back (3);
+
             auto listener = std::make_shared<HttpServerLifecycle::Listener>();
-            listener->listen = [&, generation]
+            listener->registerRoutes = [&, generationNumber] (MessageThreadCallGeneration& generation)
+            {
+                if (generationNumber == 1)
+                {
+                    probe->cancellationRegistration = generation.registerCancellation (
+                        [probe] { probe->order.push_back (2); });
+                    return;
+                }
+
+                freshGenerationResult = runDispatchedCall (
+                    [] { return 17; },
+                    [&] (std::function<void()> callback)
+                    {
+                        freshGenerationDispatcherCalled = true;
+                        callback();
+                        return true;
+                    },
+                    100ms,
+                    generation);
+            };
+            listener->listen = [&, generationNumber]
             {
                 ++listens;
-                (generation == 1 ? firstListenReturned : secondListenReturned).set_value();
+                (generationNumber == 1 ? firstListenReturned : secondListenReturned).set_value();
                 return false;
             };
-            listener->registerRoutes = [] (MessageThreadCallGeneration&) {};
+            if (generationNumber == 1)
+            {
+                listener->closeAdmission = [&, probe]
+                {
+                    if (++probe->closeAttempts == 1)
+                        throw std::runtime_error ("transient admission close failure");
+
+                    probe->order.push_back (1);
+                    if (! probe->enableLockProbe.load())
+                        return;
+
+                    probe->waitForStateHelper = std::thread (
+                        [probe, &lifecyclePointer]
+                        {
+                            probe->helperFinished.set_value (
+                                lifecyclePointer->waitForState (
+                                    ListenerStartGate::State::finished,
+                                    100ms));
+                        });
+                    if (probe->helperFinishedFuture.wait_for (250ms) == std::future_status::ready)
+                        probe->transitionMutexAvailableDuringClose = probe->helperFinishedFuture.get();
+                };
+            }
             return listener;
         });
+    lifecyclePointer = &lifecycle;
 
     lifecycle.start();
-    firstListenReturned.get_future().wait();
+    ASSERT_EQ (firstListenReturned.get_future().wait_for (1s), std::future_status::ready);
     ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
-    lifecycle.start();
-    secondListenReturned.get_future().wait();
-    lifecycle.stop();
-    lifecycle.stop();
 
-    EXPECT_EQ (generations.load(), 2);
+    lifecycle.start();
+    EXPECT_EQ (factoryCalls.load(), 1);
+    EXPECT_EQ (probe->closeAttempts.load(), 1);
+    EXPECT_TRUE (probe->order.empty());
+
+    {
+        ScopeExit closeLockProbe ([probe]
+                                  {
+                                      probe->enableLockProbe = false;
+                                      if (probe->waitForStateHelper.joinable())
+                                          probe->waitForStateHelper.join();
+                                  });
+        probe->enableLockProbe = true;
+        lifecycle.start();
+    }
+    ASSERT_EQ (secondListenReturned.get_future().wait_for (1s), std::future_status::ready);
+    EXPECT_TRUE (lifecycle.stop());
+    EXPECT_TRUE (lifecycle.stop());
+
+    EXPECT_EQ (probe->order, (std::vector<int> { 1, 2, 3 }));
+    EXPECT_EQ (probe->closeAttempts.load(), 2);
+    EXPECT_TRUE (probe->transitionMutexAvailableDuringClose);
+    EXPECT_EQ (factoryCalls.load(), 2);
     EXPECT_EQ (listens.load(), 2);
+    EXPECT_TRUE (freshGenerationDispatcherCalled);
+    EXPECT_EQ (freshGenerationResult.status, MessageThreadCallStatus::completed);
+    ASSERT_TRUE (freshGenerationResult.value.has_value());
+    EXPECT_EQ (*freshGenerationResult.value, 17);
 }
 
 TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerExits)
@@ -306,13 +569,26 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
     auto releaseFuture = release.get_future().share();
     std::atomic<int> generations { 0 };
     std::atomic<bool> isRunning { false };
+    std::atomic<int> closeAdmissionCalls { 0 };
+    std::atomic<int> generationCancellationCalls { 0 };
+    std::atomic<int> transportStopCalls { 0 };
     std::vector<int> workerWaitBudgets;
+    MessageThreadCallGeneration retainedGeneration;
+    MessageThreadCallGeneration::Registration retainedCancellation;
+    auto fakeNow = std::chrono::steady_clock::now() - 1s;
 
     HttpServerLifecycle lifecycle (
         [&]
         {
             ++generations;
             auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->registerRoutes = [&] (MessageThreadCallGeneration& generation)
+            {
+                retainedGeneration = generation;
+                retainedCancellation = generation.registerCancellation (
+                    [&] { ++generationCancellationCalls; });
+            };
+            listener->closeAdmission = [&] { ++closeAdmissionCalls; };
             listener->listen = [&]
             {
                 isRunning = true;
@@ -322,14 +598,15 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
                 return true;
             };
             listener->isRunning = [&] { return isRunning.load(); };
-            listener->stop = [] {};
+            listener->stop = [&] { ++transportStopCalls; };
             listener->onWorkerExitWait = [&] (int remainingMilliseconds)
             {
                 workerWaitBudgets.push_back (remainingMilliseconds);
             };
             return listener;
         },
-        50ms);
+        10ms,
+        [&] { return fakeNow; });
     ScopeExit releaseOnFailure ([&]
                                 {
                                     try { release.set_value(); } catch (...) {}
@@ -339,8 +616,32 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
     ASSERT_EQ (running.get_future().wait_for (1s), std::future_status::ready);
 
     EXPECT_FALSE (lifecycle.stop());
+    EXPECT_EQ (closeAdmissionCalls.load(), 1);
+    EXPECT_EQ (generationCancellationCalls.load(), 1);
+    EXPECT_EQ (transportStopCalls.load(), 1);
+    ASSERT_EQ (workerWaitBudgets.size(), 1u);
+    EXPECT_EQ (workerWaitBudgets[0], 10);
+
+    bool retainedDispatcherCalled = false;
+    const auto retainedGenerationResult = runDispatchedCall (
+        [] { return 99; },
+        [&] (std::function<void()>)
+        {
+            retainedDispatcherCalled = true;
+            return true;
+        },
+        100ms,
+        retainedGeneration);
+    EXPECT_EQ (retainedGenerationResult.status, MessageThreadCallStatus::dispatchFailed);
+    EXPECT_FALSE (retainedDispatcherCalled);
+
+    fakeNow += 10ms;
+    EXPECT_FALSE (lifecycle.stop());
     lifecycle.start();
     EXPECT_EQ (generations.load(), 1);
+    EXPECT_EQ (closeAdmissionCalls.load(), 1);
+    EXPECT_EQ (generationCancellationCalls.load(), 1);
+    EXPECT_EQ (transportStopCalls.load(), 1);
 
     release.set_value();
     ASSERT_TRUE (lifecycle.waitForState (ListenerStartGate::State::finished, 1s));
@@ -359,6 +660,77 @@ TEST (HttpServerLifecycleTests, TimedOutStopRetainsItsGenerationUntilTheWorkerEx
     ASSERT_GE (workerWaitBudgets.size(), 2u);
     for (size_t index = 1; index < workerWaitBudgets.size(); ++index)
         EXPECT_EQ (workerWaitBudgets[index], 0);
+    EXPECT_EQ (closeAdmissionCalls.load(), 1);
+    EXPECT_EQ (generationCancellationCalls.load(), 1);
+    EXPECT_EQ (transportStopCalls.load(), 1);
+}
+
+TEST (HttpServerLifecycleTests, TransientAdmissionCloseFailureIsRetriedBeforeQuiesceAndTransportStop)
+{
+    struct Probe
+    {
+        MessageThreadCallGeneration::Registration cancellationRegistration;
+        std::vector<int> order;
+        std::atomic<int> closeAttempts { 0 };
+        std::atomic<int> transportStopCalls { 0 };
+    };
+
+    auto probe = std::make_shared<Probe>();
+    std::promise<void> listenerRunning;
+    std::promise<void> releaseListener;
+    auto releaseListenerFuture = releaseListener.get_future().share();
+    std::atomic<bool> running { false };
+
+    HttpServerLifecycle lifecycle (
+        [&]
+        {
+            auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+            listener->registerRoutes = [probe] (MessageThreadCallGeneration& generation)
+            {
+                probe->cancellationRegistration = generation.registerCancellation (
+                    [probe] { probe->order.push_back (2); });
+            };
+            listener->closeAdmission = [probe]
+            {
+                if (++probe->closeAttempts == 1)
+                    throw std::runtime_error ("transient admission close failure");
+                probe->order.push_back (1);
+            };
+            listener->listen = [&]
+            {
+                running = true;
+                listenerRunning.set_value();
+                releaseListenerFuture.wait();
+                running = false;
+                return true;
+            };
+            listener->isRunning = [&] { return running.load(); };
+            listener->stop = [&, probe]
+            {
+                probe->order.push_back (3);
+                ++probe->transportStopCalls;
+                releaseListener.set_value();
+            };
+            return listener;
+        });
+    ScopeExit releaseOnFailure ([&]
+                                {
+                                    try { releaseListener.set_value(); } catch (...) {}
+                                });
+
+    lifecycle.start();
+    ASSERT_EQ (listenerRunning.get_future().wait_for (1s), std::future_status::ready);
+
+    EXPECT_FALSE (lifecycle.stop());
+    EXPECT_EQ (probe->closeAttempts.load(), 1);
+    EXPECT_EQ (probe->transportStopCalls.load(), 0);
+    EXPECT_TRUE (probe->order.empty());
+
+    EXPECT_TRUE (lifecycle.stop());
+    EXPECT_EQ (probe->closeAttempts.load(), 2);
+    EXPECT_EQ (probe->transportStopCalls.load(), 1);
+    EXPECT_EQ (probe->order, (std::vector<int> { 1, 2, 3 }));
+    EXPECT_TRUE (lifecycle.stop());
 }
 
 TEST (HttpServerLifecycleTests, FactoryAndRegistrarFailuresDoNotWedgeLaterStarts)
