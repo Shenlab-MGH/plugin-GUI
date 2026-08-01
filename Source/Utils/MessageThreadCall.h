@@ -26,15 +26,19 @@
 
 #include "../../JuceLibraryCode/JuceHeader.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <exception>
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 enum class MessageThreadCallStatus
 {
@@ -91,6 +95,142 @@ private:
         };
 };
 
+class MessageThreadCallGeneration
+{
+private:
+    struct State;
+
+public:
+    class Registration
+    {
+    public:
+        Registration() = default;
+        Registration (const Registration&) = delete;
+        Registration& operator= (const Registration&) = delete;
+
+        Registration (Registration&& other) noexcept
+            : state (std::move (other.state)), identifier (other.identifier)
+        {
+            other.identifier = 0;
+        }
+
+        Registration& operator= (Registration&& other) noexcept
+        {
+            if (this != &other)
+            {
+                reset();
+                state = std::move (other.state);
+                identifier = other.identifier;
+                other.identifier = 0;
+            }
+
+            return *this;
+        }
+
+        ~Registration()
+        {
+            reset();
+        }
+
+        explicit operator bool() const noexcept
+        {
+            return identifier != 0;
+        }
+
+    private:
+        Registration (std::shared_ptr<State> registrationState,
+                      std::size_t registrationIdentifier)
+            : state (std::move (registrationState)), identifier (registrationIdentifier)
+        {
+        }
+
+        void reset()
+        {
+            if (identifier == 0)
+                return;
+
+            if (auto lockedState = state.lock())
+            {
+                std::lock_guard<std::mutex> guard (lockedState->mutex);
+                auto& cancellations = lockedState->cancellations;
+                cancellations.erase (
+                    std::remove_if (
+                        cancellations.begin(),
+                        cancellations.end(),
+                        [this] (const auto& cancellation)
+                        {
+                            return cancellation.first == identifier;
+                        }),
+                    cancellations.end());
+            }
+
+            identifier = 0;
+        }
+
+        std::weak_ptr<State> state;
+        std::size_t identifier = 0;
+
+        friend class MessageThreadCallGeneration;
+    };
+
+    Registration registerCancellation (std::function<void()> cancellation)
+    {
+        std::lock_guard<std::mutex> guard (state->mutex);
+
+        if (state->quiesced)
+            return {};
+
+        const auto identifier = state->nextIdentifier++;
+        state->cancellations.emplace_back (identifier, std::move (cancellation));
+        return { state, identifier };
+    }
+
+    void quiesce()
+    {
+        std::vector<std::pair<std::size_t, std::function<void()>>> pendingCancellations;
+
+        {
+            std::lock_guard<std::mutex> guard (state->mutex);
+
+            if (state->quiesced)
+                return;
+
+            state->quiesced = true;
+            pendingCancellations.swap (state->cancellations);
+        }
+
+        for (const auto& cancellation : pendingCancellations)
+        {
+            try
+            {
+                cancellation.second();
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+
+#if defined (BUILD_TESTS)
+    std::size_t pendingCancellationCount() const
+    {
+        std::lock_guard<std::mutex> guard (state->mutex);
+        return state->cancellations.size();
+    }
+#endif
+
+private:
+    struct State
+    {
+        mutable std::mutex mutex;
+        bool quiesced = false;
+        std::size_t nextIdentifier = 1;
+        std::vector<std::pair<std::size_t, std::function<void()>>> cancellations;
+    };
+
+    std::shared_ptr<State> state = std::make_shared<State>();
+};
+
 template <typename Value>
 struct MessageThreadCallResult
 {
@@ -101,12 +241,46 @@ struct MessageThreadCallResult
 
 namespace MessageThreadCallDetail
 {
+#if defined (BUILD_TESTS)
+inline std::atomic<int> injectedPreparationFailures { 0 };
+
+inline void failNextCompletionPreparation()
+{
+    injectedPreparationFailures.fetch_add (1, std::memory_order_release);
+}
+
+inline bool consumeInjectedPreparationFailure()
+{
+    auto remaining = injectedPreparationFailures.load (std::memory_order_acquire);
+    while (remaining > 0)
+        if (injectedPreparationFailures.compare_exchange_weak (
+                remaining,
+                remaining - 1,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            return true;
+
+    return false;
+}
+
+inline int injectedPreparationFailureCount()
+{
+    return injectedPreparationFailures.load (std::memory_order_acquire);
+}
+
+inline void clearInjectedPreparationFailures()
+{
+    injectedPreparationFailures.store (0, std::memory_order_release);
+}
+#endif
+
 template <typename Operation, typename Dispatcher>
 auto runDispatchedCallWithGate (
     Operation&& operation,
     Dispatcher&& dispatcher,
     std::chrono::milliseconds timeout,
-    std::shared_ptr<MessageThreadCallStartGate> gate)
+    std::shared_ptr<MessageThreadCallStartGate> gate,
+    MessageThreadCallGeneration* generation)
     -> MessageThreadCallResult<std::invoke_result_t<std::decay_t<Operation>>>
 {
     using Callable = std::decay_t<Operation>;
@@ -116,38 +290,221 @@ auto runDispatchedCallWithGate (
     struct SharedState
     {
         explicit SharedState (Callable&& callable)
-            : operation (std::move (callable))
+            : operation (std::move (callable)),
+              fallbackFailure (std::make_shared<CompletionResult> (
+                  MessageThreadCallStatus::failed,
+                  std::nullopt,
+                  "Could not prepare the message-thread call result.")),
+              dispatchFallback (std::make_shared<CompletionResult> (
+                  MessageThreadCallStatus::dispatchFailed,
+                  std::nullopt,
+                  "Could not prepare the message-thread dispatch result.")),
+              timeoutFallback (std::make_shared<CompletionResult> (
+                  MessageThreadCallStatus::timedOut,
+                  std::nullopt,
+                  "Timed out waiting for the message-thread operation.")),
+              shutdownCancellation (std::make_shared<CompletionResult> (
+                  MessageThreadCallStatus::dispatchFailed,
+                  std::nullopt,
+                  "Message-thread call cancelled by listener shutdown."))
         {
         }
 
         Callable operation;
-        std::promise<void> completion;
-        std::optional<Value> value;
-        String error;
+        struct CompletionResult
+        {
+            CompletionResult (MessageThreadCallStatus completedStatus,
+                              std::nullopt_t,
+                              String completedError)
+                : status (completedStatus),
+                  error (std::move (completedError))
+            {
+            }
+
+            CompletionResult (MessageThreadCallStatus completedStatus,
+                              std::in_place_t,
+                              Value&& completedValue,
+                              String completedError)
+                : status (completedStatus),
+                  value (std::in_place,
+                         std::move (completedValue)),
+                  error (std::move (completedError))
+            {
+            }
+
+            MessageThreadCallStatus status;
+            std::optional<Value> value;
+            String error;
+        };
+
+        std::shared_ptr<CompletionResult> result;
+        const std::shared_ptr<CompletionResult> fallbackFailure;
+        const std::shared_ptr<CompletionResult> dispatchFallback;
+        const std::shared_ptr<CompletionResult> timeoutFallback;
+        const std::shared_ptr<CompletionResult> shutdownCancellation;
+        std::mutex completionMutex;
+        std::condition_variable completionChanged;
+        bool completed = false;
+
+        std::shared_ptr<CompletionResult> prepare (
+            MessageThreadCallStatus completedStatus,
+            String completedError)
+        {
+#if defined (BUILD_TESTS)
+            if (consumeInjectedPreparationFailure())
+                throw std::bad_alloc();
+#endif
+            return std::make_shared<CompletionResult> (
+                completedStatus,
+                std::nullopt,
+                std::move (completedError));
+        }
+
+        std::shared_ptr<CompletionResult> prepareValue (
+            MessageThreadCallStatus completedStatus,
+            Value&& completedValue,
+            String completedError)
+        {
+#if defined (BUILD_TESTS)
+            if (consumeInjectedPreparationFailure())
+                throw std::bad_alloc();
+#endif
+            return std::make_shared<CompletionResult> (
+                completedStatus,
+                std::in_place,
+                std::move (completedValue),
+                std::move (completedError));
+        }
+
+        void publish (std::shared_ptr<CompletionResult> completedResult)
+        {
+            {
+                std::lock_guard<std::mutex> guard (completionMutex);
+
+                if (completed)
+                    return;
+
+                result = std::move (completedResult);
+                completed = true;
+            }
+
+            completionChanged.notify_all();
+        }
+
+        bool cancelAndPublish (
+            const std::shared_ptr<MessageThreadCallStartGate>& gate,
+            std::shared_ptr<CompletionResult> completedResult)
+        {
+            std::unique_lock<std::mutex> lock (completionMutex);
+
+            if (! gate->tryCancel())
+                return false;
+
+            result = std::move (completedResult);
+            completed = true;
+            lock.unlock();
+            completionChanged.notify_all();
+            return true;
+        }
+
+        std::shared_ptr<CompletionResult> fallbackFor (
+            MessageThreadCallStatus completedStatus) const
+        {
+            return completedStatus == MessageThreadCallStatus::timedOut
+                ? timeoutFallback
+                : dispatchFallback;
+        }
     };
 
     auto state = std::make_shared<SharedState> (Callable (std::forward<Operation> (operation)));
-    auto completion = state->completion.get_future();
     const auto finishStartedOperation =
         [&]() -> MessageThreadCallResult<Value>
     {
-        completion.wait();
+        std::shared_ptr<typename SharedState::CompletionResult> completedResult;
+        {
+            std::unique_lock<std::mutex> lock (state->completionMutex);
+            state->completionChanged.wait (
+                lock,
+                [state] { return state->completed; });
+            completedResult = state->result;
+        }
 
-        if (state->error.isNotEmpty())
+        try
+        {
+            return {
+                completedResult->status,
+                std::move (completedResult->value),
+                completedResult->error
+            };
+        }
+        catch (const std::exception& exception)
+        {
+            try
+            {
+                return {
+                    MessageThreadCallStatus::failed,
+                    std::nullopt,
+                    String::fromUTF8 (exception.what())
+                };
+            }
+            catch (...)
+            {
+                return {
+                    MessageThreadCallStatus::failed,
+                    std::nullopt,
+                    "Unknown message-thread result move failure."
+                };
+            }
+        }
+        catch (...)
         {
             return {
                 MessageThreadCallStatus::failed,
                 std::nullopt,
-                state->error
+                "Unknown message-thread result move failure."
             };
         }
-
-        return {
-            MessageThreadCallStatus::completed,
-            std::move (state->value),
-            {}
-        };
     };
+
+    const auto cancelPendingCall =
+        [state, gate] (MessageThreadCallStatus status, const char* error)
+    {
+        std::shared_ptr<typename SharedState::CompletionResult> prepared;
+        try
+        {
+            prepared = state->prepare (
+                status,
+                String::fromUTF8 (error));
+        }
+        catch (...)
+        {
+            prepared = state->fallbackFor (status);
+        }
+
+        return state->cancelAndPublish (gate, std::move (prepared));
+    };
+
+    std::optional<MessageThreadCallGeneration::Registration> generationRegistration;
+
+    if (generation != nullptr)
+        generationRegistration.emplace (generation->registerCancellation (
+            [weakState = std::weak_ptr<SharedState> (state), gate]
+            {
+                if (auto lockedState = weakState.lock())
+                {
+                    lockedState->cancelAndPublish (
+                        gate,
+                        lockedState->shutdownCancellation);
+                }
+            }));
+
+    if (generation != nullptr && ! *generationRegistration)
+    {
+        state->cancelAndPublish (
+            gate,
+            state->shutdownCancellation);
+        return finishStartedOperation();
+    }
 
     std::function<void()> dispatchedOperation =
         [state, gate]
@@ -156,19 +513,44 @@ auto runDispatchedCallWithGate (
         {
             try
             {
-                state->value.emplace (state->operation());
+                auto prepared = state->prepareValue (
+                    MessageThreadCallStatus::completed,
+                    state->operation(),
+                    {});
+                state->publish (std::move (prepared));
             }
             catch (const std::exception& exception)
             {
-                state->error = String::fromUTF8 (exception.what());
+                try
+                {
+                    const auto error = String::fromUTF8 (exception.what());
+                    auto prepared = state->prepare (
+                        error.isNotEmpty()
+                            ? MessageThreadCallStatus::failed
+                            : MessageThreadCallStatus::completed,
+                        error);
+                    state->publish (std::move (prepared));
+                }
+                catch (...)
+                {
+                    state->publish (state->fallbackFailure);
+                }
             }
             catch (...)
             {
-                state->error = "Unknown message-thread operation failure.";
+                try
+                {
+                    auto prepared = state->prepare (
+                        MessageThreadCallStatus::failed,
+                        "Unknown message-thread operation failure.");
+                    state->publish (std::move (prepared));
+                }
+                catch (...)
+                {
+                    state->publish (state->fallbackFailure);
+                }
             }
         }
-
-        state->completion.set_value();
     };
 
     bool dispatched = false;
@@ -178,26 +560,22 @@ auto runDispatchedCallWithGate (
     }
     catch (const std::exception& exception)
     {
-        if (gate->tryCancel())
-        {
-            return {
+        if (cancelPendingCall (
                 MessageThreadCallStatus::dispatchFailed,
-                std::nullopt,
-                String::fromUTF8 (exception.what())
-            };
+                exception.what()))
+        {
+            return finishStartedOperation();
         }
 
         return finishStartedOperation();
     }
     catch (...)
     {
-        if (gate->tryCancel())
-        {
-            return {
+        if (cancelPendingCall (
                 MessageThreadCallStatus::dispatchFailed,
-                std::nullopt,
-                "Unknown message-thread dispatch failure."
-            };
+                "Unknown message-thread dispatch failure."))
+        {
+            return finishStartedOperation();
         }
 
         return finishStartedOperation();
@@ -205,25 +583,32 @@ auto runDispatchedCallWithGate (
 
     if (! dispatched)
     {
-        if (gate->tryCancel())
-        {
-            return {
+        if (cancelPendingCall (
                 MessageThreadCallStatus::dispatchFailed,
-                std::nullopt,
-                "Could not dispatch the operation to the message thread."
-            };
+                "Could not dispatch the operation to the message thread."))
+        {
+            return finishStartedOperation();
         }
 
         return finishStartedOperation();
     }
 
-    if (completion.wait_for (timeout) != std::future_status::ready)
+    bool completedBeforeTimeout = false;
     {
-        if (gate->tryCancel())
+        std::unique_lock<std::mutex> lock (state->completionMutex);
+        completedBeforeTimeout = state->completionChanged.wait_for (
+            lock,
+            timeout,
+            [state] { return state->completed; });
+    }
+
+    if (! completedBeforeTimeout)
+    {
+        if (cancelPendingCall (
+                MessageThreadCallStatus::timedOut,
+                "Timed out waiting for the message-thread operation."))
         {
-            return { MessageThreadCallStatus::timedOut,
-                     std::nullopt,
-                     "Timed out waiting for the message-thread operation." };
+            return finishStartedOperation();
         }
 
         return finishStartedOperation();
@@ -243,7 +628,23 @@ auto runDispatchedCall (Operation&& operation,
         std::forward<Operation> (operation),
         std::forward<Dispatcher> (dispatcher),
         timeout,
-        std::make_shared<MessageThreadCallStartGate>());
+        std::make_shared<MessageThreadCallStartGate>(),
+        nullptr);
+}
+
+template <typename Operation, typename Dispatcher>
+auto runDispatchedCall (Operation&& operation,
+                        Dispatcher&& dispatcher,
+                        std::chrono::milliseconds timeout,
+                        MessageThreadCallGeneration& generation)
+    -> MessageThreadCallResult<std::invoke_result_t<std::decay_t<Operation>>>
+{
+    return MessageThreadCallDetail::runDispatchedCallWithGate (
+        std::forward<Operation> (operation),
+        std::forward<Dispatcher> (dispatcher),
+        timeout,
+        std::make_shared<MessageThreadCallStartGate>(),
+        &generation);
 }
 
 #if defined (BUILD_TESTS)
@@ -263,7 +664,8 @@ auto runDispatchedCall (
         std::forward<Operation> (operation),
         std::forward<Dispatcher> (dispatcher),
         timeout,
-        std::move (injectedGate));
+        std::move (injectedGate),
+        nullptr);
 }
 #endif
 
