@@ -39,6 +39,7 @@
 
 #include "AcquisitionRecordingRuntime.h"
 #include "ControlCapabilityJson.h"
+#include "ControlDispatch.h"
 #include "ControlRead.h"
 #include "HttpServerLifecycle.h"
 #include "RecordingOptionsControl.h"
@@ -69,6 +70,23 @@ inline void setControlErrorResponse (httplib::Response& response,
     document["error"]["message"] = errorMessage.toStdString();
     response.status = httpStatus;
     response.set_content (document.dump(), "application/json");
+}
+
+template <typename Value>
+bool setLegacyDispatchErrorResponse (
+    httplib::Response& response,
+    const ControlDispatchResult<Value>& result)
+{
+    if (result.value.has_value())
+        return false;
+
+    json document;
+    document["ok"] = false;
+    document["error"]["code"] = result.errorCode.toStdString();
+    document["error"]["message"] = result.errorMessage.toStdString();
+    response.status = result.httpStatus;
+    response.set_content (document.dump(), "application/json");
+    return true;
 }
 } // namespace OpenEphysHttpDetail
 
@@ -234,42 +252,45 @@ private:
             }
 
             if (desired_mode == "RECORD" && !CoreServices::getRecordingStatus()) {
-                std::promise<void> signalRecordingStarted;
-                std::future<void> signalRecordingStartedFuture = signalRecordingStarted.get_future();
-
-                MessageManager::callAsync([this, &signalRecordingStarted] {
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this]
+                    {
                     CoreServices::setRecordingStatus(true);
-                    signalRecordingStarted.set_value(); // Signal that recording has started
-                });
+                    return true;
+                    },
+                    std::chrono::seconds (2));
 
-                // Wait for recording to start
-                signalRecordingStartedFuture.wait();
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
             }
             else if (desired_mode == "ACQUIRE") {
-                std::promise<void> signalAcquisitionStarted;
-                std::future<void> signalAcquisitionStartedFuture = signalAcquisitionStarted.get_future();
-
-                MessageManager::callAsync([this, &signalAcquisitionStarted] {
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this]
+                    {
                     CoreServices::setRecordingStatus(false);
                     CoreServices::setAcquisitionStatus(true);
-                    signalAcquisitionStarted.set_value(); // Signal that acquisition has started
-                });
+                    return true;
+                    },
+                    std::chrono::seconds (2));
 
-                // Wait for acquisition to start
-                signalAcquisitionStartedFuture.wait();
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
             }
             else if (desired_mode == "IDLE") {
-                std::promise<void> signalAcquisitionStopped;
-                std::future<void> signalAcquisitionStoppedFuture = signalAcquisitionStopped.get_future();
-
-                MessageManager::callAsync([this, &signalAcquisitionStopped] {
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this]
+                    {
                     CoreServices::setRecordingStatus(false);
                     CoreServices::setAcquisitionStatus(false);
-                    signalAcquisitionStopped.set_value(); // Signal that acquisition has stopped
-                });
+                    return true;
+                    },
+                    std::chrono::seconds (2));
 
-                // Wait for acquisition to stop
-                signalAcquisitionStoppedFuture.wait();
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
             }
 
             json ret;
@@ -690,16 +711,17 @@ private:
                 return;
             }
 
-            std::promise<void> signalChainLoaded;
-            std::future<void> signalChainLoadedFuture = signalChainLoaded.get_future();
+            const auto dispatchResult = handleControlDispatch (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [message_str]
+                {
+                    CoreServices::loadSignalChain(message_str);
+                    return true;
+                },
+                std::chrono::seconds (2));
 
-            MessageManager::callAsync([message_str, &signalChainLoaded] {
-                CoreServices::loadSignalChain(message_str);
-                signalChainLoaded.set_value(); // Signal that loadSignalChain is finished
-            });
-
-            // Wait for loadSignalChain to finish
-            signalChainLoadedFuture.wait();
+            if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                return;
 
             json ret;
             status_to_json(graph_, &ret);
@@ -736,12 +758,10 @@ private:
                 return;
             }
 
-            std::promise<void> signalChainSaved;
-            std::future<void> signalChainSavedFuture = signalChainSaved.get_future();
-
-            String xml;
-
-            MessageManager::callAsync([this, message_str, writePath, &signalChainSaved, &xml] {
+            const auto dispatchResult = handleControlDispatch (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [this, writePath]
+                {
 
                 std::unique_ptr<XmlElement> xmlElement = std::make_unique<XmlElement> ("SETTINGS");
 
@@ -756,15 +776,15 @@ private:
 
                 message += writePath.getFileName();
 
-                xml = xmlElement->toString();
-                signalChainSaved.set_value(); // Signal that saveSignalChain is finished
-            });
+                return xmlElement->toString();
+                },
+                std::chrono::seconds (2));
 
-            // Wait for saveSignalChain to finish
-            signalChainSavedFuture.wait();
+            if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                return;
 
             json ret;
-            ret["info"] = xml.toStdString();
+            ret["info"] = dispatchResult.value->toStdString();
             res.set_content(ret.dump(), "application/json"); });
 
         svr_->Get ("/api/processors/list", [this] (const httplib::Request&, httplib::Response& res)
@@ -945,20 +965,19 @@ private:
                 return;
             }
 
-            std::promise<void> processorConfigured;
-            std::future<void> processorConfiguredFuture = processorConfigured.get_future();
+            const auto dispatchResult = handleControlDispatch (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [this, processor, message_str]
+                {
+                    return graph_->sendConfigMessage (processor, String (message_str));
+                },
+                std::chrono::seconds (2));
 
-            String return_msg;
-            MessageManager::callAsync([this, processor, message_str, &return_msg, &processorConfigured] {
-                return_msg = graph_->sendConfigMessage(processor, String(message_str));
-                processorConfigured.set_value(); // Signal that processor has received configuration message
-            });
-
-            // Wait for processor to parse config message
-            processorConfiguredFuture.wait();
+            if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                return;
              
             json ret;
-            ret["info"] = return_msg.toStdString();
+            ret["info"] = dispatchResult.value->toStdString();
             res.set_content(ret.dump(), "application/json"); });
 
         svr_->Get ("/api/processors/clear", [this] (const httplib::Request&, httplib::Response& res)
@@ -967,27 +986,23 @@ private:
 
             if (!CoreServices::getAcquisitionStatus())
             {
-                std::promise<void> signalChainCleared;
-                std::future<void> signalChainClearedFuture = signalChainCleared.get_future();
-
-                try {
-                    MessageManager::callAsync([this, &signalChainCleared] {
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this]
+                    {
                         try {
                             graph_->clearSignalChain();
-                            signalChainCleared.set_value();
                         } catch (const std::exception& e) {
                             LOGE("Error clearing signal chain: ", e.what());
-                            signalChainCleared.set_value();
                         }
-                    });
+                        return true;
+                    },
+                    std::chrono::seconds (2));
 
-                    // Wait for loadSignalChain to finish
-                    signalChainClearedFuture.wait();
-                    return_msg = "Signal chain cleared successfully.";
-                } catch (const std::exception& e) {
-                    LOGE("Error in clear signal chain async call: ", e.what());
-                    return_msg = "Error clearing signal chain: " + String(e.what());
-                }
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
+
+                return_msg = "Signal chain cleared successfully.";
             } else {
                 return_msg = "Cannot clear signal chain while acquisition is active!";
             }
@@ -1039,18 +1054,19 @@ private:
             {
                 String processorName = processor->getDisplayName();
 
-                std::promise<void> processorDeleted;
-                std::future<void> processorDeletedFuture = processorDeleted.get_future();
-
-                MessageManager::callAsync([this, processor, &processorDeleted] {
-                    DeleteProcessor* action = new DeleteProcessor(processor);
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this, processor]
+                    {
+                    DeleteProcessor* action = new DeleteProcessor (processor);
                     graph_->getUndoManager()->beginNewTransaction("Disabled during acquisition");
-                    graph_->getUndoManager()->perform(action);
-                    processorDeleted.set_value(); // Signal that processor has been deleted
-                });
+                    graph_->getUndoManager()->perform (action);
+                    return true;
+                    },
+                    std::chrono::seconds (2));
 
-                // Wait for processor to be deleted
-                processorDeletedFuture.wait();
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
 
                 return_msg = processorName + " [" +  String(procId) + "] deleted successfully";
             } else {
@@ -1143,18 +1159,19 @@ private:
                         destProcessor = sourceProcessor->getDestNode();
                 }
 
-                std::promise <void> processorAdded;
-                std::future <void> processorAddedFuture = processorAdded.get_future();
-
-                MessageManager::callAsync([this, description, sourceProcessor, destProcessor, &processorAdded] {
-                    AddProcessor* action = new AddProcessor(description, sourceProcessor, destProcessor, false);
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [this, description, sourceProcessor, destProcessor]
+                    {
+                    AddProcessor* action = new AddProcessor (description, sourceProcessor, destProcessor, false);
                     graph_->getUndoManager()->beginNewTransaction("Disabled during acquisition");
-                    graph_->getUndoManager()->perform(action);
-                    processorAdded.set_value(); // Signal that processor has been added
-                });
+                    graph_->getUndoManager()->perform (action);
+                    return true;
+                    },
+                    std::chrono::seconds (2));
 
-                // Wait for processor to be added
-                processorAddedFuture.wait();
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
 
                 return_msg = procName + " added successfully";
                 
@@ -1178,16 +1195,17 @@ private:
 
             if (! undoDisabled && um->canUndo())
             {
-                std::promise<void> undoCompleted;
-                std::future<void> undoCompletedFuture = undoCompleted.get_future();
-
-                MessageManager::callAsync([um, &undoCompleted] {
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [um]
+                    {
                     um->undo();
-                    undoCompleted.set_value(); // Signal that undo is finished
-                });
+                    return true;
+                    },
+                    std::chrono::seconds (2));
 
-                // Wait for undo to finish
-                undoCompletedFuture.wait();
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
 
                 return_msg = "Undo operation completed successfully.";
             } else {
@@ -1210,16 +1228,17 @@ private:
 
             if (!redoDisabled && um->canRedo())
             {
-                std::promise<void> redoCompleted;
-                std::future<void> redoCompletedFuture = redoCompleted.get_future();
-
-                MessageManager::callAsync([um, &redoCompleted] {
+                const auto dispatchResult = handleControlDispatch (
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    [um]
+                    {
                     um->redo();
-                    redoCompleted.set_value(); // Signal that redo is finished
-                });
+                    return true;
+                    },
+                    std::chrono::seconds (2));
 
-                // Wait for redo to finish
-                redoCompletedFuture.wait();
+                if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                    return;
 
                 return_msg = "Redo operation completed successfully.";
             } else {
@@ -1308,17 +1327,17 @@ private:
                            return;
                        }
 
-                       std::promise<void> parameterChanged;
-                       std::future<void> parameterChangedFuture = parameterChanged.get_future();
+                       const auto dispatchResult = handleControlDispatch (
+                           OpenEphysHttpDetail::dispatchToMessageThread,
+                           [parameter, val]
+                           {
+                               parameter->setNextValue (val);
+                               return true;
+                           },
+                           std::chrono::seconds (2));
 
-                       MessageManager::callAsync ([parameter, val, &parameterChanged]
-                                                  {
-                                                      parameter->setNextValue (val);
-                                                      parameterChanged.set_value(); // Signal that parameter has been changed
-                                                  });
-
-                       // Wait for parameter to be changed
-                       parameterChangedFuture.wait();
+                       if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                           return;
 
                        json ret;
                        parameter_to_json (parameter, &ret);
@@ -1415,17 +1434,17 @@ private:
                            return;
                        }
 
-                       std::promise<void> parameterChanged;
-                       std::future<void> parameterChangedFuture = parameterChanged.get_future();
+                       const auto dispatchResult = handleControlDispatch (
+                           OpenEphysHttpDetail::dispatchToMessageThread,
+                           [parameter, val]
+                           {
+                               parameter->setNextValue (val);
+                               return true;
+                           },
+                           std::chrono::seconds (2));
 
-                       MessageManager::callAsync ([parameter, val, &parameterChanged]
-                                                  {
-                                                      parameter->setNextValue (val);
-                                                      parameterChanged.set_value(); // Signal that parameter has been changed
-                                                  });
-
-                       // Wait for parameter to be changed
-                       parameterChangedFuture.wait();
+                       if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
+                           return;
 
                        json ret;
                        parameter_to_json (parameter, &ret);

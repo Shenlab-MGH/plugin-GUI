@@ -16,6 +16,7 @@ add_sources(
   ControlCapability.cpp
   ControlCapabilityJson.h
   ControlCapabilityJson.cpp
+  ControlDispatch.h
   ControlRead.h
   ControlStatus.h
   ControlStatusJson.h
