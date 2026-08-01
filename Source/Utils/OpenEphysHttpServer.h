@@ -520,7 +520,7 @@ private:
             recording_info_to_json(graph_, &ret);
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Put ("/api/recording", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put ("/api/recording", [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
                 
                 json request_json;
@@ -562,11 +562,12 @@ private:
                             [this] { json ret; recording_info_to_json (graph_, &ret); return ret; }
                         });
                     },
-                    std::chrono::seconds (2));
+                    std::chrono::seconds (2),
+                    generation);
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
                 res.set_content(result.value->dump(), "application/json"); });
 
-        svr_->Put ("/api/recording/([0-9]+)", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put ("/api/recording/([0-9]+)", [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
 
                 json request_json;
@@ -602,7 +603,8 @@ private:
                             [this] { json ret; recording_info_to_json (graph_, &ret); return ret; }
                         });
                     },
-                    std::chrono::seconds (2));
+                    std::chrono::seconds (2),
+                    generation);
                 if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, result)) return;
                 res.set_content(result.value->dump(), "application/json"); });
 
