@@ -221,7 +221,7 @@ void ZoomTimeline::paint (Graphics& g)
     /* Draw the current playback position */
     g.setColour (findColour (ThemeColours::defaultText));
     float timelinePos = (float) (fileReader->getPlayheadPosition() - startSampleNumber) / (stopSampleNumber - startSampleNumber) * getWidth();
-    if (0 < timelinePos < sliderPosition + sliderWidth)
+    if (0 < timelinePos && timelinePos < getWidth())
     {
         g.setOpacity (1.0f);
         g.fillRoundedRectangle (timelinePos, 0, 1, this->getHeight(), 0.2);
