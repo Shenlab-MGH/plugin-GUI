@@ -40,6 +40,7 @@
 #include "AcquisitionRecordingRuntime.h"
 #include "ControlCapabilityJson.h"
 #include "ControlRead.h"
+#include "HttpServerLifecycle.h"
 #include "RecordingOptionsControl.h"
 #include "StatusHttpAdapter.h"
 #include "Utils.h"
@@ -170,19 +171,21 @@ inline void setControlErrorResponse (httplib::Response& response,
  *          quits the application
  */
 
-class OpenEphysHttpServer : juce::Thread
+class OpenEphysHttpServer
 {
 public:
     OpenEphysHttpServer (AudioComponent& audio,
                          ProcessorGraph& graph)
-        : juce::Thread ("HttpServer"),
-          audio_ (audio),
-          graph_ (&graph)
+        : audio_ (audio),
+          graph_ (&graph),
+          lifecycle_ ([this] { return createListener(); })
     {
     }
 
-    void run() override
+private:
+    void registerRoutes (httplib::Server& server)
     {
+        auto* svr_ = &server;
         svr_->Get ("/api/capabilities", [] (const httplib::Request&, httplib::Response& res)
                    {
             const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
@@ -1439,34 +1442,43 @@ public:
                        res.set_content (ret.dump(), "application/json");
                    });
 
-        LOGC ("Beginning HTTP server on port ", PORT);
-        svr_->listen ("0.0.0.0", PORT);
     }
 
+public:
     void start()
     {
-        if (! svr_)
-        {
-            svr_ = std::make_unique<httplib::Server>();
-        }
-        startThread();
+        lifecycle_.start();
     }
 
     void stop()
     {
-        if (svr_)
-        {
-            LOGC ("Shutting down HTTP server");
-            svr_->stop();
-        }
-        stopThread (5000);
+        lifecycle_.stop();
     }
 
 private:
-    std::unique_ptr<httplib::Server> svr_;
     MainWindow* main_;
     AudioComponent& audio_;
     ProcessorGraph* graph_;
+    HttpServerLifecycle lifecycle_;
+
+    HttpServerLifecycle::ListenerPtr createListener()
+    {
+        auto server = std::make_shared<httplib::Server>();
+        auto listener = std::make_shared<HttpServerLifecycle::Listener>();
+        listener->listen = [server]
+        {
+            LOGC ("Beginning HTTP server on port ", PORT);
+            return server->listen ("0.0.0.0", PORT);
+        };
+        listener->isRunning = [server] { return server->is_running(); };
+        listener->stop = [server]
+        {
+            LOGC ("Shutting down HTTP server");
+            server->stop();
+        };
+        listener->registerRoutes = [this, server] { registerRoutes (*server); };
+        return listener;
+    }
 
     var json_to_var (const json& value)
     {
