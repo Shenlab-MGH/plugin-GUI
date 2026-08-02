@@ -633,7 +633,7 @@ private:
             status_to_json(graph_, &ret);
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Put ("/api/load", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put ("/api/load", [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
             
             std::string message_str;
@@ -661,7 +661,8 @@ private:
                     CoreServices::loadSignalChain(message_str);
                     return true;
                 },
-                std::chrono::seconds (2));
+                std::chrono::seconds (2),
+                generation);
 
             if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                 return;
@@ -670,7 +671,7 @@ private:
             status_to_json(graph_, &ret);
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Put ("/api/save", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put ("/api/save", [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
             std::string message_str;
             LOGD("Received PUT request");
@@ -721,7 +722,8 @@ private:
 
                 return xmlElement->toString();
                 },
-                std::chrono::seconds (2));
+                std::chrono::seconds (2),
+                generation);
 
             if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                 return;
