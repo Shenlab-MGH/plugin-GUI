@@ -25,7 +25,93 @@ LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    manifest_path = Path(path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    validate_manifest_contract(manifest, manifest_path)
+    return manifest
+
+
+def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) -> None:
+    """Fail closed when the manifest and its versioned OE contract diverge."""
+
+    contract = manifest.get("contract")
+    if not isinstance(contract, dict):
+        raise ValueError("Open Ephys agent contract metadata is missing.")
+
+    for field in ("id", "version", "fixture"):
+        if not isinstance(contract.get(field), str) or not contract[field]:
+            raise ValueError(f"Open Ephys agent contract field is invalid: {field}.")
+
+    fixture_ref = Path(contract["fixture"])
+    if fixture_ref.is_absolute():
+        raise ValueError("Open Ephys agent contract fixture must be relative to the manifest.")
+
+    manifest_dir = Path(manifest_path).parent.resolve()
+    fixture_path = (manifest_dir / fixture_ref).resolve()
+    if not fixture_path.is_relative_to(manifest_dir):
+        raise ValueError(
+            "Open Ephys agent contract fixture must stay within the manifest directory."
+        )
+    if not fixture_path.is_file():
+        raise ValueError(f"Open Ephys agent contract fixture is missing: {fixture_path}")
+
+    try:
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Open Ephys agent contract fixture is unreadable: {fixture_path}"
+        ) from exc
+
+    if not isinstance(fixture, dict):
+        raise ValueError("Open Ephys agent contract fixture must be a JSON object.")
+    if fixture.get("contract") != contract:
+        raise ValueError("Open Ephys agent contract metadata does not match its fixture.")
+
+    baseline = manifest.get("baseline")
+    if not isinstance(baseline, dict) or any(
+        not isinstance(baseline.get(field), str) or not baseline[field]
+        for field in ("upstream", "version", "commit")
+    ):
+        raise ValueError("Open Ephys agent contract baseline metadata is invalid.")
+    if fixture.get("baseline") != baseline:
+        raise ValueError("Open Ephys agent contract baseline does not match the manifest.")
+
+    manifest_transport = manifest.get("transport") or {}
+    fixture_transport = fixture.get("transport") or {}
+    if fixture_transport.get("http_base_url") != manifest_transport.get("http_base_url"):
+        raise ValueError("Open Ephys agent contract HTTP transport does not match the manifest.")
+    if (
+        fixture_transport.get("uia") != "windows_uia"
+        or manifest_transport.get("windows_uia") is not True
+    ):
+        raise ValueError("Open Ephys agent contract UIA transport is not Windows UIA.")
+
+    manifest_uia = manifest.get("uia") or {}
+    fixture_uia = fixture.get("uia") or {}
+    if fixture_uia.get("root_id") != manifest_uia.get("root_id"):
+        raise ValueError("Open Ephys agent contract UIA root does not match the manifest.")
+
+    required_ids = fixture_uia.get("required_ids")
+    if not isinstance(required_ids, list) or any(
+        not isinstance(entry, dict) or not isinstance(entry.get("id"), str)
+        for entry in required_ids
+    ):
+        raise ValueError("Open Ephys agent contract UIA required_ids are invalid.")
+
+    required_id_values = [entry["id"] for entry in required_ids]
+    if len(required_id_values) != len(set(required_id_values)):
+        raise ValueError("Open Ephys agent contract UIA required_ids are duplicated.")
+    if fixture_uia.get("root_id") not in required_id_values:
+        raise ValueError("Open Ephys agent contract UIA root is not declared in required_ids.")
+
+    fixture_capability_ids = {
+        entry_id
+        for entry_id in required_id_values
+        if entry_id != fixture_uia.get("root_id")
+    }
+    manifest_capability_ids = set(manifest_uia.get("capability_ids") or [])
+    if fixture_capability_ids != manifest_capability_ids:
+        raise ValueError("Open Ephys agent contract UIA capability IDs do not match the manifest.")
 
 
 def command_index(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:

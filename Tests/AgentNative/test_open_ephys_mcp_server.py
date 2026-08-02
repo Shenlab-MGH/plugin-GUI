@@ -1,4 +1,5 @@
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -7,6 +8,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "agent_native"))
+
+CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2.json"
 
 import open_ephys_mcp_server as mcp
 
@@ -149,6 +152,115 @@ class AgentNativeManifestTests(unittest.TestCase):
         payload = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(payload["automation_id"], "oe.control.recording")
         self.assertEqual(payload["transport"], "windows_uia")
+
+
+class AgentNativeContractParityTests(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(CONTRACT_PATH.is_file(), str(CONTRACT_PATH))
+        self.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        self.manifest = mcp.load_manifest(ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+    def test_contract_metadata_matches_manifest_baseline_and_version(self):
+        contract = self.contract["contract"]
+        self.assertEqual(contract["id"], "open-ephys-agent")
+        self.assertRegex(contract["version"], r"^\d+\.\d+\.\d+$")
+        self.assertEqual(self.contract["scope"], "core")
+        self.assertEqual(self.manifest["contract"], contract)
+        self.assertEqual(self.manifest["baseline"], self.contract["baseline"])
+        self.assertEqual(
+            self.manifest["transport"]["http_base_url"],
+            self.contract["transport"]["http_base_url"],
+        )
+
+    def test_contract_route_matrix_matches_manifest_for_required_commands(self):
+        commands = mcp.command_index(self.manifest)
+        route_matrix = self.contract["api"]["required_routes"]
+        route_names = [entry["command"] for entry in route_matrix]
+        self.assertEqual(len(route_names), len(set(route_names)))
+        route_keys = [(entry["method"], entry["path"]) for entry in route_matrix]
+        self.assertEqual(len(route_keys), len(set(route_keys)))
+
+        for entry in route_matrix:
+            self.assertIn(entry["command"], commands)
+            command = commands[entry["command"]]
+            http = command["http"]
+            self.assertEqual(http["method"], entry["method"], entry["command"])
+            self.assertEqual(
+                http.get("path", http.get("path_template")),
+                entry["path"],
+                entry["command"],
+            )
+            declared = command.get("capabilities") or [command.get("capability")]
+            self.assertIn(entry["capability"], declared, entry["command"])
+
+    def test_contract_declares_unique_manifest_routes_and_command_count(self):
+        routes = []
+        for command in self.manifest["commands"]:
+            http = command["http"]
+            path = http.get("path", http.get("path_template"))
+            routes.append((http["method"], path))
+
+        self.assertEqual(len(routes), len(set(routes)))
+        self.assertEqual(self.contract["api"]["command_count"], len(self.manifest["commands"]))
+
+    def test_contract_uia_ids_match_manifest_and_source(self):
+        uia = self.contract["uia"]
+        self.assertEqual(self.manifest["uia"]["root_id"], uia["root_id"])
+        self.assertEqual(
+            set(self.manifest["uia"]["capability_ids"]),
+            {
+                entry["id"]
+                for entry in uia["required_ids"]
+                if entry["id"] != uia["root_id"]
+            },
+        )
+
+        for entry in uia["required_ids"]:
+            source = ROOT / entry["source"]
+            self.assertTrue(source.is_file(), entry["source"])
+            self.assertIn(entry["id"], source.read_text(encoding="utf-8"), entry["id"])
+
+    def test_default_manifest_loads_its_versioned_contract(self):
+        loaded = mcp.load_manifest(ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        self.assertEqual(loaded["contract"], self.contract["contract"])
+
+    def test_manifest_rejects_a_mismatched_contract_fixture(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture = json.loads(json.dumps(self.contract))
+            fixture["contract"]["version"] = "9.9.9"
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "contract"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_missing_contract_fixture(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            manifest["contract"]["fixture"] = "missing-contract.json"
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "fixture"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_contract_fixture_outside_manifest_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_dir = temp_root / "manifest"
+            manifest_dir.mkdir()
+            manifest = json.loads(json.dumps(self.manifest))
+            manifest["contract"]["fixture"] = "../outside-contract.json"
+            fixture = json.loads(json.dumps(self.contract))
+            fixture["contract"]["fixture"] = "../outside-contract.json"
+            (manifest_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "outside-contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "manifest directory"):
+                mcp.load_manifest(manifest_dir / "manifest.json")
 
 
 if __name__ == "__main__":

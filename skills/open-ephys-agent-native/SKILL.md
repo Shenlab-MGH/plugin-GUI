@@ -23,6 +23,21 @@ settings report their individual directory, filename, and engine capability IDs;
 they are not the `oe.control.recording` start/stop toggle. A `RECORD` command
 also requires an explicit same-run `confirm_recording: true` argument.
 
+The OE agent surface is versioned as a contract. For the current Windows
+baseline, use the `open-ephys-agent` contract `0.1.0` against Open Ephys GUI
+`1.0.2` (commit `c91afebcfb0678a667fb93f6312ed33c56ec640f`). Keep these files
+together and reject a mixed-version setup:
+
+- `agent_native/open_ephys_agent_contract_v1_0_2.json` — core release metadata,
+  required UIA IDs, and a small API↔MCP route parity matrix;
+- `agent_native/open_ephys_agent_surface.json` — the complete MCP/API command
+  manifest and UIA locator surface.
+
+The manifest is the source of truth for the full API route list. The contract
+fixture intentionally checks only the core parity slice; API-only commands and
+GUI-only UIA controls remain explicit in their respective surfaces and must not
+be assumed to have a one-to-one mapping.
+
 ## Safety boundaries
 
 - Treat `RECORD` as a high-risk action. Do not enter recording without explicit
@@ -36,5 +51,6 @@ also requires an explicit same-run `confirm_recording: true` argument.
 ## Files
 
 - Manifest: `agent_native/open_ephys_agent_surface.json`
+- Versioned contract fixture: `agent_native/open_ephys_agent_contract_v1_0_2.json`
 - MCP server: `agent_native/open_ephys_mcp_server.py`
 - UIA inspection helper: `Resources/Scripts/inspect_open_ephys_uia.ps1`

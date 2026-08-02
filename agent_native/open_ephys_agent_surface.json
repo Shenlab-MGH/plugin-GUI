@@ -7,6 +7,11 @@
     "version": "1.0.2",
     "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"
   },
+  "contract": {
+    "id": "open-ephys-agent",
+    "version": "0.1.0",
+    "fixture": "open_ephys_agent_contract_v1_0_2.json"
+  },
   "transport": {
     "http_base_url": "http://127.0.0.1:37497",
     "windows_uia": true,
@@ -364,6 +369,18 @@
   ],
   "uia": {
     "automation_id_rule": "Capability id is the Windows UIA AutomationId when the control exists in the visible GUI tree.",
+    "root_id": "oe.window.main",
+    "capability_ids": [
+      "oe.control.acquisition",
+      "oe.control.recording",
+      "oe.control.recording.options",
+      "oe.control.recording.directory",
+      "oe.control.recording.filename",
+      "oe.control.recording.engine",
+      "oe.status.cpu_usage",
+      "oe.status.disk_usage",
+      "oe.status.elapsed_time"
+    ],
     "script": "Resources/Scripts/inspect_open_ephys_uia.ps1",
     "examples": [
       "oe.control.acquisition",

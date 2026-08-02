@@ -1,0 +1,116 @@
+{
+  "contract": {
+    "id": "open-ephys-agent",
+    "version": "0.1.0",
+    "fixture": "open_ephys_agent_contract_v1_0_2.json"
+  },
+  "baseline": {
+    "upstream": "open-ephys/plugin-GUI",
+    "version": "1.0.2",
+    "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"
+  },
+  "transport": {
+    "http_base_url": "http://127.0.0.1:37497",
+    "uia": "windows_uia"
+  },
+  "scope": "core",
+  "api": {
+    "route_source": "agent_native/open_ephys_agent_surface.json",
+    "command_count": 33,
+    "required_routes": [
+      {
+        "command": "get_capabilities",
+        "method": "GET",
+        "path": "/api/capabilities",
+        "capability": "oe.capabilities"
+      },
+      {
+        "command": "get_status",
+        "method": "GET",
+        "path": "/api/status",
+        "capability": "oe.control.acquisition"
+      },
+      {
+        "command": "set_mode",
+        "method": "PUT",
+        "path": "/api/status",
+        "capability": "oe.control.acquisition"
+      },
+      {
+        "command": "get_recording",
+        "method": "GET",
+        "path": "/api/recording",
+        "capability": "oe.control.recording.directory"
+      },
+      {
+        "command": "set_recording",
+        "method": "PUT",
+        "path": "/api/recording",
+        "capability": "oe.control.recording.directory"
+      },
+      {
+        "command": "list_processors",
+        "method": "GET",
+        "path": "/api/processors",
+        "capability": "oe.processors"
+      },
+      {
+        "command": "get_processor_parameters",
+        "method": "GET",
+        "path": "/api/processors/{processor_id}/parameters",
+        "capability": "oe.processor.parameters"
+      },
+      {
+        "command": "set_parameter",
+        "method": "PUT",
+        "path": "/api/processors/{processor_id}/parameters/{parameter_name}",
+        "capability": "oe.processor.parameter"
+      }
+    ]
+  },
+  "uia": {
+    "root_id": "oe.window.main",
+    "required_ids": [
+      {
+        "id": "oe.window.main",
+        "source": "Source/MainWindow.cpp"
+      },
+      {
+        "id": "oe.control.acquisition",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.control.recording",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.control.recording.options",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.control.recording.directory",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.control.recording.filename",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.control.recording.engine",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.status.cpu_usage",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.status.disk_usage",
+        "source": "Source/UI/ControlPanel.cpp"
+      },
+      {
+        "id": "oe.status.elapsed_time",
+        "source": "Source/UI/ControlPanel.cpp"
+      }
+    ]
+  }
+}
