@@ -1,44 +1,96 @@
 #include "../../Source/Utils/ControlCapability.h"
 #include "../../Source/Utils/ControlCapabilityJson.h"
+#include "../../Source/Utils/OpenEphysHttpApiRoutes.h"
 #include "gtest/gtest.h"
+
+#include <utility>
+#include <vector>
 
 namespace
 {
-const StringArray expectedCapabilityIds {
-    "oe.control.acquisition",
-    "oe.control.recording",
-    "oe.control.recording.options",
-    "oe.control.recording.filename",
-    "oe.control.recording.new_directory",
-    "oe.control.recording.force_new_directory",
-    "oe.status.cpu_usage",
-    "oe.status.disk_usage",
-    "oe.status.elapsed_time"
+struct ExpectedApiOperation
+{
+    const char* operation;
+    const char* method;
+    const char* path;
 };
+
+struct ExpectedCapability
+{
+    const char* id;
+    std::vector<ExpectedApiOperation> operations;
+};
+
+// Official v1.1.0 only backs status / recording / cpu for Core R0 controls.
+// Order is stable and intentional.
+const std::vector<ExpectedCapability> expectedCapabilities {
+    { "oe.control.acquisition",
+      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus },
+        { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus } } },
+    { "oe.control.recording",
+      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus },
+        { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus } } },
+    { "oe.control.recording.filename",
+      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathRecording },
+        { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathRecording } } },
+    { "oe.status.cpu_usage",
+      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathCpu } } },
+};
+
+// Exact method/path pairs registered for routes the Core R0 manifest may advertise.
+const std::vector<std::pair<const char*, const char*>> registeredCoreR0Routes {
+    { OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus },
+    { OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus },
+    { OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathRecording },
+    { OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathRecording },
+    { OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathCpu },
+};
+
+bool matchesMethodPath (const String& method, const String& path, const char* expectedMethod, const char* expectedPath)
+{
+    return method == expectedMethod && path == expectedPath;
+}
+
+bool isRegisteredCoreR0Route (const String& method, const String& path)
+{
+    for (const auto& route : registeredCoreR0Routes)
+    {
+        if (matchesMethodPath (method, path, route.first, route.second))
+            return true;
+    }
+
+    return false;
+}
 } // namespace
 
 TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
 {
     const auto& capabilities = getCoreControlCapabilities();
 
-    ASSERT_EQ (capabilities.size(), (size_t) expectedCapabilityIds.size());
+    ASSERT_EQ (capabilities.size(), expectedCapabilities.size());
+    ASSERT_EQ (expectedCapabilities.size(), (size_t) 4);
 
     for (size_t i = 0; i < capabilities.size(); ++i)
     {
         const auto& capability = capabilities[i];
-        const auto& expectedId = expectedCapabilityIds[(int) i];
+        const auto& expected = expectedCapabilities[i];
+        const String expectedId (expected.id);
 
         EXPECT_EQ (capability.id, expectedId) << "capability order mismatch at index " << i;
         EXPECT_EQ (capability.uiaAutomationId, expectedId) << expectedId;
         EXPECT_TRUE (capability.name.isNotEmpty()) << expectedId;
         EXPECT_TRUE (capability.description.isNotEmpty()) << expectedId;
-        ASSERT_FALSE (capability.operations.empty()) << expectedId;
 
-        for (const auto& operation : capability.operations)
+        ASSERT_EQ (capability.operations.size(), expected.operations.size()) << expectedId;
+
+        for (size_t j = 0; j < capability.operations.size(); ++j)
         {
-            EXPECT_TRUE (operation.operation.isNotEmpty()) << expectedId;
-            EXPECT_TRUE (operation.method.isNotEmpty()) << expectedId;
-            EXPECT_TRUE (operation.path.isNotEmpty()) << expectedId;
+            const auto& operation = capability.operations[j];
+            const auto& expectedOp = expected.operations[j];
+
+            EXPECT_EQ (operation.operation, String (expectedOp.operation)) << expectedId << " op " << j;
+            EXPECT_EQ (operation.method, String (expectedOp.method)) << expectedId << " op " << j;
+            EXPECT_EQ (operation.path, String (expectedOp.path)) << expectedId << " op " << j;
         }
 
         const auto* found = findControlCapability (expectedId);
@@ -46,6 +98,79 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         EXPECT_EQ (found->id, expectedId);
         EXPECT_EQ (found->uiaAutomationId, expectedId);
     }
+
+    // Capabilities that would require unregistered endpoints must not appear.
+    EXPECT_EQ (findControlCapability ("oe.control.recording.options"), nullptr);
+    EXPECT_EQ (findControlCapability ("oe.control.recording.new_directory"), nullptr);
+    EXPECT_EQ (findControlCapability ("oe.control.recording.force_new_directory"), nullptr);
+    EXPECT_EQ (findControlCapability ("oe.status.disk_usage"), nullptr);
+    EXPECT_EQ (findControlCapability ("oe.status.elapsed_time"), nullptr);
+}
+
+TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
+{
+    const auto& capabilities = getCoreControlCapabilities();
+
+    ASSERT_EQ (capabilities.size(), (size_t) 4);
+
+    for (const auto& capability : capabilities)
+    {
+        ASSERT_FALSE (capability.operations.empty()) << capability.id;
+
+        for (const auto& operation : capability.operations)
+        {
+            EXPECT_TRUE (isRegisteredCoreR0Route (operation.method, operation.path))
+                << capability.id << " advertises unregistered "
+                << operation.method << " " << operation.path;
+        }
+    }
+
+    // Exact pairs for each canonical capability (not merely nonempty strings).
+    const auto* acquisition = findControlCapability ("oe.control.acquisition");
+    const auto* recording = findControlCapability ("oe.control.recording");
+    const auto* filename = findControlCapability ("oe.control.recording.filename");
+    const auto* cpu = findControlCapability ("oe.status.cpu_usage");
+
+    ASSERT_NE (acquisition, nullptr);
+    ASSERT_NE (recording, nullptr);
+    ASSERT_NE (filename, nullptr);
+    ASSERT_NE (cpu, nullptr);
+
+    ASSERT_EQ (acquisition->operations.size(), (size_t) 2);
+    EXPECT_TRUE (matchesMethodPath (acquisition->operations[0].method,
+                                    acquisition->operations[0].path,
+                                    OpenEphysHttpApi::kMethodGet,
+                                    OpenEphysHttpApi::kPathStatus));
+    EXPECT_TRUE (matchesMethodPath (acquisition->operations[1].method,
+                                    acquisition->operations[1].path,
+                                    OpenEphysHttpApi::kMethodPut,
+                                    OpenEphysHttpApi::kPathStatus));
+
+    ASSERT_EQ (recording->operations.size(), (size_t) 2);
+    EXPECT_TRUE (matchesMethodPath (recording->operations[0].method,
+                                    recording->operations[0].path,
+                                    OpenEphysHttpApi::kMethodGet,
+                                    OpenEphysHttpApi::kPathStatus));
+    EXPECT_TRUE (matchesMethodPath (recording->operations[1].method,
+                                    recording->operations[1].path,
+                                    OpenEphysHttpApi::kMethodPut,
+                                    OpenEphysHttpApi::kPathStatus));
+
+    ASSERT_EQ (filename->operations.size(), (size_t) 2);
+    EXPECT_TRUE (matchesMethodPath (filename->operations[0].method,
+                                    filename->operations[0].path,
+                                    OpenEphysHttpApi::kMethodGet,
+                                    OpenEphysHttpApi::kPathRecording));
+    EXPECT_TRUE (matchesMethodPath (filename->operations[1].method,
+                                    filename->operations[1].path,
+                                    OpenEphysHttpApi::kMethodPut,
+                                    OpenEphysHttpApi::kPathRecording));
+
+    ASSERT_EQ (cpu->operations.size(), (size_t) 1);
+    EXPECT_TRUE (matchesMethodPath (cpu->operations[0].method,
+                                    cpu->operations[0].path,
+                                    OpenEphysHttpApi::kMethodGet,
+                                    OpenEphysHttpApi::kPathCpu));
 }
 
 TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
@@ -55,24 +180,30 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
     EXPECT_EQ (document["contract_version"], "0.1.0");
     EXPECT_EQ (document["surface"], "discovery_only");
     ASSERT_TRUE (document["capabilities"].is_array());
-    ASSERT_EQ (document["capabilities"].size(), (size_t) expectedCapabilityIds.size());
+    ASSERT_EQ (document["capabilities"].size(), expectedCapabilities.size());
+    ASSERT_EQ (document["capabilities"].size(), (size_t) 4);
 
     for (size_t i = 0; i < document["capabilities"].size(); ++i)
     {
         const auto& item = document["capabilities"][i];
-        const auto expectedId = expectedCapabilityIds[(int) i].toStdString();
+        const auto& expected = expectedCapabilities[i];
+        const auto expectedId = std::string (expected.id);
 
         EXPECT_EQ (item["id"], expectedId);
         EXPECT_EQ (item["uia"]["automation_id"], expectedId);
         ASSERT_TRUE (item["api"].is_array());
-        ASSERT_FALSE (item["api"].empty()) << expectedId;
+        ASSERT_EQ (item["api"].size(), expected.operations.size()) << expectedId;
 
-        for (const auto& operation : item["api"])
+        for (size_t j = 0; j < item["api"].size(); ++j)
         {
+            const auto& operation = item["api"][j];
+            const auto& expectedOp = expected.operations[j];
+
             ASSERT_TRUE (operation.contains ("method")) << expectedId;
             ASSERT_TRUE (operation.contains ("path")) << expectedId;
-            EXPECT_FALSE (operation["method"].get<std::string>().empty()) << expectedId;
-            EXPECT_FALSE (operation["path"].get<std::string>().empty()) << expectedId;
+            EXPECT_EQ (operation["operation"].get<std::string>(), expectedOp.operation) << expectedId;
+            EXPECT_EQ (operation["method"].get<std::string>(), expectedOp.method) << expectedId;
+            EXPECT_EQ (operation["path"].get<std::string>(), expectedOp.path) << expectedId;
         }
     }
 
@@ -82,6 +213,6 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
                                            { return item["id"] == "oe.control.acquisition"; });
     ASSERT_NE (acquisition, document["capabilities"].end());
     EXPECT_EQ ((*acquisition)["uia"]["automation_id"], "oe.control.acquisition");
-    EXPECT_EQ ((*acquisition)["api"][0]["path"], "/api/status");
-    EXPECT_EQ ((*acquisition)["api"][0]["method"], "GET");
+    EXPECT_EQ ((*acquisition)["api"][0]["path"], OpenEphysHttpApi::kPathStatus);
+    EXPECT_EQ ((*acquisition)["api"][0]["method"], OpenEphysHttpApi::kMethodGet);
 }

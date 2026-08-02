@@ -4,6 +4,7 @@
 add_sources(
   open-ephys
   OpenEphysHttpServer.h
+  OpenEphysHttpApiRoutes.h
   ControlCapability.h
   ControlCapability.cpp
   ControlCapabilityJson.h

@@ -22,45 +22,30 @@
 */
 
 #include "ControlCapability.h"
+#include "OpenEphysHttpApiRoutes.h"
 #include <algorithm>
 
 const std::vector<ControlCapability>& getCoreControlCapabilities()
 {
+    // Agent Core R0: advertise only capabilities backed by official v1.1.0 routes.
+    // Order is stable. UIA automation_id matches canonical id.
     static const std::vector<ControlCapability> capabilities {
         { "oe.control.acquisition", "Acquisition", "Start or stop data acquisition.",
           ControlCapabilityKind::toggle, "oe.control.acquisition",
-          { { "read", "GET", "/api/status", {}, { "mode" } },
-            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } } },
+          { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus, {}, { "mode" } },
+            { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus, { "mode" }, { "mode" } } } },
         { "oe.control.recording", "Recording", "Start or stop writing data to disk.",
           ControlCapabilityKind::toggle, "oe.control.recording",
-          { { "read", "GET", "/api/status", {}, { "mode" } },
-            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } } },
-        { "oe.control.recording.options", "Recording options", "Show or hide recording options.",
-          ControlCapabilityKind::toggle, "oe.control.recording.options",
-          { { "read", "GET", "/api/recording/options", {}, { "expanded" } },
-            { "set", "PUT", "/api/recording/options", { "expanded" }, { "expanded" } } } },
+          { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus, {}, { "mode" } },
+            { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus, { "mode" }, { "mode" } } } },
         { "oe.control.recording.filename", "Recording filename", "Edit the recording filename.",
           ControlCapabilityKind::collection, "oe.control.recording.filename",
-          { { "read", "GET", "/api/recording", {}, { "prepend_text", "base_text", "append_text" } },
-            { "set", "PUT", "/api/recording", { "prepend_text", "base_text", "append_text" },
+          { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathRecording, {}, { "prepend_text", "base_text", "append_text" } },
+            { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathRecording, { "prepend_text", "base_text", "append_text" },
               { "prepend_text", "base_text", "append_text" } } } },
-        { "oe.control.recording.new_directory", "New recording directory", "Start a new data directory for the next recording.",
-          ControlCapabilityKind::toggle, "oe.control.recording.new_directory",
-          { { "read", "GET", "/api/recording/options", {}, { "new_directory_requested" } },
-            { "set", "PUT", "/api/recording/options", { "new_directory_requested" }, { "new_directory_requested" } } } },
-        { "oe.control.recording.force_new_directory", "Force new recording directories", "Force a new data directory for each recording.",
-          ControlCapabilityKind::toggle, "oe.control.recording.force_new_directory",
-          { { "read", "GET", "/api/recording/options", {}, { "force_new_directory" } },
-            { "set", "PUT", "/api/recording/options", { "force_new_directory" }, { "force_new_directory" } } } },
         { "oe.status.cpu_usage", "CPU usage", "Fraction of available processing time used by the signal chain.",
           ControlCapabilityKind::range, "oe.status.cpu_usage",
-          { { "read", "GET", "/api/cpu", {}, { "usage" } } } },
-        { "oe.status.disk_usage", "Disk usage", "Fraction of recording-volume space currently used.",
-          ControlCapabilityKind::range, "oe.status.disk_usage",
-          { { "read", "GET", "/api/disk", {}, { "usage" } } } },
-        { "oe.status.elapsed_time", "Elapsed time", "Elapsed acquisition or recording time.",
-          ControlCapabilityKind::status, "oe.status.elapsed_time",
-          { { "read", "GET", "/api/time", {}, { "display" } } } }
+          { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathCpu, {}, { "usage" } } } }
     };
 
     return capabilities;

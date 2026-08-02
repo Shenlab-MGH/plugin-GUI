@@ -38,6 +38,7 @@
 #include "../UI/ProcessorList.h"
 
 #include "ControlCapabilityJson.h"
+#include "OpenEphysHttpApiRoutes.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
@@ -155,7 +156,7 @@ public:
 
     void run() override
     {
-        svr_->Get ("/api/capabilities", [] (const httplib::Request&, httplib::Response& res)
+        svr_->Get (OpenEphysHttpApi::kPathCapabilities, [] (const httplib::Request&, httplib::Response& res)
                    {
             const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
             res.set_content (document.dump(), "application/json"); });
@@ -169,13 +170,13 @@ public:
             ret["info"] = xmlElement.get()->toString().toStdString();
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/status", [this] (const httplib::Request&, httplib::Response& res)
+        svr_->Get (OpenEphysHttpApi::kPathStatus, [this] (const httplib::Request&, httplib::Response& res)
                    {
             json ret;
             status_to_json(graph_, &ret);
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Put ("/api/status", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put (OpenEphysHttpApi::kPathStatus, [this] (const httplib::Request& req, httplib::Response& res)
                    {
             std::string desired_mode;
 
@@ -238,7 +239,7 @@ public:
             status_to_json(graph_, &ret);
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/cpu", [this] (const httplib::Request&, httplib::Response& res)
+        svr_->Get (OpenEphysHttpApi::kPathCpu, [this] (const httplib::Request&, httplib::Response& res)
                    {
             json ret;
             ret["usage"] = AccessClass::getAudioComponent()->deviceManager.getCpuUsage();
@@ -336,13 +337,13 @@ public:
                 audio_device_info_to_json(&ret);
                 res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/recording", [this] (const httplib::Request&, httplib::Response& res)
+        svr_->Get (OpenEphysHttpApi::kPathRecording, [this] (const httplib::Request&, httplib::Response& res)
                    {
             json ret;
             recording_info_to_json(graph_, &ret);
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Put ("/api/recording", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put (OpenEphysHttpApi::kPathRecording, [this] (const httplib::Request& req, httplib::Response& res)
                    {
                 
                 json request_json;
