@@ -1,0 +1,60 @@
+{
+  "format_version": "1.0.0",
+  "bundle": {
+    "id": "open-ephys-agent-native",
+    "version": "0.1.2",
+    "platform": "windows",
+    "coverage": "contracted-core-only"
+  },
+  "official_upstream": {
+    "repository": "open-ephys/plugin-GUI",
+    "tag": "v1.0.2",
+    "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f",
+    "gui_version": "1.0.2"
+  },
+  "contract": {
+    "id": "open-ephys-agent",
+    "schema_version": "0.1.2",
+    "version": "0.1.2",
+    "fixture": "agent_native/open_ephys_agent_contract_v1_0_2.json"
+  },
+  "components": {
+    "api": {
+      "artifact": "Source/Utils/OpenEphysHttpServer.h",
+      "requires_contract": {
+        "id": "open-ephys-agent",
+        "version": "0.1.2"
+      }
+    },
+    "uia": {
+      "artifact": "Resources/Scripts/inspect_open_ephys_uia.ps1",
+      "requires_contract": {
+        "id": "open-ephys-agent",
+        "version": "0.1.2"
+      }
+    },
+    "mcp": {
+      "artifact": "agent_native/open_ephys_mcp_server.py",
+      "implementation": "python-stdio",
+      "protocol_version": "2024-11-05",
+      "server_name": "open-ephys-agent-native",
+      "requires_contract": {
+        "id": "open-ephys-agent",
+        "version": "0.1.2"
+      }
+    },
+    "skill": {
+      "artifact": "skills/open-ephys-agent-native/SKILL.md",
+      "source_contract_pin": "prose",
+      "requires_contract": {
+        "id": "open-ephys-agent",
+        "version": "0.1.2"
+      }
+    }
+  },
+  "verification": {
+    "level": "offline-contract-and-ci",
+    "hardware_verified": false,
+    "scientific_verified": false
+  }
+}
