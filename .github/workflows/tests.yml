@@ -32,14 +32,32 @@ jobs:
       run: |
         sudo apt update
         sudo ./Resources/Scripts/install_linux_dependencies.sh
-        sudo apt-get install -y xvfb xauth
+        sudo apt-get install -y openbox x11-utils xvfb xauth
         git apply Resources/Scripts/gha_unit_tests.patch
         cd Build && cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON ..
         make -j8
     - name: run tests
       run: |
         chmod +x ./Resources/Scripts/run_unit_tests_linux.sh
-        xvfb-run -a --server-args='-screen 0 1920x1080x24' ./Resources/Scripts/run_unit_tests_linux.sh Build/TestBin
+        xvfb-run -a --server-args='-screen 0 1920x1080x24' bash -c '
+          openbox --sm-disable &
+          openbox_pid=$!
+          trap "kill $openbox_pid 2>/dev/null || true" EXIT
+
+          for _ in {1..20}; do
+            if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id #"; then
+              break
+            fi
+            sleep 0.1
+          done
+
+          if ! xprop -root _NET_SUPPORTING_WM_CHECK | grep -q "window id #"; then
+            echo "Openbox did not initialize under Xvfb."
+            exit 1
+          fi
+
+          ./Resources/Scripts/run_unit_tests_linux.sh Build/TestBin
+        '
       shell: bash
 
   integration-tests:
