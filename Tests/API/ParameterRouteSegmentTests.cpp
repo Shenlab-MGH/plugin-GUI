@@ -69,13 +69,19 @@ struct UnsafeRouteName
     int expectedStatus;
 };
 
-const std::array<UnsafeRouteName, 7> unsafeRouteNames { {
+const std::array<UnsafeRouteName, 13> unsafeRouteNames { {
     { "%2F", "/", 404 },
     { "%5C", "\\", 400 },
     { "%2E", ".", 400 },
     { "%2E%2E", "..", 400 },
     { "%", "%", 400 },
     { "%0A", "\n", 400 },
+    { "%C2%85", "\xC2\x85", 400 },
+    { "%80", nullptr, 400 },
+    { "%C2", nullptr, 400 },
+    { "%C0%AF", nullptr, 400 },
+    { "%ED%A0%80", nullptr, 400 },
+    { "%F4%90%80%80", nullptr, 400 },
     { "", "", 404 },
 } };
 
@@ -177,15 +183,16 @@ protected:
             10));
 
         for (const auto& name : unsafeRouteNames)
-            processor->addParameter (new RouteTestIntParameter (
-                processor.get(),
-                Parameter::PROCESSOR_SCOPE,
-                name.decoded,
-                "Unsafe route test parameter",
-                "Must not be reachable through a parameter route.",
-                5,
-                0,
-                10));
+            if (name.decoded != nullptr)
+                processor->addParameter (new RouteTestIntParameter (
+                    processor.get(),
+                    Parameter::PROCESSOR_SCOPE,
+                    name.decoded,
+                    "Unsafe route test parameter",
+                    "Must not be reachable through a parameter route.",
+                    5,
+                    0,
+                    10));
 
         auto stream = std::make_unique<DataStream> (DataStream::Settings {
             "Route test stream", "", "route.test.stream", 30000.0f, false });
@@ -210,15 +217,16 @@ protected:
 
 
         for (const auto& name : unsafeRouteNames)
-            stream->addParameter (new RouteTestIntParameter (
-                stream.get(),
-                Parameter::STREAM_SCOPE,
-                name.decoded,
-                "Unsafe stream route test parameter",
-                "Must not be reachable through a parameter route.",
-                6,
-                0,
-                10));
+            if (name.decoded != nullptr)
+                stream->addParameter (new RouteTestIntParameter (
+                    stream.get(),
+                    Parameter::STREAM_SCOPE,
+                    name.decoded,
+                    "Unsafe stream route test parameter",
+                    "Must not be reachable through a parameter route.",
+                    6,
+                    0,
+                    10));
 
         streamId = stream->getStreamId();
         processor->addRouteTestStream (std::move (stream));
@@ -243,6 +251,9 @@ protected:
         const std::string& body)
     {
         auto client = loopback->client();
+        client.set_connection_timeout (2s);
+        client.set_read_timeout (2s);
+        client.set_write_timeout (2s);
         auto response = std::async (
             std::launch::async,
             [&client, &path, &body]
@@ -250,9 +261,22 @@ protected:
                 return client.Put (path.c_str(), body, "application/json");
             });
         const auto deadline = std::chrono::steady_clock::now() + 2s;
-        while (response.wait_for (0ms) != std::future_status::ready
-               && std::chrono::steady_clock::now() < deadline)
+        bool readyBeforeDeadline = false;
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            if (response.wait_for (0ms) == std::future_status::ready)
+            {
+                readyBeforeDeadline = true;
+                break;
+            }
             MessageManager::getInstance()->runDispatchLoopUntil (1);
+        }
+
+        if (! readyBeforeDeadline)
+        {
+            client.stop();
+            throw std::runtime_error ("Parameter PUT did not complete before the test deadline.");
+        }
 
         return response.get();
     }
@@ -272,18 +296,48 @@ TEST_F (ParameterRouteSegmentTests,
 {
     auto client = loopback->client();
 
-    const auto processorGet = client.Get ("/api/processors/101/parameters/gain%20mode");
+    const auto processorList = client.Get ("/api/processors/101/parameters");
+    ASSERT_TRUE (processorList);
+    ASSERT_EQ (processorList->status, 200);
+    const auto listedProcessorParameter = json::parse (processorList->body)["parameters"].at (0);
+    const auto processorParameterName = listedProcessorParameter["name"].get<std::string>();
+    ASSERT_EQ (processorParameterName, "gain mode");
+    EXPECT_NE (listedProcessorParameter["key"].get<std::string>(), processorParameterName);
+
+    auto encodedProcessorParameterName = processorParameterName;
+    const auto processorSpace = encodedProcessorParameterName.find (' ');
+    ASSERT_NE (processorSpace, std::string::npos);
+    encodedProcessorParameterName.replace (processorSpace, 1, "%20");
+    const auto processorParameterPath =
+        "/api/processors/101/parameters/" + encodedProcessorParameterName;
+
+    const auto streamList = client.Get ("/api/processors/101/streams/0/parameters");
+    ASSERT_TRUE (streamList);
+    ASSERT_EQ (streamList->status, 200);
+    const auto listedStreamParameter = json::parse (streamList->body)["parameters"].at (0);
+    const auto streamParameterName = listedStreamParameter["name"].get<std::string>();
+    ASSERT_EQ (streamParameterName, "gain mode");
+    EXPECT_NE (listedStreamParameter["key"].get<std::string>(), streamParameterName);
+
+    auto encodedStreamParameterName = streamParameterName;
+    const auto streamSpace = encodedStreamParameterName.find (' ');
+    ASSERT_NE (streamSpace, std::string::npos);
+    encodedStreamParameterName.replace (streamSpace, 1, "%20");
+    const auto streamParameterPath =
+        "/api/processors/101/streams/0/parameters/" + encodedStreamParameterName;
+
+    const auto processorGet = client.Get (processorParameterPath.c_str());
     ASSERT_TRUE (processorGet);
     ASSERT_EQ (processorGet->status, 200);
     EXPECT_EQ (json::parse (processorGet->body)["name"], "gain mode");
 
-    const auto streamGet = client.Get ("/api/processors/101/streams/0/parameters/gain%20mode");
+    const auto streamGet = client.Get (streamParameterPath.c_str());
     ASSERT_TRUE (streamGet);
     ASSERT_EQ (streamGet->status, 200);
     EXPECT_EQ (json::parse (streamGet->body)["name"], "gain mode");
 
     const auto processorPut = putWhilePumpingMessageThread (
-        "/api/processors/101/parameters/gain%20mode", "{\"value\": 7}");
+        processorParameterPath, "{\"value\": 7}");
     ASSERT_TRUE (processorPut);
     ASSERT_EQ (processorPut->status, 200);
     EXPECT_EQ (static_cast<int> (processorInGraph->getParameter ("gain mode")->getValue()), 7);
@@ -292,7 +346,7 @@ TEST_F (ParameterRouteSegmentTests,
                1);
 
     const auto streamPut = putWhilePumpingMessageThread (
-        "/api/processors/101/streams/0/parameters/gain%20mode", "{\"value\": 8}");
+        streamParameterPath, "{\"value\": 8}");
     ASSERT_TRUE (streamPut);
     ASSERT_EQ (streamPut->status, 200);
     EXPECT_EQ (static_cast<int> (processorInGraph->getDataStream (streamId)->getParameter ("gain mode")->getValue()), 8);
@@ -341,18 +395,21 @@ TEST_F (ParameterRouteSegmentTests,
         EXPECT_EQ (streamPut->status, name.expectedStatus) << name.encoded;
         EXPECT_TRUE (streamPut->body.empty()) << name.encoded;
 
-        auto* processorParameter = processorInGraph->getParameter (name.decoded);
-        ASSERT_NE (processorParameter, nullptr) << name.encoded;
-        EXPECT_EQ (static_cast<int> (processorParameter->getValue()), 5) << name.encoded;
-        EXPECT_EQ (static_cast<RouteTestIntParameter*> (processorParameter)->mutationCalls, 0)
-            << name.encoded;
+        if (name.decoded != nullptr)
+        {
+            auto* processorParameter = processorInGraph->getParameter (name.decoded);
+            ASSERT_NE (processorParameter, nullptr) << name.encoded;
+            EXPECT_EQ (static_cast<int> (processorParameter->getValue()), 5) << name.encoded;
+            EXPECT_EQ (static_cast<RouteTestIntParameter*> (processorParameter)->mutationCalls, 0)
+                << name.encoded;
 
-        auto* streamParameter =
-            processorInGraph->getDataStream (streamId)->getParameter (name.decoded);
-        ASSERT_NE (streamParameter, nullptr) << name.encoded;
-        EXPECT_EQ (static_cast<int> (streamParameter->getValue()), 6) << name.encoded;
-        EXPECT_EQ (static_cast<RouteTestIntParameter*> (streamParameter)->mutationCalls, 0)
-            << name.encoded;
+            auto* streamParameter =
+                processorInGraph->getDataStream (streamId)->getParameter (name.decoded);
+            ASSERT_NE (streamParameter, nullptr) << name.encoded;
+            EXPECT_EQ (static_cast<int> (streamParameter->getValue()), 6) << name.encoded;
+            EXPECT_EQ (static_cast<RouteTestIntParameter*> (streamParameter)->mutationCalls, 0)
+                << name.encoded;
+        }
     }
 }
 } // namespace

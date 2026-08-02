@@ -31,6 +31,7 @@
 
 #include "httplib.h"
 #include "json.hpp"
+#include <cstdint>
 #include <sstream>
 
 #include "../AccessClass.h"
@@ -1757,11 +1758,74 @@ private:
                      && parameterName.find ('/') == std::string::npos
                      && parameterName.find ('\\') == std::string::npos;
 
-        for (const auto character : parameterName)
+        for (size_t index = 0; valid && index < parameterName.size();)
         {
-            const auto byte = static_cast<unsigned char> (character);
-            if (byte < 0x20 || byte == 0x7f)
+            const auto firstByte = static_cast<unsigned char> (parameterName[index]);
+            uint32_t codePoint = 0;
+            uint32_t minimumCodePoint = 0;
+            size_t continuationCount = 0;
+
+            if (firstByte <= 0x7f)
+            {
+                codePoint = firstByte;
+            }
+            else if (firstByte >= 0xc2 && firstByte <= 0xdf)
+            {
+                codePoint = firstByte & 0x1f;
+                minimumCodePoint = 0x80;
+                continuationCount = 1;
+            }
+            else if (firstByte >= 0xe0 && firstByte <= 0xef)
+            {
+                codePoint = firstByte & 0x0f;
+                minimumCodePoint = 0x800;
+                continuationCount = 2;
+            }
+            else if (firstByte >= 0xf0 && firstByte <= 0xf4)
+            {
+                codePoint = firstByte & 0x07;
+                minimumCodePoint = 0x10000;
+                continuationCount = 3;
+            }
+            else
+            {
                 valid = false;
+                break;
+            }
+
+            if (index + continuationCount >= parameterName.size())
+            {
+                valid = false;
+                break;
+            }
+
+            for (size_t offset = 1; offset <= continuationCount; ++offset)
+            {
+                const auto continuationByte =
+                    static_cast<unsigned char> (parameterName[index + offset]);
+                if ((continuationByte & 0xc0) != 0x80)
+                {
+                    valid = false;
+                    break;
+                }
+                codePoint = (codePoint << 6) | (continuationByte & 0x3f);
+            }
+
+            if (! valid)
+                break;
+
+            if (codePoint < minimumCodePoint
+                || codePoint > 0x10ffff
+                || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+                || codePoint <= 0x1f
+                || codePoint == 0x7f
+                || (codePoint >= 0x80 && codePoint <= 0x9f))
+            {
+                valid = false;
+                break;
+            }
+
+            index += continuationCount + 1;
         }
 
         const auto queryStart = request.target.find ('?');
