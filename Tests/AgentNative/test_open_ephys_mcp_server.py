@@ -524,7 +524,7 @@ class AgentNativeManifestTests(unittest.TestCase):
             stream_index=1, identifier="probe_lfp", semantic_segment="probe_lfp"
         )
         not_colliding["uia"]["automation_id"] = (
-            "oe.processor.101.streams.table.source_101.stream_probe_ap.index_1"
+            "oe.processor.101.streams.table.source_101.stream_probe_lfp.index_1"
         )
         not_colliding["uia"]["uses_collision_suffix"] = True
         with mock.patch.object(
@@ -548,7 +548,7 @@ class AgentNativeManifestTests(unittest.TestCase):
                 }
             )
         self.assertIn("error", rejected)
-        self.assertIn("semantic segment", rejected["error"]["message"].lower())
+        self.assertIn("sibling locators", rejected["error"]["message"].lower())
 
     def test_typed_get_stream_requires_collision_flag_to_match_suffix_presence(self):
         server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
