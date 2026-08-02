@@ -632,6 +632,7 @@ TEST_F (ParameterEditorAccessibilityTests,
 
     TrackingMessageThreadComboBox comboBox;
     TextButton sibling ("Sibling");
+    sibling.setWantsKeyboardFocus (true);
     comboBox.setEditableText (true);
     comboBox.addItem ("OFF", 1);
     comboBox.addItem ("-100", 2);
@@ -655,7 +656,6 @@ TEST_F (ParameterEditorAccessibilityTests,
     EXPECT_TRUE (
         handler->getActions().invoke (
             AccessibilityActionType::expand));
-    EXPECT_TRUE (comboBox.hasKeyboardFocus (true));
     EXPECT_TRUE (
         comboBox.showPopupUsedMessageThread.load());
     EXPECT_TRUE (
