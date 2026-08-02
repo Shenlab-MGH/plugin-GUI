@@ -4648,7 +4648,9 @@ TEST_F (LfpDisplayNodeTests,
                 FakeSourceNodeParams {
                     0,
                     sampleRate,
-                    bitVolts }));
+                    bitVolts }),
+            TestGuiRuntimeLifetime::
+                process);
     auto* zeroChannelProcessor =
         zeroChannelTester
             ->createProcessor<
