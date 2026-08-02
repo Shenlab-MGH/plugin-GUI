@@ -831,7 +831,10 @@ private:
                        }
 
                        json ret;
-                       stream_to_json (processor, stream, &ret);
+                       stream_to_json (processor,
+                                       stream,
+                                       juce::String (req.matches[2]).getIntValue(),
+                                       &ret);
                        res.set_content (ret.dump(), "application/json");
                    });
 
@@ -1644,12 +1647,27 @@ private:
         }
     }
 
-    inline static void stream_to_json (GenericProcessor* processor, const DataStream* stream, json* stream_json)
+    inline static void stream_to_json (GenericProcessor* processor,
+                                       const DataStream* stream,
+                                       int stream_index,
+                                       json* stream_json)
     {
         (*stream_json)["name"] = stream->getName().toStdString();
         (*stream_json)["source_id"] = stream->getSourceNodeId();
         (*stream_json)["sample_rate"] = stream->getSampleRate();
         (*stream_json)["channel_count"] = stream->getChannelCount();
+        (*stream_json)["stream_index"] = stream_index;
+        (*stream_json)["runtime_id"] = stream->getStreamId();
+        (*stream_json)["source_name"] = stream->getSourceNodeName().toStdString();
+        (*stream_json)["description"] = stream->getDescription().toStdString();
+        (*stream_json)["identifier"] = stream->getIdentifier().toStdString();
+        (*stream_json)["generates_timestamps"] = stream->generatesTimestamps();
+        (*stream_json)["identity"] = {
+            { "available", stream->getIdentifier().isNotEmpty() },
+            { "scope", "configuration" },
+            { "source_id", stream->getSourceNodeId() },
+            { "identifier", stream->getIdentifier().toStdString() }
+        };
 
         std::vector<json> parameters_json;
         parameters_to_json (processor, stream->getStreamId(), &parameters_json);
@@ -1667,11 +1685,13 @@ private:
 
         std::vector<json> streams_json;
 
+        int stream_index = 0;
         for (auto stream : processor->getDataStreams())
         {
             json stream_json;
-            stream_to_json (processor, stream, &stream_json);
+            stream_to_json (processor, stream, stream_index, &stream_json);
             streams_json.push_back (stream_json);
+            ++stream_index;
         }
 
         (*processor_json)["streams"] = streams_json;

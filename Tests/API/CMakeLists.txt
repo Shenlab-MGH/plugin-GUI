@@ -18,6 +18,7 @@ add_sources(${COMPONENT_NAME}_tests
         StatusControlTests.cpp
         StatusHttpAdapterTests.cpp
         StatusRequestParserTests.cpp
+        StreamContractTests.cpp
 )
 set_source_files_properties(ParameterRouteSegmentTests.cpp PROPERTIES
         COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/bigobj>")
