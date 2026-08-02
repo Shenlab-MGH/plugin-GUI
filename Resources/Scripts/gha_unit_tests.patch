@@ -2,14 +2,19 @@ diff --git a/Tests/Processors/CMakeLists.txt b/Tests/Processors/CMakeLists.txt
 index a89fa4da4..ab53e8d89 100644
 --- a/Tests/Processors/CMakeLists.txt
 +++ b/Tests/Processors/CMakeLists.txt
-@@ -5,8 +5,8 @@ add_sources(${COMPONENT_NAME}_tests
+@@ -5,13 +5,13 @@ add_sources(${COMPONENT_NAME}_tests
  		DataBufferTests.cpp
  		PluginManagerTests.cpp
  		SourceNodeTests.cpp
 -		RecordNodeTests.cpp
--		ProcessorGraphTests.cpp
 +		#RecordNodeTests.cpp
+ 		RecordNodeRecordingStartTests.cpp
+ 		RecordNodeRecordingStopTests.cpp
+ 		RecordThreadCleanStopTests.cpp
+ 		ProcessorGraphRecordingStopTests.cpp
+-		ProcessorGraphTests.cpp
 +		#ProcessorGraphTests.cpp
+ 		ProcessorGraphAcquisitionReadinessTests.cpp
  		EventTests.cpp
  		DataThreadTests.cpp
  		GenericProcessorTests.cpp
