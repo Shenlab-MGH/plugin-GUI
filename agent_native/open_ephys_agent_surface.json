@@ -28,10 +28,13 @@
       "enabled",
       "deactivate_during_acquisition",
       "uia.automation_id"
-    ]
+    ],
+    "route_lookup_field": "name",
+    "stable_identity_field": "key"
   },
   "parameter_name_segment_policy": {
     "field": "parameter_name",
+    "source": "parameter_response.name",
     "input": "raw",
     "render": "percent_encode_utf8_once",
     "reject": ["empty", "slash", "backslash", "dot_segment", "control_character"]

@@ -24,6 +24,9 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = ROOT / "open_ephys_agent_surface.json"
 DEFAULT_BASE_URL = "http://127.0.0.1:37497"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+SUPPORTED_SCHEMA_VERSION = "0.1.2"
+SUPPORTED_CONTRACT_ID = "open-ephys-agent"
+SUPPORTED_CONTRACT_VERSION = "0.1.2"
 PARAMETER_AUTOMATION_ID_RULE = "oe.parameter.<sanitised parameter key>"
 PROCESSOR_CATALOG_AUTOMATION_ID_RULE = (
     "oe.processor_catalog.<sanitised processor slug>"
@@ -39,8 +42,14 @@ PARAMETER_RESPONSE_REQUIRED_FIELDS = [
     "deactivate_during_acquisition",
     "uia.automation_id",
 ]
+PARAMETER_RESPONSE_CONTRACT = {
+    "required_fields": PARAMETER_RESPONSE_REQUIRED_FIELDS,
+    "route_lookup_field": "name",
+    "stable_identity_field": "key",
+}
 PARAMETER_NAME_SEGMENT_POLICY = {
     "field": "parameter_name",
+    "source": "parameter_response.name",
     "input": "raw",
     "render": "percent_encode_utf8_once",
     "reject": ["empty", "slash", "backslash", "dot_segment", "control_character"],
@@ -57,6 +66,11 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
 def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) -> None:
     """Fail closed when the manifest and its versioned OE contract diverge."""
 
+    if manifest.get("schema_version") != SUPPORTED_SCHEMA_VERSION:
+        raise ValueError(
+            f"Open Ephys agent schema is not supported: {manifest.get('schema_version')!r}."
+        )
+
     contract = manifest.get("contract")
     if not isinstance(contract, dict):
         raise ValueError("Open Ephys agent contract metadata is missing.")
@@ -64,6 +78,15 @@ def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) ->
     for field in ("id", "version", "fixture"):
         if not isinstance(contract.get(field), str) or not contract[field]:
             raise ValueError(f"Open Ephys agent contract field is invalid: {field}.")
+
+    if (
+        contract["id"] != SUPPORTED_CONTRACT_ID
+        or contract["version"] != SUPPORTED_CONTRACT_VERSION
+    ):
+        raise ValueError(
+            "Open Ephys agent manifest does not declare the supported contract "
+            f"{SUPPORTED_CONTRACT_ID} {SUPPORTED_CONTRACT_VERSION}."
+        )
 
     fixture_ref = Path(contract["fixture"])
     if fixture_ref.is_absolute():
@@ -87,8 +110,15 @@ def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) ->
 
     if not isinstance(fixture, dict):
         raise ValueError("Open Ephys agent contract fixture must be a JSON object.")
+    if fixture.get("schema_version") != SUPPORTED_SCHEMA_VERSION:
+        raise ValueError("Open Ephys agent contract fixture schema is not supported.")
     if fixture.get("contract") != contract:
         raise ValueError("Open Ephys agent contract metadata does not match its fixture.")
+    if (
+        fixture["contract"].get("id") != SUPPORTED_CONTRACT_ID
+        or fixture["contract"].get("version") != SUPPORTED_CONTRACT_VERSION
+    ):
+        raise ValueError("Open Ephys agent fixture does not declare the supported contract.")
 
     baseline = manifest.get("baseline")
     if not isinstance(baseline, dict) or any(
@@ -129,9 +159,7 @@ def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) ->
         )
 
     parameter_response = (fixture.get("api") or {}).get("parameter_response")
-    if not isinstance(parameter_response, dict) or (
-        parameter_response.get("required_fields") != PARAMETER_RESPONSE_REQUIRED_FIELDS
-    ):
+    if parameter_response != PARAMETER_RESPONSE_CONTRACT:
         raise ValueError("Open Ephys agent contract parameter response is invalid.")
     if manifest.get("parameter_response") != parameter_response:
         raise ValueError("Open Ephys agent contract parameter response does not match the manifest.")

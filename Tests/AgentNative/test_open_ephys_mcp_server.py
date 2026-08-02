@@ -60,7 +60,15 @@ class AgentNativeManifestTests(unittest.TestCase):
     def test_parameter_routes_reject_unsafe_raw_parameter_name_segments(self):
         commands = mcp.command_index(self.manifest)
         for name in ("get_parameter", "set_parameter", "get_stream_parameter", "set_stream_parameter"):
-            for parameter_name in ("", "bad/name", "bad\\name", ".", "..", "bad\nname"):
+            for parameter_name in (
+                "",
+                "bad/name",
+                "bad\\name",
+                ".",
+                "..",
+                "bad\nname",
+                "bad\u0085name",
+            ):
                 with self.subTest(command=name, parameter_name=repr(parameter_name)):
                     with self.assertRaisesRegex(ValueError, "(?i)parameter name"):
                         mcp.render_path(
@@ -311,6 +319,7 @@ class AgentNativeContractParityTests(unittest.TestCase):
     def test_contract_declares_canonical_parameter_name_segment_policy(self):
         policy = {
             "field": "parameter_name",
+            "source": "parameter_response.name",
             "input": "raw",
             "render": "percent_encode_utf8_once",
             "reject": ["empty", "slash", "backslash", "dot_segment", "control_character"],
@@ -337,6 +346,8 @@ class AgentNativeContractParityTests(unittest.TestCase):
                 "uia.automation_id",
             ],
         )
+        self.assertEqual(parameter_response["route_lookup_field"], "name")
+        self.assertEqual(parameter_response["stable_identity_field"], "key")
         self.assertEqual(
             self.contract["uia"]["parameter_automation_id_rule"],
             "oe.parameter.<sanitised parameter key>",
@@ -360,7 +371,9 @@ class AgentNativeContractParityTests(unittest.TestCase):
         self.assertIn("`get_stream_parameters`, `get_parameter`, or `get_stream_parameter` first.", skill)
         self.assertIn("Pass that returned\n`uia.automation_id` to `oe_uia_locator` as `automation_id`.", skill)
         self.assertIn("do not construct or guess them from a parameter name or key", skill)
-        self.assertIn("use its returned\n`key` as the raw `parameter_name`", skill)
+        self.assertIn("use its returned\n`name` as the raw `parameter_name`", skill)
+        self.assertIn("`key` remains the stable identity", skill)
+        self.assertNotIn("`key` as the raw `parameter_name`", skill)
         self.assertIn("one percent-encoded path segment", skill)
         self.assertIn("does not validate a real\ndevice", skill)
 
@@ -484,6 +497,35 @@ class AgentNativeContractParityTests(unittest.TestCase):
             (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "parameter response"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_stale_schema_version(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            fixture = json.loads(json.dumps(self.contract))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture["contract"]["fixture"] = "contract.json"
+            manifest["schema_version"] = "0.1.1"
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "schema"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_matched_but_unsupported_contract_version(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            fixture = json.loads(json.dumps(self.contract))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture["contract"]["fixture"] = "contract.json"
+            manifest["contract"]["version"] = "0.1.1"
+            fixture["contract"]["version"] = "0.1.1"
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "supported contract"):
                 mcp.load_manifest(temp_root / "manifest.json")
 
     def test_manifest_rejects_a_mismatched_parameter_name_segment_policy(self):

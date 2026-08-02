@@ -8,7 +8,7 @@
 
 - This is one narrow agent-native parity package. Do not change acquisition, recording, processor, parameter, stream, or Neuropixels behavior.
 - Preserve all existing API routes, payload shapes, supported legacy parameter names, UIA AutomationIds, and MCP command names.
-- The GUI/API identity remains the API-returned parameter `key` and `uia.automation_id`; the MCP and skill must discover rather than synthesize them.
+- HTTP parameter routes resolve the API-returned `name`. Use that raw `name` as `parameter_name`; `key` remains stable identity and the source of UIA identity. The MCP and skill must discover rather than synthesize either value.
 - A parameter name is exactly one URL path segment. Accept a valid percent-encoded space (`%20`) and other names that cpp-httplib safely decodes into one non-empty segment; reject decoded `/`, `\`, `.` and `..`, malformed percent escapes, empty segments, and control characters.
 - Processor and stream parameter GET and PUT routes must use the same admission rule.
 - Strict TDD: add a real behavioral test, observe the expected failure against production code, then implement the minimum fix. Do not use source-text assertions.
@@ -42,10 +42,10 @@ Files:
 - `agent_native/README.md` only if its user workflow needs clarification
 
 1. RED: add behavior tests requiring agent contract `0.1.2` across manifest, fixture, MCP `initialize.serverInfo.version`, and skill.
-2. RED: prove MCP renders processor and stream parameter names containing spaces as one percent-encoded path segment and refuses values that would introduce a slash, backslash, dot-segment, control character, or empty segment.
+2. RED: prove MCP renders the API-returned processor and stream parameter `name` containing spaces as one percent-encoded path segment and refuses values that would introduce a slash, backslash, dot-segment, control character, or empty segment.
 3. GREEN: add the smallest shared MCP path-segment validator/renderer and apply it only to dynamic parameter-name fields.
 4. GREEN: describe the runtime guarantee in the versioned contract and surface manifest so mixed `0.1.1`/`0.1.2` assets fail closed.
-5. GREEN: update the OE-only skill workflow to discover the parameter first, use its returned key, and send it as one percent-encoded segment. It must not claim real-device validation.
+5. GREEN: update the OE-only skill workflow to discover the parameter first, use its returned `name` as the raw route field, and send it as one percent-encoded segment. Preserve `key` as stable identity and the source of UIA identity. The skill must not claim real-device validation.
 
 ## Verification and Publication
 

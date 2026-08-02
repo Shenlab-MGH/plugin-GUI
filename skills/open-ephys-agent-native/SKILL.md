@@ -48,10 +48,13 @@ the legacy `name`, `type`, and string `value` fields. Pass that returned
 `uia.automation_id` to `oe_uia_locator` as `automation_id`.
 
 For a parameter GET or PUT, discover the parameter first and use its returned
-`key` as the raw `parameter_name`. The MCP bridge rejects empty names, slashes,
-backslashes, dot-segments, and control characters, then renders the raw key as
-one percent-encoded path segment. Do not pre-encode or decode the key: a
-literal `%20` key is sent as `%2520`. This workflow does not validate a real
+`name` as the raw `parameter_name`. The MCP bridge rejects empty names, slashes,
+backslashes, dot-segments, and control characters, then renders the raw name as
+one percent-encoded path segment. Do not pre-encode or decode the name: a
+literal `%20` name is sent as `%2520`.
+The returned `key` remains the stable identity and the source of UIA identity;
+it is not the HTTP route lookup value. This workflow
+does not validate a real
 device; it only describes the contract-level request path.
 
 Parameter AutomationIds follow `oe.parameter.<sanitised parameter key>`, but
