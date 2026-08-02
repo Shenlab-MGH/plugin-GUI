@@ -787,7 +787,7 @@ private:
             ret["parameters"] = parameters_json;
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get (R"(/api/processors/([0-9]+)/parameters/([A-Za-z0-9_\.\-]+))",
+        svr_->Get (R"(/api/processors/([0-9]+)/parameters/([^/]+))",
                    [this] (const httplib::Request& req, httplib::Response& res)
                    {
                        auto processor = find_processor (req.matches[1]);
@@ -796,6 +796,9 @@ private:
                            res.status = 404;
                            return;
                        }
+
+                       if (! admit_parameter_route_segment (req, 2, res))
+                           return;
 
                        auto parameter = find_parameter (processor, req.matches[2]);
                        if (parameter == nullptr)
@@ -856,7 +859,7 @@ private:
                        res.set_content (ret.dump(), "application/json");
                    });
 
-        svr_->Get (R"(/api/processors/([0-9]+)/streams/([0-9]+)/parameters/([A-Za-z0-9_\.\-]+))",
+        svr_->Get (R"(/api/processors/([0-9]+)/streams/([0-9]+)/parameters/([^/]+))",
                    [this] (const httplib::Request& req, httplib::Response& res)
                    {
                        auto processor = find_processor (req.matches[1]);
@@ -872,6 +875,9 @@ private:
                            res.status = 404;
                            return;
                        }
+
+                       if (! admit_parameter_route_segment (req, 3, res))
+                           return;
 
                        auto parameter = find_parameter (processor, stream->getStreamId(), req.matches[3]);
                        if (parameter == nullptr)
@@ -1194,7 +1200,7 @@ private:
             ret["info"] = return_msg.toStdString();
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Put (R"(/api/processors/([0-9]+)/parameters/([A-Za-z0-9_\.\-]+))",
+        svr_->Put (R"(/api/processors/([0-9]+)/parameters/([^/]+))",
                    [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
                        auto processor = find_processor (req.matches[1]);
@@ -1203,6 +1209,9 @@ private:
                            res.status = 404;
                            return;
                        }
+
+                       if (! admit_parameter_route_segment (req, 2, res))
+                           return;
 
                        auto parameter = find_parameter (processor, req.matches[2]);
 
@@ -1290,7 +1299,7 @@ private:
                        res.set_content (ret.dump(), "application/json");
                    });
 
-        svr_->Put (R"(/api/processors/([0-9]+)/streams/([0-9]+)/parameters/([A-Za-z0-9_\.\-]+))",
+        svr_->Put (R"(/api/processors/([0-9]+)/streams/([0-9]+)/parameters/([^/]+))",
                    [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
                        auto processor = find_processor (req.matches[1]);
@@ -1311,6 +1320,9 @@ private:
                        {
                            LOGD ("Found stream: ", stream->getName());
                        }
+
+                       if (! admit_parameter_route_segment (req, 3, res))
+                           return;
 
                        auto parameter = find_parameter (processor, stream->getStreamId(), req.matches[3]);
 
@@ -1732,6 +1744,55 @@ private:
         }
 
         return nullptr;
+    }
+
+    static inline bool admit_parameter_route_segment (const httplib::Request& request,
+                                                       size_t matchIndex,
+                                                       httplib::Response& response)
+    {
+        const std::string parameterName = request.matches[matchIndex];
+        bool valid = ! parameterName.empty()
+                     && parameterName != "."
+                     && parameterName != ".."
+                     && parameterName.find ('/') == std::string::npos
+                     && parameterName.find ('\\') == std::string::npos;
+
+        for (const auto character : parameterName)
+        {
+            const auto byte = static_cast<unsigned char> (character);
+            if (byte < 0x20 || byte == 0x7f)
+                valid = false;
+        }
+
+        const auto queryStart = request.target.find ('?');
+        const auto pathEnd = queryStart == std::string::npos ? request.target.size() : queryStart;
+        const auto segmentStart = request.target.rfind ('/', pathEnd) + 1;
+        const auto encodedName = request.target.substr (segmentStart, pathEnd - segmentStart);
+        const auto isHexDigit = [] (char character)
+        {
+            return (character >= '0' && character <= '9')
+                   || (character >= 'a' && character <= 'f')
+                   || (character >= 'A' && character <= 'F');
+        };
+
+        for (size_t index = 0; index < encodedName.size(); ++index)
+        {
+            if (encodedName[index] != '%')
+                continue;
+
+            if (index + 2 >= encodedName.size()
+                || ! isHexDigit (encodedName[index + 1])
+                || ! isHexDigit (encodedName[index + 2]))
+            {
+                valid = false;
+                break;
+            }
+            index += 2;
+        }
+
+        if (! valid)
+            response.status = 400;
+        return valid;
     }
 
     static inline Parameter* find_parameter (GenericProcessor* processor, uint16 streamId, const std::string& parameter_name)
