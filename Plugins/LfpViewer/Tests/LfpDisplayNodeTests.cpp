@@ -4696,9 +4696,19 @@ TEST_F (LfpDisplayNodeTests,
 TEST_F (LfpDisplayNodeTests,
         PaneSelectorRetainedActionsHonourLatestAvailabilityAndDestruction)
 {
+    const auto mark = [] (const char* label)
+    {
+        ::fprintf (
+            stderr,
+            "[ci42] retained:%s\n",
+            label);
+        ::fflush (stderr);
+    };
+    mark ("test-begin");
     AccessibilityActions
         retainedActions;
     {
+        mark ("canvas-ctor-begin");
         auto canvas =
             std::make_unique<
                 LfpViewer::
@@ -4708,29 +4718,45 @@ TEST_F (LfpDisplayNodeTests,
                     SplitLayouts::
                         TWO_VERT,
                 false);
+        mark ("canvas-ctor-end");
+        mark ("updateSettings-begin");
         canvas->updateSettings();
+        mark ("updateSettings-end");
+        mark ("setSize-begin");
         canvas->setSize (900, 800);
+        mark ("setSize-end");
+        mark ("addToDesktop-begin");
         canvas->addToDesktop (0);
+        mark ("addToDesktop-end");
+        mark ("setVisible-begin");
         canvas->setVisible (true);
+        mark ("setVisible-end");
+        mark ("get-splitters-begin");
         const auto splitters =
             getDisplaySplitters (
                 *canvas);
+        mark ("get-splitters-end");
         ASSERT_EQ (
             splitters.size(),
             3);
+        mark ("get-handler-begin");
         auto* handler =
             splitters[1]
                 ->timescale
                 ->getAccessibilityHandler();
+        mark ("get-handler-end");
         ASSERT_NE (
             handler,
             nullptr);
+        mark ("get-actions-begin");
         retainedActions =
             handler->getActions();
+        mark ("get-actions-end");
 
         std::atomic<bool>
             workerReturned { false };
         bool invoked = false;
+        mark ("worker-start-begin");
         std::thread worker (
             [&]
             {
@@ -4741,10 +4767,13 @@ TEST_F (LfpDisplayNodeTests,
                 workerReturned.store (
                     true);
             });
+        mark ("worker-start-end");
+        mark ("setEnabled-false-begin");
         splitters[1]
             ->timescale
             ->setEnabled (
                 false);
+        mark ("setEnabled-false-end");
         for (int attempt = 0;
              attempt < 100
                  && ! workerReturned.load();
@@ -4754,21 +4783,27 @@ TEST_F (LfpDisplayNodeTests,
                 ->runDispatchLoopUntil (
                     10);
         }
+        mark ("worker-join-begin");
         joinLfpWorkerOrAbort (
             worker,
             workerReturned);
+        mark ("worker-join-end");
         EXPECT_TRUE (invoked);
+        mark ("first-invoke-result");
         EXPECT_TRUE (
             canvas->isPaneActive (0));
 
+        mark ("setEnabled-true-begin");
         splitters[1]
             ->timescale
             ->setEnabled (
                 true);
+        mark ("setEnabled-true-end");
         const auto originalBounds =
             splitters[1]
                 ->timescale
                 ->getBounds();
+        mark ("setBounds-negative-begin");
         splitters[1]
             ->timescale
             ->setBounds (
@@ -4781,44 +4816,59 @@ TEST_F (LfpDisplayNodeTests,
                     .getWidth(),
                 originalBounds
                     .getHeight());
+        mark ("setBounds-negative-end");
+        mark ("second-invoke-begin");
         EXPECT_TRUE (
             invokeLfpActionFromWorker (
                 retainedActions,
                 AccessibilityActionType::
                     press));
+        mark ("second-invoke-end");
         EXPECT_TRUE (
             canvas->isPaneActive (0));
+        mark ("restore-bounds-begin");
         splitters[1]
             ->timescale
             ->setBounds (
                 originalBounds);
+        mark ("restore-bounds-end");
 
+        mark ("setLayout-single-begin");
         canvas->setLayout (
             LfpViewer::
                 SplitLayouts::SINGLE);
+        mark ("setLayout-single-end");
+        mark ("third-invoke-begin");
         EXPECT_TRUE (
             invokeLfpActionFromWorker (
                 retainedActions,
                 AccessibilityActionType::
                     press));
+        mark ("third-invoke-end");
         EXPECT_TRUE (
             canvas->isPaneActive (0));
         EXPECT_FALSE (
             canvas->isPaneActive (1));
 
+        mark ("old-teardown-begin");
         canvas->endAnimation();
         canvas->setVisible (false);
         canvas->removeFromDesktop();
+        mark ("old-teardown-end");
     }
 
+    mark ("old-scope-exited");
+    mark ("stopAcquisition-begin");
     EXPECT_TRUE (
         processor->stopAcquisition());
+    mark ("stopAcquisition-end");
     EXPECT_TRUE (
         invokeLfpActionFromWorker (
             retainedActions,
             AccessibilityActionType::
                 press));
 
+    mark ("replacement-create-begin");
     auto replacement =
         std::make_unique<
             LfpViewer::
@@ -4828,6 +4878,7 @@ TEST_F (LfpDisplayNodeTests,
                 SplitLayouts::
                     TWO_VERT,
             false);
+    mark ("replacement-create-end");
     replacement->updateSettings();
     replacement->setSize (
         900,
@@ -4849,9 +4900,12 @@ TEST_F (LfpDisplayNodeTests,
         replacement
             ->isPaneActive (1));
 
+    mark ("replacement-teardown-begin");
     replacement->endAnimation();
     replacement->setVisible (false);
     replacement->removeFromDesktop();
+    mark ("replacement-teardown-end");
+    mark ("test-end");
 }
 
 #if JUCE_WINDOWS
