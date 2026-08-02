@@ -11271,6 +11271,7 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_EQ (tooltip->getTooltip(), "4");
 }
 
+#if JUCE_WINDOWS
 TEST_F (LfpDisplayNodeTests,
         WindowsUiaWorkerTogglesShowChannelNumbers)
 {
@@ -11345,6 +11346,7 @@ TEST_F (LfpDisplayNodeTests,
     const auto closedDrawerResult = runAction (id, LfpWindowsUiaAction::queryToggle);
     EXPECT_EQ (closedDrawerResult.invokeResult, E_FAIL);
 }
+#endif
 
 TEST_F (LfpDisplayNodeTests,
         InvertSignalToggleRunsOnMessageThreadAndSurvivesEdgeCases)
@@ -11446,6 +11448,7 @@ TEST_F (LfpDisplayNodeTests,
     joinLfpWorkerOrAbort (destroyedWorker, workerReturned);
 }
 
+#if JUCE_WINDOWS
 TEST_F (LfpDisplayNodeTests,
         WindowsUiaWorkerTogglesSubtractOffsetAndKeepsSpikeRasterOn)
 {
@@ -11539,6 +11542,7 @@ TEST_F (LfpDisplayNodeTests,
     const auto closedDrawerResult = runAction (id, LfpWindowsUiaAction::queryToggle);
     EXPECT_EQ (closedDrawerResult.invokeResult, E_FAIL);
 }
+#endif
 
 TEST_F (LfpDisplayNodeTests,
         InvertSignalXmlRoundTripsPerPaneWithoutNotifications)
@@ -11974,6 +11978,7 @@ TEST_F (LfpDisplayNodeTests,
             .isEmpty());
 }
 
+#if JUCE_WINDOWS
 TEST_F (LfpDisplayNodeTests,
         WindowsUiaWorkerTogglesInvertSignal)
 {
@@ -12048,6 +12053,7 @@ TEST_F (LfpDisplayNodeTests,
     const auto closedDrawerResult = runAction (id, LfpWindowsUiaAction::queryToggle);
     EXPECT_EQ (closedDrawerResult.invokeResult, E_FAIL);
 }
+#endif
 
 TEST_F (LfpDisplayNodeTests,
         ReverseOrderToggleRunsOnMessageThreadAndTracksProgrammaticState)

@@ -25,6 +25,7 @@
 #define __GRAPHVIEWER_H_4E971BF9__
 
 #include "../AccessClass.h"
+#include "../TestableExport.h"
 #include "../Processors/Editors/GenericEditor.h"
 #include "../Processors/Visualization/Visualizer.h"
 #include "EditorViewport.h"
@@ -123,7 +124,7 @@ private:
  @see GraphViewer, GraphNode
 */
 
-class DataStreamButton : public Button
+class TESTABLE DataStreamButton : public Button
 {
 public:
     enum class Purpose
