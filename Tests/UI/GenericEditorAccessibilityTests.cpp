@@ -185,6 +185,15 @@ public:
 
     StreamSelectorTable& getStreamSelector() { return *streamSelector; }
 
+    void showStreamSelectorForTesting()
+    {
+        drawerOpen = true;
+        drawerButton->setToggleState (
+            true,
+            dontSendNotification);
+        resized();
+    }
+
     void selectedStreamHasChanged() override
     {
         selectedStreamChangeUsedMessageThread.store (
@@ -2137,8 +2146,10 @@ TEST (GenericEditorAccessibilityTests,
     TestStreamProcessor processor;
     processor.setNodeId (100);
     InspectableGenericEditor editor (&processor);
+    editor.setSize (450, 150);
     editor.setVisible (true);
     editor.addToDesktop (0);
+    editor.showStreamSelectorForTesting();
     auto& selector = editor.getStreamSelector();
     TestDataStream first ({ "Probe AP",
                             "Neuropixels action-potential stream",
