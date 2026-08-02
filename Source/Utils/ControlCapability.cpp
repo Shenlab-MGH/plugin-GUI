@@ -28,23 +28,23 @@
 const std::vector<ControlCapability>& getCoreControlCapabilities()
 {
     // Agent Core R0: advertise only capabilities backed by official v1.1.0 routes.
-    // Order is stable. UIA automation_id matches canonical id.
+    // Order is stable. Discovery-only: no UIA AutomationId claims (UI does not implement them).
     static const std::vector<ControlCapability> capabilities {
         { "oe.control.acquisition", "Acquisition", "Start or stop data acquisition.",
-          ControlCapabilityKind::toggle, "oe.control.acquisition",
+          ControlCapabilityKind::toggle,
           { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus, {}, { "mode" } },
             { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus, { "mode" }, { "mode" } } } },
         { "oe.control.recording", "Recording", "Start or stop writing data to disk.",
-          ControlCapabilityKind::toggle, "oe.control.recording",
+          ControlCapabilityKind::toggle,
           { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus, {}, { "mode" } },
             { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus, { "mode" }, { "mode" } } } },
         { "oe.control.recording.filename", "Recording filename", "Edit the recording filename.",
-          ControlCapabilityKind::collection, "oe.control.recording.filename",
+          ControlCapabilityKind::collection,
           { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathRecording, {}, { "prepend_text", "base_text", "append_text" } },
             { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathRecording, { "prepend_text", "base_text", "append_text" },
               { "prepend_text", "base_text", "append_text" } } } },
         { "oe.status.cpu_usage", "CPU usage", "Fraction of available processing time used by the signal chain.",
-          ControlCapabilityKind::range, "oe.status.cpu_usage",
+          ControlCapabilityKind::range,
           { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathCpu, {}, { "usage" } } } }
     };
 

@@ -77,7 +77,6 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         const String expectedId (expected.id);
 
         EXPECT_EQ (capability.id, expectedId) << "capability order mismatch at index " << i;
-        EXPECT_EQ (capability.uiaAutomationId, expectedId) << expectedId;
         EXPECT_TRUE (capability.name.isNotEmpty()) << expectedId;
         EXPECT_TRUE (capability.description.isNotEmpty()) << expectedId;
 
@@ -96,7 +95,6 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         const auto* found = findControlCapability (expectedId);
         ASSERT_NE (found, nullptr) << expectedId;
         EXPECT_EQ (found->id, expectedId);
-        EXPECT_EQ (found->uiaAutomationId, expectedId);
     }
 
     // Capabilities that would require unregistered endpoints must not appear.
@@ -190,7 +188,8 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
         const auto expectedId = std::string (expected.id);
 
         EXPECT_EQ (item["id"], expectedId);
-        EXPECT_EQ (item["uia"]["automation_id"], expectedId);
+        // R0 is API-discovery-only: official v1.1.0 UI does not implement AutomationIds.
+        EXPECT_FALSE (item.contains ("uia")) << expectedId;
         ASSERT_TRUE (item["api"].is_array());
         ASSERT_EQ (item["api"].size(), expected.operations.size()) << expectedId;
 
@@ -212,7 +211,7 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
                                            [] (const auto& item)
                                            { return item["id"] == "oe.control.acquisition"; });
     ASSERT_NE (acquisition, document["capabilities"].end());
-    EXPECT_EQ ((*acquisition)["uia"]["automation_id"], "oe.control.acquisition");
+    EXPECT_FALSE ((*acquisition).contains ("uia"));
     EXPECT_EQ ((*acquisition)["api"][0]["path"], OpenEphysHttpApi::kPathStatus);
     EXPECT_EQ ((*acquisition)["api"][0]["method"], OpenEphysHttpApi::kMethodGet);
 }
