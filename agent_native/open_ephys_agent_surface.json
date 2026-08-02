@@ -51,7 +51,8 @@
       "identity.identifier",
       "uia.automation_id",
       "uia.scope",
-      "uia.uses_display_name_fallback"
+      "uia.uses_display_name_fallback",
+      "uia.uses_collision_suffix"
     ],
     "route_lookup_field": "stream_index",
     "identity": {

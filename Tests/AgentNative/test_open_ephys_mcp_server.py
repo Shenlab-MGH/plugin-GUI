@@ -380,6 +380,7 @@ class AgentNativeManifestTests(unittest.TestCase):
             ("identity.identifier", lambda s: s["identity"].update(identifier="other")),
             ("uia.scope", lambda s: s["uia"].update(scope="global")),
             ("uia.fallback", lambda s: s["uia"].update(uses_display_name_fallback=True)),
+            ("uia.collision_suffix_type", lambda s: s["uia"].update(uses_collision_suffix=1)),
             ("uia.processor", lambda s: s["uia"].update(automation_id=s["uia"]["automation_id"].replace("processor.101", "processor.202"))),
             ("uia.source", lambda s: s["uia"].update(automation_id=s["uia"]["automation_id"].replace("source_101", "source_202"))),
         ):
@@ -406,6 +407,174 @@ class AgentNativeManifestTests(unittest.TestCase):
                             "params": {
                                 "name": "oe_list_streams",
                                 "arguments": {"processor_id": 101},
+                            },
+                        }
+                    )
+                self.assertIn("error", response)
+
+    def test_stream_semantic_sanitiser_matches_cpp_ascii_rules(self):
+        cases = {
+            "Probe.AP 01": "probe_ap_01",
+            " A--B ": "a_b",
+            "AP-é__LFP": "ap_lfp",
+            "___": "unnamed",
+            "神经": "unnamed",
+            "": "unnamed",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(mcp.sanitise_stream_semantic_segment(raw), expected)
+
+    def test_typed_stream_tools_derive_locator_segment_from_identifier_or_name(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        streams = (
+            self._valid_stream(
+                identifier="Probe.AP", name="Ignored fallback", semantic_segment="probe_ap"
+            ),
+            self._valid_stream(
+                identifier="", name="Fallback Name", semantic_segment="fallback_name"
+            ),
+            self._valid_stream(
+                identifier="神经", name="Ignored fallback", semantic_segment="unnamed"
+            ),
+        )
+
+        for stream in streams:
+            with self.subTest(identifier=stream["identifier"], name=stream["name"]):
+                with mock.patch.object(
+                    mcp,
+                    "call_http",
+                    return_value={"ok": True, "status": 200, "response": stream},
+                ):
+                    response = server.handle(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 20,
+                            "method": "tools/call",
+                            "params": {
+                                "name": "oe_get_stream",
+                                "arguments": {"processor_id": 101, "stream_index": 0},
+                            },
+                        }
+                    )
+                self.assertNotIn("error", response)
+
+    def test_typed_stream_tools_reject_a_self_reported_wrong_semantic_segment(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        stream = self._valid_stream(identifier="imec.ap", name="Probe AP")
+        stream["uia"]["automation_id"] = (
+            "oe.processor.101.streams.table.source_101.stream_probe_ap"
+        )
+        with mock.patch.object(
+            mcp,
+            "call_http",
+            return_value={"ok": True, "status": 200, "response": stream},
+        ):
+            response = server.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 21,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "oe_get_stream",
+                        "arguments": {"processor_id": 101, "stream_index": 0},
+                    },
+                }
+            )
+        self.assertIn("error", response)
+
+    def test_typed_stream_list_recomputes_collision_from_metadata(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        dotted = self._valid_stream(
+            stream_index=0, identifier="probe.ap", semantic_segment="probe_ap"
+        )
+        underscored = self._valid_stream(
+            stream_index=1, identifier="probe_ap", semantic_segment="probe_ap"
+        )
+        for stream in (dotted, underscored):
+            stream["uia"]["automation_id"] = (
+                "oe.processor.101.streams.table.source_101.stream_probe_ap."
+                f"index_{stream['stream_index']}"
+            )
+            stream["uia"]["uses_collision_suffix"] = True
+
+        with mock.patch.object(
+            mcp,
+            "call_http",
+            return_value={
+                "ok": True,
+                "status": 200,
+                "response": {"id": 101, "streams": [dotted, underscored]},
+            },
+        ):
+            accepted = server.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 22,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "oe_list_streams",
+                        "arguments": {"processor_id": 101},
+                    },
+                }
+            )
+        self.assertNotIn("error", accepted)
+
+        not_colliding = self._valid_stream(
+            stream_index=1, identifier="probe_lfp", semantic_segment="probe_lfp"
+        )
+        not_colliding["uia"]["automation_id"] = (
+            "oe.processor.101.streams.table.source_101.stream_probe_ap.index_1"
+        )
+        not_colliding["uia"]["uses_collision_suffix"] = True
+        with mock.patch.object(
+            mcp,
+            "call_http",
+            return_value={
+                "ok": True,
+                "status": 200,
+                "response": {"id": 101, "streams": [dotted, not_colliding]},
+            },
+        ):
+            rejected = server.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 23,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "oe_list_streams",
+                        "arguments": {"processor_id": 101},
+                    },
+                }
+            )
+        self.assertIn("error", rejected)
+        self.assertIn("semantic segment", rejected["error"]["message"].lower())
+
+    def test_typed_get_stream_requires_collision_flag_to_match_suffix_presence(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        invalid = []
+        unique_with_suffix = self._valid_stream()
+        unique_with_suffix["uia"]["automation_id"] += ".index_0"
+        invalid.append(unique_with_suffix)
+        collision_without_suffix = self._valid_stream()
+        collision_without_suffix["uia"]["uses_collision_suffix"] = True
+        invalid.append(collision_without_suffix)
+
+        for stream in invalid:
+            with self.subTest(uia=stream["uia"]):
+                with mock.patch.object(
+                    mcp,
+                    "call_http",
+                    return_value={"ok": True, "status": 200, "response": stream},
+                ):
+                    response = server.handle(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 24,
+                            "method": "tools/call",
+                            "params": {
+                                "name": "oe_get_stream",
+                                "arguments": {"processor_id": 101, "stream_index": 0},
                             },
                         }
                     )
@@ -516,6 +685,8 @@ class AgentNativeManifestTests(unittest.TestCase):
         second = self._valid_stream(stream_index=1)
         first["uia"]["automation_id"] += ".index_0"
         second["uia"]["automation_id"] += ".index_1"
+        first["uia"]["uses_collision_suffix"] = True
+        second["uia"]["uses_collision_suffix"] = True
         with mock.patch.object(
             mcp,
             "call_http",
@@ -614,9 +785,15 @@ class AgentNativeManifestTests(unittest.TestCase):
                 self.assertIn("error", response)
 
     @staticmethod
-    def _valid_stream(stream_index=0):
+    def _valid_stream(
+        stream_index=0,
+        *,
+        identifier="imec.ap",
+        name="Probe AP",
+        semantic_segment="imec_ap",
+    ):
         return {
-            "name": "Probe AP",
+            "name": name,
             "source_id": 101,
             "sample_rate": 30000.0,
             "channel_count": 0,
@@ -625,18 +802,22 @@ class AgentNativeManifestTests(unittest.TestCase):
             "runtime_id": 7,
             "source_name": "Neuropixels PXI",
             "description": "AP stream",
-            "identifier": "imec.ap",
+            "identifier": identifier,
             "generates_timestamps": True,
             "identity": {
-                "available": True,
+                "available": identifier != "",
                 "scope": "configuration",
                 "source_id": 101,
-                "identifier": "imec.ap",
+                "identifier": identifier,
             },
             "uia": {
-                "automation_id": "oe.processor.101.streams.table.source_101.stream_imec_ap",
+                "automation_id": (
+                    "oe.processor.101.streams.table.source_101.stream_"
+                    + semantic_segment
+                ),
                 "scope": "configuration",
-                "uses_display_name_fallback": False,
+                "uses_display_name_fallback": identifier == "",
+                "uses_collision_suffix": False,
             },
         }
 
@@ -800,6 +981,7 @@ class AgentNativeContractParityTests(unittest.TestCase):
                 "uia.automation_id",
                 "uia.scope",
                 "uia.uses_display_name_fallback",
+                "uia.uses_collision_suffix",
             ],
             "route_lookup_field": "stream_index",
             "identity": {

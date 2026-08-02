@@ -80,9 +80,9 @@ For Windows UIA, pass the API-returned `uia.automation_id` to
 `oe_uia_locator`. Do not construct a stream AutomationId from a name,
 identifier, source id, or index. The locator is configuration-scoped and may
 refer to a display-name fallback. When sanitised sibling identities collide,
-the returned locator includes `.index_<stream_index>`; preserve that suffix
-exactly and rediscover after reordering. Stop if the exact control is absent,
-ambiguous, or unavailable.
+`uia.uses_collision_suffix` is true and the returned locator includes
+`.index_<stream_index>`; preserve that suffix exactly and rediscover after
+reordering. Stop if the exact control is absent, ambiguous, or unavailable.
 
 ## Safety boundaries
 

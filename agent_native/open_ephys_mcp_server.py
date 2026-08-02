@@ -79,6 +79,7 @@ STREAM_RESPONSE_CONTRACT = {
         "uia.automation_id",
         "uia.scope",
         "uia.uses_display_name_fallback",
+        "uia.uses_collision_suffix",
     ],
     "route_lookup_field": "stream_index",
     "identity": {
@@ -493,6 +494,22 @@ def _is_nonnegative_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+def sanitise_stream_semantic_segment(value: str) -> str:
+    """Mirror C++ sanitiseSemanticSegment's ASCII-only behavior exactly."""
+
+    result: list[str] = []
+    for character in value:
+        if "A" <= character <= "Z":
+            character = character.lower()
+        if "a" <= character <= "z" or "0" <= character <= "9":
+            result.append(character)
+        elif result and result[-1] != "_":
+            result.append("_")
+    while result and result[-1] == "_":
+        result.pop()
+    return "".join(result) or "unnamed"
+
+
 def parse_stream_row_automation_id(automation_id: Any) -> dict[str, Any] | None:
     if not isinstance(automation_id, str):
         return None
@@ -568,6 +585,8 @@ def validate_stream_response(
         raise ValueError("Open Ephys stream UIA fallback flag must be a boolean.")
     if uia["uses_display_name_fallback"] != (stream["identifier"] == ""):
         raise ValueError("Open Ephys stream UIA fallback does not match its identifier.")
+    if not isinstance(uia["uses_collision_suffix"], bool):
+        raise ValueError("Open Ephys stream UIA collision suffix flag must be a boolean.")
     parsed_locator = parse_stream_row_automation_id(uia["automation_id"])
     if parsed_locator is None:
         raise ValueError("Open Ephys stream UIA AutomationId is invalid.")
@@ -575,31 +594,36 @@ def validate_stream_response(
         raise ValueError("Open Ephys stream UIA processor id does not match the request.")
     if parsed_locator["source_id"] != stream["source_id"]:
         raise ValueError("Open Ephys stream UIA source id does not match the stream.")
+    identity_segment = stream["identifier"] if stream["identifier"] else stream["name"]
+    expected_semantic_segment = sanitise_stream_semantic_segment(identity_segment)
+    if parsed_locator["semantic_segment"] != expected_semantic_segment:
+        raise ValueError("Open Ephys stream UIA semantic segment does not match stream metadata.")
+    has_collision_suffix = parsed_locator["collision_index"] is not None
+    if uia["uses_collision_suffix"] != has_collision_suffix:
+        raise ValueError("Open Ephys stream UIA collision suffix flag does not match its locator.")
     if (
         parsed_locator["collision_index"] is not None
         and parsed_locator["collision_index"] != stream["stream_index"]
     ):
         raise ValueError("Open Ephys stream UIA collision index does not match stream_index.")
+    parsed_locator["uses_collision_suffix"] = uia["uses_collision_suffix"]
+    parsed_locator["metadata_collision_key"] = (
+        processor_id,
+        stream["source_id"],
+        expected_semantic_segment,
+    )
     return parsed_locator
 
 
 def validate_stream_list_locators(parsed_locators: list[dict[str, Any]]) -> None:
     base_counts: dict[tuple[int, int, str], int] = {}
     for locator in parsed_locators:
-        key = (
-            locator["processor_id"],
-            locator["source_id"],
-            locator["semantic_segment"],
-        )
+        key = locator["metadata_collision_key"]
         base_counts[key] = base_counts.get(key, 0) + 1
     for locator in parsed_locators:
-        key = (
-            locator["processor_id"],
-            locator["source_id"],
-            locator["semantic_segment"],
-        )
+        key = locator["metadata_collision_key"]
         has_collision = base_counts[key] > 1
-        if has_collision != (locator["collision_index"] is not None):
+        if has_collision != locator["uses_collision_suffix"]:
             raise ValueError("Open Ephys stream UIA collision suffix does not match sibling locators.")
 
 
