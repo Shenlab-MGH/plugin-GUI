@@ -2,19 +2,11 @@ import re
 import unittest
 from pathlib import Path
 
+from Tests.AgentNative.workflow_test_utils import workflow_job
+
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
-
-
-def workflow_job(workflow, job_id):
-    match = re.search(
-        rf"(?ms)^  {re.escape(job_id)}:\s*\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\Z)",
-        workflow,
-    )
-    if match is None:
-        raise AssertionError(f"Missing workflow job: {job_id}")
-    return match.group("body")
 
 
 class WindowsAgentCiTests(unittest.TestCase):

@@ -6,6 +6,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import sys
 
+from Tests.AgentNative.workflow_test_utils import workflow_job
+
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_PATH = ROOT / "agent_native" / "open_ephys_agent_release_bundle.json"
@@ -13,6 +15,11 @@ SURFACE_PATH = ROOT / "agent_native" / "open_ephys_agent_surface.json"
 FIXTURE_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2.json"
 INSTALLER_PATH = ROOT / "Resources" / "Installers" / "Windows" / "windows_installer_script.iss"
 TESTS_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
+FULL_HISTORY_CHECKOUT_PATTERN = (
+    r"(?m)^    - uses: actions/checkout@v4[ \t]*\n"
+    r"      with:[ \t]*\n"
+    r"        fetch-depth: 0[ \t]*$"
+)
 
 sys.path.insert(0, str(ROOT / "agent_native"))
 
@@ -125,12 +132,28 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
 
     def test_unit_ci_fetches_history_required_for_provenance(self):
         workflow = TESTS_WORKFLOW_PATH.read_text(encoding="utf-8")
-        unit_job = workflow.split("\n  integration-tests:", maxsplit=1)[0]
+        unit_job = workflow_job(workflow, "unit-tests")
 
         self.assertRegex(
             unit_job,
-            r"(?m)^    - uses: actions/checkout@v4[ \t]*\n      with:[ \t]*\n        fetch-depth: 0[ \t]*$",
+            FULL_HISTORY_CHECKOUT_PATTERN,
         )
+
+    def test_unit_provenance_checkout_cannot_be_masked_by_windows_job(self):
+        workflow = TESTS_WORKFLOW_PATH.read_text(encoding="utf-8")
+        unit_job = workflow_job(workflow, "unit-tests")
+        windows_job = workflow_job(workflow, "windows-agent-tests")
+        mutated_unit_job, replacement_count = re.subn(
+            r"(?m)^        fetch-depth: 0[ \t]*$",
+            "        fetch-depth: 1",
+            unit_job,
+            count=1,
+        )
+
+        self.assertEqual(replacement_count, 1)
+        self.assertNotIn("windows-agent-tests:", unit_job)
+        self.assertNotRegex(mutated_unit_job, FULL_HISTORY_CHECKOUT_PATTERN)
+        self.assertIn("fetch-depth: 0", windows_job)
 
     def test_bundle_baseline_matches_surface_and_fixture(self):
         bundle = self.load_bundle()
