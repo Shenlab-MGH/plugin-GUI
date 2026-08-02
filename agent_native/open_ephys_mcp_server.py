@@ -752,6 +752,11 @@ class JsonRpcError(Exception):
         self.data = data
 
 
+class InvalidParamsError(JsonRpcError):
+    def __init__(self, message: str = "Invalid params", data: Any = None) -> None:
+        super().__init__(-32602, message, data)
+
+
 class McpServer:
     def __init__(self, *, base_url: str = DEFAULT_BASE_URL, manifest_path: Path = DEFAULT_MANIFEST) -> None:
         self.base_url = validate_base_url(base_url)
@@ -795,8 +800,6 @@ class McpServer:
             return {"jsonrpc": "2.0", "id": request_id, "result": result}
         except JsonRpcError as exc:
             return self._error_response(request_id, exc)
-        except ValueError as exc:
-            return self._error_response(request_id, JsonRpcError(-32602, str(exc)))
         except Exception:
             return {
                 "jsonrpc": "2.0",
@@ -837,11 +840,11 @@ class McpServer:
 
     def _validate_known_method_params(self, method: str, request: dict[str, Any]) -> None:
         if not self._params_are_an_object(request):
-            raise JsonRpcError(-32602, "Invalid params")
+            raise InvalidParamsError()
         if method == "initialize":
             params = request.get("params")
             if not isinstance(params, dict):
-                raise JsonRpcError(-32602, "Invalid params")
+                raise InvalidParamsError()
             protocol_version = params.get("protocolVersion")
             capabilities = params.get("capabilities")
             client_info = params.get("clientInfo")
@@ -852,15 +855,14 @@ class McpServer:
                 or not isinstance(client_info.get("name"), str)
                 or not isinstance(client_info.get("version"), str)
             ):
-                raise JsonRpcError(-32602, "Invalid params")
+                raise InvalidParamsError()
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.connection_state != "new":
             raise JsonRpcError(SERVER_NOT_INITIALIZED, "Invalid lifecycle order")
         requested_version = params["protocolVersion"]
         if requested_version != MCP_PROTOCOL_VERSION:
-            raise JsonRpcError(
-                -32602,
+            raise InvalidParamsError(
                 "Invalid params",
                 {"supported": MCP_PROTOCOL_VERSION, "requested": requested_version},
             )
@@ -889,13 +891,68 @@ class McpServer:
             *self.manifest["typed_tools"],
         }
         if not isinstance(name, str) or name not in known_tools or not isinstance(arguments, dict):
-            raise JsonRpcError(-32602, "Invalid params")
-        if name == "oe_post_command" and not isinstance(arguments.get("command"), str):
-            raise JsonRpcError(-32602, "Invalid params")
-        if name == "oe_api_request" and (
-            not isinstance(arguments.get("method"), str) or not isinstance(arguments.get("path"), str)
+            raise InvalidParamsError()
+        if name == "oe_post_command":
+            self._validate_post_command_arguments(arguments)
+        elif name == "oe_api_request":
+            self._validate_raw_api_arguments(arguments)
+        elif name in self.manifest["typed_tools"]:
+            try:
+                validate_typed_stream_arguments(name, arguments)
+            except ValueError as exc:
+                raise InvalidParamsError(str(exc)) from exc
+        elif name == "oe_uia_locator":
+            self._validate_uia_locator_arguments(arguments)
+
+    def _validate_post_command_arguments(self, arguments: dict[str, Any]) -> None:
+        name = arguments.get("command")
+        command_arguments = arguments.get("arguments", {})
+        if not isinstance(name, str) or not isinstance(command_arguments, dict):
+            raise InvalidParamsError()
+        command = command_index(self.manifest).get(name)
+        if command is None:
+            raise InvalidParamsError(f"Unknown command: {name}")
+        try:
+            validate_command_arguments(command, command_arguments)
+            render_path(command, command_arguments)
+        except ValueError as exc:
+            raise InvalidParamsError(str(exc)) from exc
+
+    @staticmethod
+    def _validate_raw_api_arguments(arguments: dict[str, Any]) -> None:
+        method = arguments.get("method")
+        path = arguments.get("path")
+        body = arguments.get("body")
+        if (
+            not isinstance(method, str)
+            or method not in {"GET", "POST", "PUT", "DELETE"}
+            or not isinstance(path, str)
+            or ("body" in arguments and not isinstance(body, dict))
         ):
-            raise JsonRpcError(-32602, "Invalid params")
+            raise InvalidParamsError()
+        try:
+            validate_raw_api_request(method, path, body)
+        except ValueError as exc:
+            raise InvalidParamsError(str(exc)) from exc
+
+    def _validate_uia_locator_arguments(self, arguments: dict[str, Any]) -> None:
+        capability = arguments.get("capability")
+        automation_id = arguments.get("automation_id")
+        if capability is not None and automation_id is not None:
+            raise InvalidParamsError("Provide either capability or automation_id, not both.")
+        if capability is not None:
+            allowed_capabilities = {
+                *self.manifest["uia"]["capability_ids"],
+                self.manifest["uia"]["root_id"],
+            }
+            if capability not in allowed_capabilities:
+                raise InvalidParamsError("UIA capability is not allowlisted by the manifest.")
+        elif not (
+            self._is_parameter_automation_id(automation_id)
+            or self._is_processor_catalog_automation_id(automation_id)
+            or self._is_stream_row_automation_id(automation_id)
+        ):
+            raise InvalidParamsError("AutomationId must match a declared dynamic UIA rule.")
 
     def _call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")

@@ -193,6 +193,53 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertEqual(malformed["error"]["code"], -32602)
         self.assertEqual(unknown_tool["error"]["code"], -32602)
 
+    def test_raw_api_request_rejects_unsupported_methods_as_invalid_params(self):
+        server = self.initialized_server()
+        with mock.patch.object(
+            mcp, "call_http", return_value={"ok": True, "status": 200, "response": {}}
+        ) as call_http:
+            for method in ("PATCH", ["PUT"]):
+                with self.subTest(method=method):
+                    response = server.handle({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "oe_api_request",
+                            "arguments": {"method": method, "path": "/api/status"},
+                        },
+                    })
+
+                    self.assertEqual(response["error"]["code"], -32602)
+        call_http.assert_not_called()
+
+    def test_raw_api_request_rejects_nonobject_bodies_as_invalid_params(self):
+        server = self.initialized_server()
+
+        response = server.handle({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "oe_api_request",
+                "arguments": {"method": "PUT", "path": "/api/status", "body": [1]},
+            },
+        })
+
+        self.assertEqual(response["error"]["code"], -32602)
+
+    def test_unexpected_value_errors_are_internal_errors(self):
+        server = self.initialized_server()
+        with mock.patch.object(server, "_call_tool", side_effect=ValueError("unexpected")):
+            response = server.handle({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "oe_list_commands", "arguments": {}},
+            })
+
+        self.assertEqual(response["error"], {"code": -32603, "message": "Internal error"})
+
     def test_unexpected_tool_failure_is_an_internal_error(self):
         server = self.initialized_server()
         with mock.patch.object(server, "_call_tool", side_effect=RuntimeError("unexpected")):
@@ -765,7 +812,10 @@ class AgentNativeManifestTests(unittest.TestCase):
                 }
             )
         self.assertIn("error", rejected)
-        self.assertIn("sibling locators", rejected["error"]["message"].lower())
+        self.assertEqual(
+            rejected["error"],
+            {"code": -32603, "message": "Internal error"},
+        )
 
     def test_typed_get_stream_requires_collision_flag_to_match_suffix_presence(self):
         server = self.initialized_server()
