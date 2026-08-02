@@ -8,6 +8,7 @@ on:
       - 'Plugins/**'
       - 'Resources/**'
       - 'Source/**'
+      - 'Tests/**'
       - 'CMakeLists.txt'
       - 'HelperFunctions.cmake'
     branches:
