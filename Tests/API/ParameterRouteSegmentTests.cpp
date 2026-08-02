@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <future>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -233,6 +234,24 @@ protected:
         streamId = stream->getStreamId();
         processor->addRouteTestStream (std::move (stream));
 
+        auto secondStream = std::make_unique<DataStream> (DataStream::Settings {
+            "Second route test stream",
+            "Second stream used to verify route index identity.",
+            "route.test.stream.second",
+            2500.0f,
+            true });
+        secondStream->addParameter (new RouteTestIntParameter (
+            secondStream.get(),
+            Parameter::STREAM_SCOPE,
+            "gain mode",
+            "Second stream gain mode",
+            "A parameter used to detect oversized-index aliasing.",
+            7,
+            0,
+            10));
+        secondStreamId = secondStream->getStreamId();
+        processor->addRouteTestStream (std::move (secondStream));
+
         auto added = graph.addNode (
             std::unique_ptr<AudioProcessor> (processor.release()),
             AudioProcessorGraph::NodeID (101));
@@ -289,9 +308,31 @@ protected:
     std::unique_ptr<RouteTestProcessor> processor;
     RouteTestProcessor* processorInGraph = nullptr;
     uint16 streamId = 0;
+    uint16 secondStreamId = 0;
     std::unique_ptr<OpenEphysHttpServer> server;
     std::unique_ptr<LoopbackParameterServer> loopback;
 };
+
+TEST (StreamIndexParserTests, AcceptsOnlyCompleteBoundedDecimalIndices)
+{
+    int parsedIndex = -1;
+    EXPECT_TRUE (OpenEphysHttpDetail::parseStreamIndex ("0", parsedIndex));
+    EXPECT_EQ (parsedIndex, 0);
+    EXPECT_TRUE (OpenEphysHttpDetail::parseStreamIndex ("1", parsedIndex));
+    EXPECT_EQ (parsedIndex, 1);
+    EXPECT_TRUE (OpenEphysHttpDetail::parseStreamIndex (
+        std::to_string (std::numeric_limits<int>::max()), parsedIndex));
+    EXPECT_EQ (parsedIndex, std::numeric_limits<int>::max());
+
+    parsedIndex = 17;
+    EXPECT_FALSE (OpenEphysHttpDetail::parseStreamIndex (
+        "18446744073709551617", parsedIndex));
+    EXPECT_EQ (parsedIndex, 17);
+    EXPECT_FALSE (OpenEphysHttpDetail::parseStreamIndex ("1suffix", parsedIndex));
+    EXPECT_EQ (parsedIndex, 17);
+    EXPECT_FALSE (OpenEphysHttpDetail::parseStreamIndex ("", parsedIndex));
+    EXPECT_EQ (parsedIndex, 17);
+}
 
 TEST_F (ParameterRouteSegmentTests,
         DecodedSpaceAndLegacyNamesCanReadAndWriteProcessorAndStreamParameters)
@@ -413,5 +454,76 @@ TEST_F (ParameterRouteSegmentTests,
                 << name.encoded;
         }
     }
+}
+
+TEST_F (ParameterRouteSegmentTests,
+        NestedAndDirectSecondStreamRoutesExposeTheSameSnapshotIdentity)
+{
+    auto client = loopback->client();
+
+    const auto processorResponse = client.Get ("/api/processors/101");
+    ASSERT_TRUE (processorResponse);
+    ASSERT_EQ (processorResponse->status, 200);
+    const auto processorDocument = json::parse (processorResponse->body);
+    ASSERT_EQ (processorDocument["streams"].size(), 2u);
+
+    const auto streamResponse = client.Get ("/api/processors/101/streams/1");
+    ASSERT_TRUE (streamResponse);
+    ASSERT_EQ (streamResponse->status, 200);
+    const auto directStream = json::parse (streamResponse->body);
+
+    EXPECT_EQ (directStream, processorDocument["streams"][1]);
+    EXPECT_EQ (directStream["stream_index"], 1);
+    EXPECT_EQ (directStream["runtime_id"], secondStreamId);
+    EXPECT_EQ (directStream["identity"]["identifier"], "route.test.stream.second");
+}
+
+TEST_F (ParameterRouteSegmentTests,
+        OversizedDigitOnlyStreamIndexNeverAliasesAnExistingStream)
+{
+    const std::string oversizedIndex = "18446744073709551617";
+    const std::string streamPath =
+        "/api/processors/101/streams/" + oversizedIndex;
+    auto client = loopback->client();
+
+    const auto streamResponse = client.Get (streamPath.c_str());
+    ASSERT_TRUE (streamResponse);
+    EXPECT_EQ (streamResponse->status, 404);
+    EXPECT_TRUE (streamResponse->body.empty());
+
+    const auto parameterListResponse = client.Get (
+        (streamPath + "/parameters").c_str());
+    ASSERT_TRUE (parameterListResponse);
+    EXPECT_EQ (parameterListResponse->status, 404);
+    EXPECT_TRUE (parameterListResponse->body.empty());
+
+    const auto parameterResponse = client.Get (
+        (streamPath + "/parameters/gain%20mode").c_str());
+    ASSERT_TRUE (parameterResponse);
+    EXPECT_EQ (parameterResponse->status, 404);
+    EXPECT_TRUE (parameterResponse->body.empty());
+
+    const auto putResponse = putWhilePumpingMessageThread (
+        streamPath + "/parameters/gain%20mode", "{\"value\": 9}");
+    ASSERT_TRUE (putResponse);
+    EXPECT_EQ (putResponse->status, 404);
+    EXPECT_TRUE (putResponse->body.empty());
+
+    auto* firstParameter = processorInGraph
+                               ->getDataStream (streamId)
+                               ->getParameter ("gain mode");
+    auto* secondParameter = processorInGraph
+                                ->getDataStream (secondStreamId)
+                                ->getParameter ("gain mode");
+    ASSERT_NE (firstParameter, nullptr);
+    ASSERT_NE (secondParameter, nullptr);
+    EXPECT_EQ (static_cast<int> (firstParameter->getValue()), 3);
+    EXPECT_EQ (static_cast<int> (secondParameter->getValue()), 7);
+    EXPECT_EQ (
+        static_cast<RouteTestIntParameter*> (firstParameter)->mutationCalls,
+        0);
+    EXPECT_EQ (
+        static_cast<RouteTestIntParameter*> (secondParameter)->mutationCalls,
+        0);
 }
 } // namespace

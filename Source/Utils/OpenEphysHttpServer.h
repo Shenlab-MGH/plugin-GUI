@@ -31,6 +31,7 @@
 
 #include "httplib.h"
 #include "json.hpp"
+#include <charconv>
 #include <cstdint>
 #include <sstream>
 
@@ -55,6 +56,22 @@ using json = nlohmann::json;
 
 namespace OpenEphysHttpDetail
 {
+inline bool parseStreamIndex (const std::string& text, int& parsedIndex)
+{
+    if (text.empty())
+        return false;
+
+    int candidate = 0;
+    const auto* begin = text.data();
+    const auto* end = begin + text.size();
+    const auto result = std::from_chars (begin, end, candidate);
+    if (result.ec != std::errc() || result.ptr != end || candidate < 0)
+        return false;
+
+    parsedIndex = candidate;
+    return true;
+}
+
 inline bool dispatchToMessageThread (std::function<void()> operation)
 {
     return MessageManager::callAsync (std::move (operation));
@@ -823,7 +840,15 @@ private:
                            return;
                        }
 
-                       auto stream = find_stream (processor, req.matches[2]);
+                       int stream_index = 0;
+                       if (! OpenEphysHttpDetail::parseStreamIndex (
+                               req.matches[2], stream_index))
+                       {
+                           res.status = 404;
+                           return;
+                       }
+
+                       auto stream = find_stream (processor, stream_index);
                        if (stream == nullptr)
                        {
                            res.status = 404;
@@ -833,7 +858,7 @@ private:
                        json ret;
                        stream_to_json (processor,
                                        stream,
-                                       juce::String (req.matches[2]).getIntValue(),
+                                       stream_index,
                                        &ret);
                        res.set_content (ret.dump(), "application/json");
                    });
@@ -848,7 +873,15 @@ private:
                            return;
                        }
 
-                       auto stream = find_stream (processor, req.matches[2]);
+                       int stream_index = 0;
+                       if (! OpenEphysHttpDetail::parseStreamIndex (
+                               req.matches[2], stream_index))
+                       {
+                           res.status = 404;
+                           return;
+                       }
+
+                       auto stream = find_stream (processor, stream_index);
                        if (stream == nullptr)
                        {
                            res.status = 404;
@@ -873,7 +906,15 @@ private:
                            return;
                        }
 
-                       auto stream = find_stream (processor, req.matches[2]);
+                       int stream_index = 0;
+                       if (! OpenEphysHttpDetail::parseStreamIndex (
+                               req.matches[2], stream_index))
+                       {
+                           res.status = 404;
+                           return;
+                       }
+
+                       auto stream = find_stream (processor, stream_index);
                        if (stream == nullptr)
                        {
                            res.status = 404;
@@ -1313,7 +1354,15 @@ private:
                            return;
                        }
 
-                       auto stream = find_stream (processor, req.matches[2]);
+                       int stream_index = 0;
+                       if (! OpenEphysHttpDetail::parseStreamIndex (
+                               req.matches[2], stream_index))
+                       {
+                           res.status = 404;
+                           return;
+                       }
+
+                       auto stream = find_stream (processor, stream_index);
 
                        if (stream == nullptr)
                        {
@@ -1742,10 +1791,8 @@ private:
         return nullptr;
     }
 
-    inline const DataStream* find_stream (GenericProcessor* p, const std::string& id_string)
+    inline const DataStream* find_stream (GenericProcessor* p, int stream_index)
     {
-        int stream_index = juce::String (id_string).getIntValue();
-
         if (stream_index < 0)
             return nullptr;
 
