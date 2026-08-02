@@ -41,6 +41,12 @@ TESTABLE String createStreamSemanticSegment (
     StringRef identifier,
     StringRef displayNameFallback);
 
+/** Returns whether the indexed stream needs an index suffix to distinguish
+    its sanitised semantic segment from its current siblings. */
+TESTABLE bool streamSemanticSegmentNeedsIndexSuffix (
+    const StringArray& siblingSemanticSegments,
+    int streamIndex);
+
 /** Returns the Windows UIA AutomationId for a stream selector table row.
     This locator is scoped to the processor's current configuration. Rows
     whose sanitised segments collide receive a deterministic index suffix;

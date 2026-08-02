@@ -120,6 +120,7 @@ public:
 
 private:
     Array<const DataStream*> streams;
+    StringArray streamSemanticSegments;
 
     StreamSelectorTable* owner;
 

@@ -1742,7 +1742,11 @@ private:
                   .toStdString() },
             { "scope", "configuration" },
             { "uses_display_name_fallback",
-              stream->getIdentifier().isEmpty() }
+              stream->getIdentifier().isEmpty() },
+            { "uses_collision_suffix",
+              streamSemanticSegmentNeedsIndexSuffix (
+                  siblingSemanticSegments,
+                  stream_index) }
         };
 
         std::vector<json> parameters_json;

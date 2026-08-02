@@ -357,21 +357,13 @@ String createStreamSelectorRowSemanticId (
         return {};
     }
 
-    const auto& semanticSegment =
-        siblingSemanticSegments[streamIndex];
-    int matchingSegments = 0;
-    for (const auto& siblingSegment :
-         siblingSemanticSegments)
-    {
-        if (siblingSegment == semanticSegment)
-            ++matchingSegments;
-    }
-
     auto automationId =
         String (tableSemanticId)
         + "."
-        + semanticSegment;
-    if (matchingSegments > 1)
+        + siblingSemanticSegments[streamIndex];
+    if (streamSemanticSegmentNeedsIndexSuffix (
+            siblingSemanticSegments,
+            streamIndex))
     {
         automationId +=
             ".index_"
@@ -379,6 +371,33 @@ String createStreamSelectorRowSemanticId (
     }
 
     return automationId;
+}
+
+bool streamSemanticSegmentNeedsIndexSuffix (
+    const StringArray& siblingSemanticSegments,
+    int streamIndex)
+{
+    if (! isPositiveAndBelow (
+            streamIndex,
+            siblingSemanticSegments.size()))
+    {
+        return false;
+    }
+
+    const auto& semanticSegment =
+        siblingSemanticSegments[streamIndex];
+    int matchingSegments = 0;
+    for (const auto& siblingSegment :
+         siblingSemanticSegments)
+    {
+        if (siblingSegment == semanticSegment
+            && ++matchingSegments > 1)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::unique_ptr<AccessibilityHandler>

@@ -2193,6 +2193,8 @@ TEST (GenericEditorAccessibilityTests,
     TableListBox expandedTable (
         "Expanded stream table",
         &expandedModel);
+    expandedTable.setComponentID (
+        "oe.processor.100.streams.expanded_table");
     expandedModel.table = &expandedTable;
     expandedModel.update ({ &dotted, &underscored, &fallback });
     EXPECT_EQ (
@@ -2210,6 +2212,76 @@ TEST (GenericEditorAccessibilityTests,
             2,
             "oe.processor.100.streams.expanded_table"),
         "oe.processor.100.streams.expanded_table.source_101.stream_probe_ap.index_2");
+
+    StreamTableModel normalChildModel (&selector);
+    TableListBox normalChildTable (
+        "Normal stream table",
+        &normalChildModel);
+    normalChildTable.setComponentID (
+        "oe.processor.100.streams.table");
+    normalChildModel.table = &normalChildTable;
+    normalChildModel.update (
+        { &dotted, &underscored, &fallback });
+
+    struct CellExpectation
+    {
+        int column;
+        const char* suffix;
+    };
+    const CellExpectation cellExpectations[] {
+        { StreamTableModel::Columns::ENABLED,
+          "processing_enabled" },
+        { StreamTableModel::Columns::DELAY,
+          "processing_delay" },
+        { StreamTableModel::Columns::TTL_LINE_STATES,
+          "ttl_lines" },
+        { StreamTableModel::Columns::START_TIME,
+          "sync_start_offset" },
+        { StreamTableModel::Columns::LATEST_SYNC,
+          "last_sync_event" },
+        { StreamTableModel::Columns::SYNC_ACCURACY,
+          "sync_accuracy" }
+    };
+
+    for (int row = 0; row < 3; ++row)
+    {
+        for (const auto& expectation : cellExpectations)
+        {
+            std::unique_ptr<Component> normalChild (
+                normalChildModel.refreshComponentForCell (
+                    row,
+                    expectation.column,
+                    false,
+                    nullptr));
+            std::unique_ptr<Component> expandedChild (
+                expandedModel.refreshComponentForCell (
+                    row,
+                    expectation.column,
+                    false,
+                    nullptr));
+            ASSERT_NE (normalChild, nullptr);
+            ASSERT_NE (expandedChild, nullptr);
+
+            const auto rowSegment =
+                "source_101.stream_probe_ap.index_"
+                + String (row);
+            EXPECT_EQ (
+                normalChild->getComponentID(),
+                "oe.processor.100.streams.table."
+                    + rowSegment
+                    + "."
+                    + expectation.suffix);
+            EXPECT_EQ (
+                expandedChild->getComponentID(),
+                "oe.processor.100.streams.expanded_table."
+                    + rowSegment
+                    + "."
+                    + expectation.suffix);
+            EXPECT_NE (
+                normalChild->getComponentID(),
+                expandedChild->getComponentID());
+        }
+    }
 }
 
 TEST (GenericEditorAccessibilityTests,
@@ -2858,7 +2930,7 @@ TEST (GenericEditorAccessibilityTests, ScopesStreamStatusControlsToProcessorAndS
     ASSERT_NE (ttlMonitor, nullptr);
 
     const String expectedId =
-        "oe.processor.100.streams.source_101.stream_probe_ap.ttl_lines";
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.ttl_lines";
     EXPECT_EQ (ttlMonitor->getComponentID(), expectedId);
     EXPECT_EQ (ttlMonitor->getTitle(), "Probe AP TTL line states");
     EXPECT_EQ (ttlMonitor->getDescription(),
@@ -2870,7 +2942,7 @@ TEST (GenericEditorAccessibilityTests, ScopesStreamStatusControlsToProcessorAndS
     ASSERT_NE (delayMonitor, nullptr);
     EXPECT_EQ (
         delayMonitor->getComponentID(),
-        "oe.processor.100.streams.source_101.stream_probe_ap.processing_delay");
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.processing_delay");
     EXPECT_EQ (delayMonitor->getTitle(), "Probe AP processing delay");
     EXPECT_EQ (delayMonitor->getDescription(),
                "Processing delay for Probe AP.");

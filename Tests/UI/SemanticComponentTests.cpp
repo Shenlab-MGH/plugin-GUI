@@ -111,6 +111,10 @@ TEST (SemanticComponentTests, BuildsConfigurationScopedStreamRowIds)
     const StringArray uniqueSegments {
         "source_101.stream_probe_ap"
     };
+    EXPECT_FALSE (
+        streamSemanticSegmentNeedsIndexSuffix (
+            uniqueSegments,
+            0));
     EXPECT_EQ (
         createStreamSelectorRowSemanticId (
             "oe.processor.100.streams.table",
@@ -123,6 +127,14 @@ TEST (SemanticComponentTests, BuildsConfigurationScopedStreamRowIds)
         "source_101.stream_probe_ap",
         "source_101.stream_probe_ap"
     };
+    EXPECT_TRUE (
+        streamSemanticSegmentNeedsIndexSuffix (
+            collidingSegments,
+            2));
+    EXPECT_FALSE (
+        streamSemanticSegmentNeedsIndexSuffix (
+            collidingSegments,
+            -1));
     EXPECT_EQ (
         createStreamSelectorRowSemanticId (
             "oe.processor.100.streams.table",

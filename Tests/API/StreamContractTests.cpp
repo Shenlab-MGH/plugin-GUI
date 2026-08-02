@@ -171,7 +171,8 @@ TEST (StreamContractTests, EmptyIdentifierDoesNotFabricateStableIdentity)
         json ({ { "automation_id",
                   "oe.processor.100.streams.table.source_101.stream_probe_ap" },
                 { "scope", "configuration" },
-                { "uses_display_name_fallback", true } }));
+                { "uses_display_name_fallback", true },
+                { "uses_collision_suffix", false } }));
 }
 
 TEST (StreamContractTests, ExposesMatchingConfigurationScopedUiaLocator)
@@ -188,7 +189,8 @@ TEST (StreamContractTests, ExposesMatchingConfigurationScopedUiaLocator)
         json ({ { "automation_id",
                   "oe.processor.100.streams.table.source_101.stream_imec_ap" },
                 { "scope", "configuration" },
-                { "uses_display_name_fallback", false } }));
+                { "uses_display_name_fallback", false },
+                { "uses_collision_suffix", false } }));
 }
 
 TEST (StreamContractTests, DisambiguatesSanitisedUiaLocatorCollisions)
@@ -216,6 +218,12 @@ TEST (StreamContractTests, DisambiguatesSanitisedUiaLocatorCollisions)
     EXPECT_EQ (
         nested["streams"][2]["uia"]["uses_display_name_fallback"],
         true);
+    for (const auto& stream : nested["streams"])
+    {
+        EXPECT_EQ (
+            stream["uia"]["uses_collision_suffix"],
+            true);
+    }
     EXPECT_NE (
         nested["streams"][0]["uia"]["automation_id"],
         nested["streams"][1]["uia"]["automation_id"]);

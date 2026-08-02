@@ -173,21 +173,6 @@ String getStreamSelectorSemanticId (const GenericEditor& editor)
         "streams");
 }
 
-String getStreamSemanticSegment (const DataStream& stream)
-{
-    return createStreamSemanticSegment (
-        stream.getSourceNodeId(),
-        stream.getIdentifier(),
-        stream.getName());
-}
-
-String getStreamSemanticId (const GenericEditor& editor,
-                            const DataStream& stream)
-{
-    return getStreamSelectorSemanticId (editor)
-           + "." + getStreamSemanticSegment (stream);
-}
-
 class StreamEnableButton;
 
 class StreamEnableButtonAccessibilityState
@@ -352,7 +337,7 @@ public:
     void configure (
         StreamSelectorTable& selectorToUse,
         const DataStream& stream,
-        const String& tableSemanticId,
+        const String& rowSemanticId,
         bool processingEnabled)
     {
         if (selector
@@ -368,10 +353,7 @@ public:
         streamId = stream.getStreamId();
         applySemanticMetadata (
             *this,
-            tableSemanticId
-                + "."
-                + getStreamSemanticSegment (
-                    stream)
+            rowSemanticId
                 + ".processing_enabled",
             stream.getName()
                 + " processing enabled",
@@ -648,6 +630,11 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
                                                       bool isRowSelected,
                                                       Component* existingComponentToUpdate)
 {
+    const auto rowSemanticId =
+        getSemanticIdForRow (
+            rowNumber,
+            table->getComponentID());
+
     if (columnId == StreamTableModel::Columns::DELAY)
     {
         auto* delayMonitor = dynamic_cast<DelayMonitor*> (existingComponentToUpdate);
@@ -659,7 +646,7 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
 
         const auto* stream = streams[rowNumber];
         delayMonitor->setAccessibilityContext (
-            getStreamSemanticId (*owner->editor, *stream)
+            rowSemanticId
                 + ".processing_delay",
             stream->getName() + " processing delay",
             "Processing delay for " + stream->getName() + ".");
@@ -676,7 +663,7 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
         }
 
         const auto* stream = streams[rowNumber];
-        const auto streamId = getStreamSemanticId (*owner->editor, *stream)
+        const auto streamId = rowSemanticId
                               + ".ttl_lines";
         ttlMonitor->setAccessibilityContext (
             streamId,
@@ -700,7 +687,7 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
         toggle->configure (
             *owner,
             *stream,
-            table->getComponentID(),
+            rowSemanticId,
             owner->checkStream (
                 stream));
         return toggle;
@@ -716,7 +703,7 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
 
         const auto* stream = streams[rowNumber];
         syncStartTimeMonitor->setAccessibilityContext (
-            getStreamSemanticId (*owner->editor, *stream)
+            rowSemanticId
                 + ".sync_start_offset",
             stream->getName() + " synchronization start offset",
             "Synchronization start offset for " + stream->getName() + ".");
@@ -734,7 +721,7 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
 
         const auto* stream = streams[rowNumber];
         lastSyncEventMonitor->setAccessibilityContext (
-            getStreamSemanticId (*owner->editor, *stream)
+            rowSemanticId
                 + ".last_sync_event",
             stream->getName() + " last synchronization event",
             "Approximate time since the last synchronization event for "
@@ -753,7 +740,7 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
 
         const auto* stream = streams[rowNumber];
         syncAccuracyMonitor->setAccessibilityContext (
-            getStreamSemanticId (*owner->editor, *stream)
+            rowSemanticId
                 + ".sync_accuracy",
             stream->getName() + " synchronization accuracy",
             "Synchronization accuracy for " + stream->getName() + ".");
@@ -774,6 +761,15 @@ int StreamTableModel::getNumRows()
 void StreamTableModel::update (Array<const DataStream*> dataStreams_)
 {
     streams = dataStreams_;
+    streamSemanticSegments.clear();
+    for (const auto* stream : streams)
+    {
+        streamSemanticSegments.add (
+            createStreamSemanticSegment (
+                stream->getSourceNodeId(),
+                stream->getIdentifier(),
+                stream->getName()));
+    }
     table->updateContent();
 }
 
@@ -865,19 +861,9 @@ String StreamTableModel::getSemanticIdForRow (
     if (! isPositiveAndBelow (rowNumber, streams.size()))
         return {};
 
-    StringArray siblingSemanticSegments;
-    for (const auto* stream : streams)
-    {
-        siblingSemanticSegments.add (
-            createStreamSemanticSegment (
-                stream->getSourceNodeId(),
-                stream->getIdentifier(),
-                stream->getName()));
-    }
-
     return createStreamSelectorRowSemanticId (
         tableSemanticId,
-        siblingSemanticSegments,
+        streamSemanticSegments,
         rowNumber);
 }
 
