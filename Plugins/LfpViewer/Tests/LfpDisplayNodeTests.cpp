@@ -4848,6 +4848,10 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_FALSE (
         replacement
             ->isPaneActive (1));
+
+    replacement->endAnimation();
+    replacement->setVisible (false);
+    replacement->removeFromDesktop();
 }
 
 #if JUCE_WINDOWS
