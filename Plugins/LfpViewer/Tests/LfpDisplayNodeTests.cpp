@@ -131,34 +131,6 @@ Component* findLfpDescendantByAccessibilityTitle (
     return nullptr;
 }
 
-Component* findLfpDesktopComponentByAccessibilityTitle (
-    StringRef title)
-{
-    auto& desktop =
-        Desktop::getInstance();
-
-    for (int index = 0;
-         index < desktop
-                     .getNumComponents();
-         ++index)
-    {
-        if (auto* component =
-                desktop.getComponent (
-                    index))
-        {
-            if (auto* result =
-                    findLfpDescendantByAccessibilityTitle (
-                        *component,
-                        title))
-            {
-                return result;
-            }
-        }
-    }
-
-    return nullptr;
-}
-
 class LfpChannelSelectionProbe final
     : public LfpViewer::
           LfpChannelDisplay
@@ -11754,8 +11726,26 @@ TEST_F (LfpDisplayNodeTests,
     MessageManager::callAsync (
         [observation]
         {
+            auto* modal =
+                Component::
+                    getCurrentlyModalComponent (
+                        0);
+            const auto modalIsShowing =
+                modal != nullptr
+                && modal->isShowing();
+            if (! modalIsShowing)
+            {
+                PopupMenu::
+                    dismissAllActiveMenus();
+            }
+            ASSERT_NE (
+                modal,
+                nullptr);
+            ASSERT_TRUE (
+                modalIsShowing);
             if (auto* item =
-                    findLfpDesktopComponentByAccessibilityTitle (
+                    findLfpDescendantByAccessibilityTitle (
+                        *modal,
                         "Invert signal"))
             {
                 observation->foundInvertSignal =
