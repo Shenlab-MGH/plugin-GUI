@@ -79,8 +79,8 @@ nlohmann::json controlCapabilitiesToJson (const std::vector<ControlCapability>& 
         for (const auto& operation : capability.operations)
         {
             item["api"].push_back ({ { "operation", operation.operation.toStdString() },
-                                     { "method", operation.method.toStdString() },
-                                     { "path", operation.path.toStdString() },
+                                     { "method", operation.route.methodString() },
+                                     { "path", operation.route.path },
                                      { "request_fields", stringArrayToJson (operation.requestFields) },
                                      { "response_fields", stringArrayToJson (operation.responseFields) } });
         }

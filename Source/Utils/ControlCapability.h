@@ -26,6 +26,7 @@
 
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "../TestableExport.h"
+#include "OpenEphysHttpApiRoutes.h"
 #include <vector>
 
 enum class ControlCapabilityKind
@@ -42,8 +43,7 @@ enum class ControlCapabilityKind
 struct ControlApiOperation
 {
     String operation;
-    String method;
-    String path;
+    OpenEphysHttpApi::Route route;
     StringArray requestFields;
     StringArray responseFields;
 };

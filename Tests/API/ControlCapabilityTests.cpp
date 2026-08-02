@@ -3,7 +3,7 @@
 #include "../../Source/Utils/OpenEphysHttpApiRoutes.h"
 #include "gtest/gtest.h"
 
-#include <utility>
+#include <cstring>
 #include <vector>
 
 namespace
@@ -11,8 +11,7 @@ namespace
 struct ExpectedApiOperation
 {
     const char* operation;
-    const char* method;
-    const char* path;
+    OpenEphysHttpApi::Route route;
 };
 
 struct ExpectedCapability
@@ -22,46 +21,96 @@ struct ExpectedCapability
 };
 
 // Official v1.1.0 only backs status / recording / cpu for Core R0 controls.
-// Order is stable and intentional.
+// Order is stable and intentional. Operations reference shared route descriptors.
 const std::vector<ExpectedCapability> expectedCapabilities {
     { "oe.control.acquisition",
-      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus },
-        { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus } } },
+      { { "read", OpenEphysHttpApi::kStatusGet },
+        { "set", OpenEphysHttpApi::kStatusPut } } },
     { "oe.control.recording",
-      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus },
-        { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus } } },
+      { { "read", OpenEphysHttpApi::kStatusGet },
+        { "set", OpenEphysHttpApi::kStatusPut } } },
     { "oe.control.recording.filename",
-      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathRecording },
-        { "set", OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathRecording } } },
+      { { "read", OpenEphysHttpApi::kRecordingGet },
+        { "set", OpenEphysHttpApi::kRecordingPut } } },
     { "oe.status.cpu_usage",
-      { { "read", OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathCpu } } },
+      { { "read", OpenEphysHttpApi::kCpuGet } } },
 };
 
-// Exact method/path pairs registered for routes the Core R0 manifest may advertise.
-const std::vector<std::pair<const char*, const char*>> registeredCoreR0Routes {
-    { OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathStatus },
-    { OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathStatus },
-    { OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathRecording },
-    { OpenEphysHttpApi::kMethodPut, OpenEphysHttpApi::kPathRecording },
-    { OpenEphysHttpApi::kMethodGet, OpenEphysHttpApi::kPathCpu },
+// Exact shared descriptors for Core R0 routes the manifest may advertise.
+const OpenEphysHttpApi::Route coreR0RouteDescriptors[] = {
+    OpenEphysHttpApi::kStatusGet,
+    OpenEphysHttpApi::kStatusPut,
+    OpenEphysHttpApi::kRecordingGet,
+    OpenEphysHttpApi::kRecordingPut,
+    OpenEphysHttpApi::kCpuGet,
 };
 
-bool matchesMethodPath (const String& method, const String& path, const char* expectedMethod, const char* expectedPath)
+// Shared descriptors also cover GET /api/capabilities (discovery endpoint).
+const OpenEphysHttpApi::Route sharedRegisteredRouteDescriptors[] = {
+    OpenEphysHttpApi::kCapabilitiesGet,
+    OpenEphysHttpApi::kStatusGet,
+    OpenEphysHttpApi::kStatusPut,
+    OpenEphysHttpApi::kRecordingGet,
+    OpenEphysHttpApi::kRecordingPut,
+    OpenEphysHttpApi::kCpuGet,
+};
+
+bool routesEqual (const OpenEphysHttpApi::Route& a, const OpenEphysHttpApi::Route& b)
 {
-    return method == expectedMethod && path == expectedPath;
+    return a.method == b.method
+           && a.path != nullptr
+           && b.path != nullptr
+           && std::strcmp (a.path, b.path) == 0;
 }
 
-bool isRegisteredCoreR0Route (const String& method, const String& path)
+bool isRegisteredCoreR0Route (const OpenEphysHttpApi::Route& route)
 {
-    for (const auto& route : registeredCoreR0Routes)
+    for (const auto& candidate : coreR0RouteDescriptors)
     {
-        if (matchesMethodPath (method, path, route.first, route.second))
+        if (routesEqual (route, candidate))
             return true;
     }
 
     return false;
 }
 } // namespace
+
+TEST (ControlCapabilityTests, SharedRouteDescriptorsHaveExactMethodPathPairs)
+{
+    EXPECT_EQ (OpenEphysHttpApi::kCapabilitiesGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kCapabilitiesGet.path, "/api/capabilities");
+    EXPECT_STREQ (OpenEphysHttpApi::kCapabilitiesGet.methodString(), "GET");
+
+    EXPECT_EQ (OpenEphysHttpApi::kStatusGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kStatusGet.path, "/api/status");
+    EXPECT_STREQ (OpenEphysHttpApi::kStatusGet.methodString(), "GET");
+
+    EXPECT_EQ (OpenEphysHttpApi::kStatusPut.method, OpenEphysHttpApi::Method::Put);
+    EXPECT_STREQ (OpenEphysHttpApi::kStatusPut.path, "/api/status");
+    EXPECT_STREQ (OpenEphysHttpApi::kStatusPut.methodString(), "PUT");
+
+    EXPECT_EQ (OpenEphysHttpApi::kRecordingGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingGet.path, "/api/recording");
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingGet.methodString(), "GET");
+
+    EXPECT_EQ (OpenEphysHttpApi::kRecordingPut.method, OpenEphysHttpApi::Method::Put);
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingPut.path, "/api/recording");
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingPut.methodString(), "PUT");
+
+    EXPECT_EQ (OpenEphysHttpApi::kCpuGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kCpuGet.path, "/api/cpu");
+    EXPECT_STREQ (OpenEphysHttpApi::kCpuGet.methodString(), "GET");
+
+    ASSERT_EQ (sizeof (sharedRegisteredRouteDescriptors) / sizeof (sharedRegisteredRouteDescriptors[0]), (size_t) 6);
+    ASSERT_EQ (sizeof (coreR0RouteDescriptors) / sizeof (coreR0RouteDescriptors[0]), (size_t) 5);
+
+    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[0], OpenEphysHttpApi::kCapabilitiesGet));
+    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[1], OpenEphysHttpApi::kStatusGet));
+    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[2], OpenEphysHttpApi::kStatusPut));
+    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[3], OpenEphysHttpApi::kRecordingGet));
+    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[4], OpenEphysHttpApi::kRecordingPut));
+    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[5], OpenEphysHttpApi::kCpuGet));
+}
 
 TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
 {
@@ -88,8 +137,9 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
             const auto& expectedOp = expected.operations[j];
 
             EXPECT_EQ (operation.operation, String (expectedOp.operation)) << expectedId << " op " << j;
-            EXPECT_EQ (operation.method, String (expectedOp.method)) << expectedId << " op " << j;
-            EXPECT_EQ (operation.path, String (expectedOp.path)) << expectedId << " op " << j;
+            EXPECT_EQ (operation.route.method, expectedOp.route.method) << expectedId << " op " << j;
+            EXPECT_STREQ (operation.route.path, expectedOp.route.path) << expectedId << " op " << j;
+            EXPECT_TRUE (routesEqual (operation.route, expectedOp.route)) << expectedId << " op " << j;
         }
 
         const auto* found = findControlCapability (expectedId);
@@ -117,13 +167,13 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
 
         for (const auto& operation : capability.operations)
         {
-            EXPECT_TRUE (isRegisteredCoreR0Route (operation.method, operation.path))
+            EXPECT_TRUE (isRegisteredCoreR0Route (operation.route))
                 << capability.id << " advertises unregistered "
-                << operation.method << " " << operation.path;
+                << operation.route.methodString() << " " << operation.route.path;
         }
     }
 
-    // Exact pairs for each canonical capability (not merely nonempty strings).
+    // Exact descriptors for each canonical capability (not merely nonempty strings).
     const auto* acquisition = findControlCapability ("oe.control.acquisition");
     const auto* recording = findControlCapability ("oe.control.recording");
     const auto* filename = findControlCapability ("oe.control.recording.filename");
@@ -135,40 +185,19 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
     ASSERT_NE (cpu, nullptr);
 
     ASSERT_EQ (acquisition->operations.size(), (size_t) 2);
-    EXPECT_TRUE (matchesMethodPath (acquisition->operations[0].method,
-                                    acquisition->operations[0].path,
-                                    OpenEphysHttpApi::kMethodGet,
-                                    OpenEphysHttpApi::kPathStatus));
-    EXPECT_TRUE (matchesMethodPath (acquisition->operations[1].method,
-                                    acquisition->operations[1].path,
-                                    OpenEphysHttpApi::kMethodPut,
-                                    OpenEphysHttpApi::kPathStatus));
+    EXPECT_TRUE (routesEqual (acquisition->operations[0].route, OpenEphysHttpApi::kStatusGet));
+    EXPECT_TRUE (routesEqual (acquisition->operations[1].route, OpenEphysHttpApi::kStatusPut));
 
     ASSERT_EQ (recording->operations.size(), (size_t) 2);
-    EXPECT_TRUE (matchesMethodPath (recording->operations[0].method,
-                                    recording->operations[0].path,
-                                    OpenEphysHttpApi::kMethodGet,
-                                    OpenEphysHttpApi::kPathStatus));
-    EXPECT_TRUE (matchesMethodPath (recording->operations[1].method,
-                                    recording->operations[1].path,
-                                    OpenEphysHttpApi::kMethodPut,
-                                    OpenEphysHttpApi::kPathStatus));
+    EXPECT_TRUE (routesEqual (recording->operations[0].route, OpenEphysHttpApi::kStatusGet));
+    EXPECT_TRUE (routesEqual (recording->operations[1].route, OpenEphysHttpApi::kStatusPut));
 
     ASSERT_EQ (filename->operations.size(), (size_t) 2);
-    EXPECT_TRUE (matchesMethodPath (filename->operations[0].method,
-                                    filename->operations[0].path,
-                                    OpenEphysHttpApi::kMethodGet,
-                                    OpenEphysHttpApi::kPathRecording));
-    EXPECT_TRUE (matchesMethodPath (filename->operations[1].method,
-                                    filename->operations[1].path,
-                                    OpenEphysHttpApi::kMethodPut,
-                                    OpenEphysHttpApi::kPathRecording));
+    EXPECT_TRUE (routesEqual (filename->operations[0].route, OpenEphysHttpApi::kRecordingGet));
+    EXPECT_TRUE (routesEqual (filename->operations[1].route, OpenEphysHttpApi::kRecordingPut));
 
     ASSERT_EQ (cpu->operations.size(), (size_t) 1);
-    EXPECT_TRUE (matchesMethodPath (cpu->operations[0].method,
-                                    cpu->operations[0].path,
-                                    OpenEphysHttpApi::kMethodGet,
-                                    OpenEphysHttpApi::kPathCpu));
+    EXPECT_TRUE (routesEqual (cpu->operations[0].route, OpenEphysHttpApi::kCpuGet));
 }
 
 TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
@@ -201,8 +230,8 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
             ASSERT_TRUE (operation.contains ("method")) << expectedId;
             ASSERT_TRUE (operation.contains ("path")) << expectedId;
             EXPECT_EQ (operation["operation"].get<std::string>(), expectedOp.operation) << expectedId;
-            EXPECT_EQ (operation["method"].get<std::string>(), expectedOp.method) << expectedId;
-            EXPECT_EQ (operation["path"].get<std::string>(), expectedOp.path) << expectedId;
+            EXPECT_EQ (operation["method"].get<std::string>(), expectedOp.route.methodString()) << expectedId;
+            EXPECT_EQ (operation["path"].get<std::string>(), expectedOp.route.path) << expectedId;
         }
     }
 
@@ -212,6 +241,6 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
                                            { return item["id"] == "oe.control.acquisition"; });
     ASSERT_NE (acquisition, document["capabilities"].end());
     EXPECT_FALSE ((*acquisition).contains ("uia"));
-    EXPECT_EQ ((*acquisition)["api"][0]["path"], OpenEphysHttpApi::kPathStatus);
-    EXPECT_EQ ((*acquisition)["api"][0]["method"], OpenEphysHttpApi::kMethodGet);
+    EXPECT_EQ ((*acquisition)["api"][0]["path"], OpenEphysHttpApi::kStatusGet.path);
+    EXPECT_EQ ((*acquisition)["api"][0]["method"], OpenEphysHttpApi::kStatusGet.methodString());
 }

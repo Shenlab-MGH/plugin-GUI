@@ -24,21 +24,56 @@
 #ifndef OPEN_EPHYS_HTTP_API_ROUTES_H
 #define OPEN_EPHYS_HTTP_API_ROUTES_H
 
-/** Shared HTTP method/path constants for official routes used by both
-    OpenEphysHttpServer registration and the Core R0 capability manifest.
+#include <utility>
 
-    Values match existing string literals; replacing literals with these
-    constants must not change runtime behavior.
+/** Shared HTTP method+path route descriptors for official Core R0 routes
+    (plus GET /api/capabilities). Used by both OpenEphysHttpServer registration
+    and the Core R0 capability manifest so method/path cannot drift.
+
+    Scope is intentionally small: only existing Core R0 routes and discovery.
 */
 namespace OpenEphysHttpApi
 {
-inline constexpr const char* kMethodGet = "GET";
-inline constexpr const char* kMethodPut = "PUT";
+enum class Method
+{
+    Get,
+    Put
+};
 
-inline constexpr const char* kPathCapabilities = "/api/capabilities";
-inline constexpr const char* kPathStatus = "/api/status";
-inline constexpr const char* kPathRecording = "/api/recording";
-inline constexpr const char* kPathCpu = "/api/cpu";
+struct Route
+{
+    Method method;
+    const char* path;
+
+    constexpr const char* methodString() const noexcept
+    {
+        return method == Method::Get ? "GET" : "PUT";
+    }
+};
+
+inline constexpr Route kCapabilitiesGet { Method::Get, "/api/capabilities" };
+inline constexpr Route kStatusGet { Method::Get, "/api/status" };
+inline constexpr Route kStatusPut { Method::Put, "/api/status" };
+inline constexpr Route kRecordingGet { Method::Get, "/api/recording" };
+inline constexpr Route kRecordingPut { Method::Put, "/api/recording" };
+inline constexpr Route kCpuGet { Method::Get, "/api/cpu" };
+
+/** Register a handler using the route descriptor's method (Get or Put).
+    The same Route instance must drive capability serialization and registration.
+*/
+template <typename Server, typename Handler>
+void registerRoute (Server& server, const Route& route, Handler&& handler)
+{
+    switch (route.method)
+    {
+        case Method::Get:
+            server.Get (route.path, std::forward<Handler> (handler));
+            break;
+        case Method::Put:
+            server.Put (route.path, std::forward<Handler> (handler));
+            break;
+    }
+}
 } // namespace OpenEphysHttpApi
 
 #endif // OPEN_EPHYS_HTTP_API_ROUTES_H
