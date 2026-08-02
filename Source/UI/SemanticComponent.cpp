@@ -347,16 +347,38 @@ String createStreamSemanticSegment (
 
 String createStreamSelectorRowSemanticId (
     StringRef tableSemanticId,
-    int sourceNodeId,
-    StringRef identifier,
-    StringRef displayNameFallback)
+    const StringArray& siblingSemanticSegments,
+    int streamIndex)
 {
-    return String (tableSemanticId)
-           + "."
-           + createStreamSemanticSegment (
-               sourceNodeId,
-               identifier,
-               displayNameFallback);
+    if (! isPositiveAndBelow (
+            streamIndex,
+            siblingSemanticSegments.size()))
+    {
+        return {};
+    }
+
+    const auto& semanticSegment =
+        siblingSemanticSegments[streamIndex];
+    int matchingSegments = 0;
+    for (const auto& siblingSegment :
+         siblingSemanticSegments)
+    {
+        if (siblingSegment == semanticSegment)
+            ++matchingSegments;
+    }
+
+    auto automationId =
+        String (tableSemanticId)
+        + "."
+        + semanticSegment;
+    if (matchingSegments > 1)
+    {
+        automationId +=
+            ".index_"
+            + String (streamIndex);
+    }
+
+    return automationId;
 }
 
 std::unique_ptr<AccessibilityHandler>

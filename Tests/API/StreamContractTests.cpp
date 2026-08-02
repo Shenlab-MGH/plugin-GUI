@@ -191,6 +191,39 @@ TEST (StreamContractTests, ExposesMatchingConfigurationScopedUiaLocator)
                 { "uses_display_name_fallback", false } }));
 }
 
+TEST (StreamContractTests, DisambiguatesSanitisedUiaLocatorCollisions)
+{
+    StreamContractProcessor processor;
+    processor.setNodeId (100);
+    processor.addStream (
+        probeStreamSettings ("probe.ap"), 101, "Neuropixels PXI");
+    const auto* underscored = processor.addStream (
+        probeStreamSettings ("probe_ap"), 101, "Neuropixels PXI");
+    processor.addStream (
+        probeStreamSettings (""), 101, "Neuropixels PXI");
+
+    const auto nested = serialiseProcessor (processor);
+    ASSERT_EQ (nested["streams"].size(), 3u);
+    EXPECT_EQ (
+        nested["streams"][0]["uia"]["automation_id"],
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.index_0");
+    EXPECT_EQ (
+        nested["streams"][1]["uia"]["automation_id"],
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.index_1");
+    EXPECT_EQ (
+        nested["streams"][2]["uia"]["automation_id"],
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.index_2");
+    EXPECT_EQ (
+        nested["streams"][2]["uia"]["uses_display_name_fallback"],
+        true);
+    EXPECT_NE (
+        nested["streams"][0]["uia"]["automation_id"],
+        nested["streams"][1]["uia"]["automation_id"]);
+
+    const auto direct = serialiseStream (processor, underscored, 1);
+    EXPECT_EQ (direct, nested["streams"][1]);
+}
+
 TEST (StreamContractTests, ReorderingChangesLocatorButNotIdentityFacts)
 {
     StreamContractProcessor processor;

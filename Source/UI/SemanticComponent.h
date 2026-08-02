@@ -42,12 +42,13 @@ TESTABLE String createStreamSemanticSegment (
     StringRef displayNameFallback);
 
 /** Returns the Windows UIA AutomationId for a stream selector table row.
-    This locator is scoped to the processor's current configuration. */
+    This locator is scoped to the processor's current configuration. Rows
+    whose sanitised segments collide receive a deterministic index suffix;
+    non-colliding row IDs remain unchanged. */
 TESTABLE String createStreamSelectorRowSemanticId (
     StringRef tableSemanticId,
-    int sourceNodeId,
-    StringRef identifier,
-    StringRef displayNameFallback);
+    const StringArray& siblingSemanticSegments,
+    int streamIndex);
 TESTABLE std::unique_ptr<AccessibilityHandler>
 createReadOnlyProgressAccessibilityHandler (
     Component& component,

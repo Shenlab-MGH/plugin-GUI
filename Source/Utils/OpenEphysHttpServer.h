@@ -1723,13 +1723,22 @@ private:
                 processor->getNodeId(),
                 "streams")
             + ".table";
+        StringArray siblingSemanticSegments;
+        for (const auto* sibling :
+             processor->getDataStreams())
+        {
+            siblingSemanticSegments.add (
+                createStreamSemanticSegment (
+                    sibling->getSourceNodeId(),
+                    sibling->getIdentifier(),
+                    sibling->getName()));
+        }
         (*stream_json)["uia"] = {
             { "automation_id",
               createStreamSelectorRowSemanticId (
                   streamTableSemanticId,
-                  stream->getSourceNodeId(),
-                  stream->getIdentifier(),
-                  stream->getName())
+                  siblingSemanticSegments,
+                  stream_index)
                   .toStdString() },
             { "scope", "configuration" },
             { "uses_display_name_fallback",

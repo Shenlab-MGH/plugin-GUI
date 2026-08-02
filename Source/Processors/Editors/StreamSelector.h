@@ -54,7 +54,7 @@ class StreamSelectorAccessibilityValueState;
 /**
 *   TableListBoxModel for selecting streams
 */
-class StreamTableModel : public TableListBoxModel
+class TESTABLE StreamTableModel : public TableListBoxModel
 {
 public:
     /** Constructor */

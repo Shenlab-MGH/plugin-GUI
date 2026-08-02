@@ -865,11 +865,20 @@ String StreamTableModel::getSemanticIdForRow (
     if (! isPositiveAndBelow (rowNumber, streams.size()))
         return {};
 
+    StringArray siblingSemanticSegments;
+    for (const auto* stream : streams)
+    {
+        siblingSemanticSegments.add (
+            createStreamSemanticSegment (
+                stream->getSourceNodeId(),
+                stream->getIdentifier(),
+                stream->getName()));
+    }
+
     return createStreamSelectorRowSemanticId (
         tableSemanticId,
-        streams[rowNumber]->getSourceNodeId(),
-        streams[rowNumber]->getIdentifier(),
-        streams[rowNumber]->getName());
+        siblingSemanticSegments,
+        rowNumber);
 }
 
 String StreamTableModel::getDescriptionForRow (int rowNumber) const

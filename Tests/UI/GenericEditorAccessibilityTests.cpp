@@ -2138,6 +2138,81 @@ TEST (GenericEditorAccessibilityTests, ExposesUniqueNamedStreamRows)
 }
 
 TEST (GenericEditorAccessibilityTests,
+      DisambiguatesCollidingStreamRowsInNormalAndExpandedTables)
+{
+    TestStreamProcessor processor;
+    processor.setNodeId (100);
+    InspectableGenericEditor editor (&processor);
+    auto& selector = editor.getStreamSelector();
+    TestDataStream dotted ({ "Dotted AP",
+                             "Identifier contains a dot",
+                             "probe.ap",
+                             30000.0f,
+                             true },
+                           101);
+    TestDataStream underscored ({ "Underscored AP",
+                                  "Identifier contains an underscore",
+                                  "probe_ap",
+                                  30000.0f,
+                                  true },
+                                101);
+    TestDataStream fallback ({ "Probe AP",
+                               "Empty identifier uses the display name",
+                               "",
+                               30000.0f,
+                               true },
+                             101);
+
+    selector.add (&dotted);
+    selector.add (&underscored);
+    selector.add (&fallback);
+    selector.finishedUpdate();
+
+    auto* table = dynamic_cast<TableListBox*> (
+        findDescendantBySemanticId (
+            selector,
+            "oe.processor.100.streams.table"));
+    ASSERT_NE (table, nullptr);
+    auto* dottedRow = table->getComponentForRowNumber (0);
+    auto* underscoredRow = table->getComponentForRowNumber (1);
+    auto* fallbackRow = table->getComponentForRowNumber (2);
+    ASSERT_NE (dottedRow, nullptr);
+    ASSERT_NE (underscoredRow, nullptr);
+    ASSERT_NE (fallbackRow, nullptr);
+    EXPECT_EQ (
+        dottedRow->getComponentID(),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.index_0");
+    EXPECT_EQ (
+        underscoredRow->getComponentID(),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.index_1");
+    EXPECT_EQ (
+        fallbackRow->getComponentID(),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.index_2");
+
+    StreamTableModel expandedModel (&selector);
+    TableListBox expandedTable (
+        "Expanded stream table",
+        &expandedModel);
+    expandedModel.table = &expandedTable;
+    expandedModel.update ({ &dotted, &underscored, &fallback });
+    EXPECT_EQ (
+        expandedModel.getSemanticIdForRow (
+            0,
+            "oe.processor.100.streams.expanded_table"),
+        "oe.processor.100.streams.expanded_table.source_101.stream_probe_ap.index_0");
+    EXPECT_EQ (
+        expandedModel.getSemanticIdForRow (
+            1,
+            "oe.processor.100.streams.expanded_table"),
+        "oe.processor.100.streams.expanded_table.source_101.stream_probe_ap.index_1");
+    EXPECT_EQ (
+        expandedModel.getSemanticIdForRow (
+            2,
+            "oe.processor.100.streams.expanded_table"),
+        "oe.processor.100.streams.expanded_table.source_101.stream_probe_ap.index_2");
+}
+
+TEST (GenericEditorAccessibilityTests,
       PublishesCurrentStreamAsReadOnlyValue)
 {
     ScopedGenericEditorTestApplication application;

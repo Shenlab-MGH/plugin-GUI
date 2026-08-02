@@ -108,20 +108,39 @@ TEST (SemanticComponentTests, SanitisesDynamicIdSegments)
 
 TEST (SemanticComponentTests, BuildsConfigurationScopedStreamRowIds)
 {
+    const StringArray uniqueSegments {
+        "source_101.stream_probe_ap"
+    };
     EXPECT_EQ (
         createStreamSelectorRowSemanticId (
             "oe.processor.100.streams.table",
-            101,
-            "probe.ap",
-            "Probe AP fallback"),
+            uniqueSegments,
+            0),
         "oe.processor.100.streams.table.source_101.stream_probe_ap");
+
+    const StringArray collidingSegments {
+        "source_101.stream_probe_ap",
+        "source_101.stream_probe_ap",
+        "source_101.stream_probe_ap"
+    };
     EXPECT_EQ (
         createStreamSelectorRowSemanticId (
             "oe.processor.100.streams.table",
-            101,
-            "",
-            "Probe AP fallback"),
-        "oe.processor.100.streams.table.source_101.stream_probe_ap_fallback");
+            collidingSegments,
+            2),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap.index_2");
+    EXPECT_TRUE (
+        createStreamSelectorRowSemanticId (
+            "oe.processor.100.streams.table",
+            collidingSegments,
+            -1)
+            .isEmpty());
+    EXPECT_TRUE (
+        createStreamSelectorRowSemanticId (
+            "oe.processor.100.streams.table",
+            collidingSegments,
+            3)
+            .isEmpty());
 }
 
 TEST (SemanticComponentTests, AppliesStableAccessibleMeaning)
