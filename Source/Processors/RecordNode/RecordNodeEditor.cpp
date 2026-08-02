@@ -769,9 +769,7 @@ private:
 
 String getParameterSemanticId (Parameter& parameter)
 {
-    return "oe.parameter."
-           + sanitiseSemanticSegment (
-               String (parameter.getKey()));
+    return parameter.getAutomationId();
 }
 
 String getParameterSemanticTitle (
@@ -1247,7 +1245,7 @@ RecordChannelsParameterEditor::RecordChannelsParameterEditor (RecordNode* rn, Pa
     monitor->setTooltip (sourceNodeId + " | " + streamName);
     applySemanticMetadata (
         *monitor,
-        "oe.parameter." + sanitiseSemanticSegment (String (param->getKey())),
+        param->getAutomationId(),
         "Recording channels for " + streamName,
         param->getDescription());
     monitor->addListener (this);

@@ -45,7 +45,7 @@ MonitorMuteButton::MonitorMuteButton (Parameter* param) : ParameterEditor (param
     editor = muteButton.get();
     applySemanticMetadata (
         *muteButton,
-        "oe.parameter." + sanitiseSemanticSegment (String (param->getKey())),
+        param->getAutomationId(),
         param->getDisplayName(),
         param->getDescription());
 
@@ -99,8 +99,7 @@ AudioOutputSelector::AudioOutputSelector (Parameter* param) : ParameterEditor (p
     bothButton->setToggleState (true, dontSendNotification);
     editor = outputChannelButtonManager.get();
 
-    const auto semanticId = "oe.parameter."
-                            + sanitiseSemanticSegment (String (param->getKey()));
+    const auto semanticId = param->getAutomationId();
     applySemanticMetadata (
         *outputChannelButtonManager,
         semanticId,

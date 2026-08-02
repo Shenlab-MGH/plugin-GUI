@@ -383,6 +383,7 @@
   "uia": {
     "automation_id_rule": "Capability id is the Windows UIA AutomationId when the control exists in the visible GUI tree.",
     "parameter_automation_id_rule": "oe.parameter.<sanitised parameter key>",
+    "processor_catalog_automation_id_rule": "oe.processor_catalog.<sanitised processor slug>",
     "root_id": "oe.window.main",
     "capability_ids": [
       "oe.control.acquisition",

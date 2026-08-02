@@ -24,6 +24,9 @@ DEFAULT_MANIFEST = ROOT / "open_ephys_agent_surface.json"
 DEFAULT_BASE_URL = "http://127.0.0.1:37497"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 PARAMETER_AUTOMATION_ID_RULE = "oe.parameter.<sanitised parameter key>"
+PROCESSOR_CATALOG_AUTOMATION_ID_RULE = (
+    "oe.processor_catalog.<sanitised processor slug>"
+)
 PARAMETER_RESPONSE_REQUIRED_FIELDS = [
     "name",
     "type",
@@ -109,6 +112,14 @@ def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) ->
         raise ValueError("Open Ephys agent contract parameter UIA rule is invalid.")
     if manifest_uia.get("parameter_automation_id_rule") != fixture_parameter_rule:
         raise ValueError("Open Ephys agent contract parameter UIA rule does not match the manifest.")
+
+    fixture_processor_catalog_rule = fixture_uia.get("processor_catalog_automation_id_rule")
+    if fixture_processor_catalog_rule != PROCESSOR_CATALOG_AUTOMATION_ID_RULE:
+        raise ValueError("Open Ephys agent contract processor catalog UIA rule is invalid.")
+    if manifest_uia.get("processor_catalog_automation_id_rule") != fixture_processor_catalog_rule:
+        raise ValueError(
+            "Open Ephys agent contract processor catalog UIA rule does not match the manifest."
+        )
 
     parameter_response = (fixture.get("api") or {}).get("parameter_response")
     if not isinstance(parameter_response, dict) or (
@@ -423,21 +434,27 @@ class McpServer:
                 raise ValueError("Provide either capability or automation_id, not both.")
 
             if capability is not None:
-                allowed_capabilities = set(self.manifest["uia"]["capability_ids"])
+                allowed_capabilities = {
+                    *self.manifest["uia"]["capability_ids"],
+                    self.manifest["uia"]["root_id"],
+                }
                 if capability not in allowed_capabilities:
                     raise ValueError("UIA capability is not allowlisted by the manifest.")
                 automation_id = capability
-            elif not self._is_parameter_automation_id(automation_id):
-                raise ValueError("Parameter AutomationId must match the declared parameter UIA rule.")
+                rule = self.manifest["uia"]["automation_id_rule"]
+            elif self._is_parameter_automation_id(automation_id):
+                rule = self.manifest["uia"]["parameter_automation_id_rule"]
+            elif self._is_processor_catalog_automation_id(automation_id):
+                rule = self.manifest["uia"]["processor_catalog_automation_id_rule"]
+            else:
+                raise ValueError(
+                    "AutomationId must match a declared dynamic UIA rule."
+                )
 
             payload = {
                 "automation_id": automation_id,
                 "transport": "windows_uia",
-                "rule": (
-                    self.manifest["uia"]["automation_id_rule"]
-                    if capability is not None
-                    else self.manifest["uia"]["parameter_automation_id_rule"]
-                ),
+                "rule": rule,
                 "inspect_script": self.manifest["uia"]["script"],
             }
             if capability is not None:
@@ -448,12 +465,34 @@ class McpServer:
         raise ValueError(f"Unknown tool: {name}")
 
     def _is_parameter_automation_id(self, automation_id: Any) -> bool:
+        return self._matches_dynamic_automation_id(
+            automation_id,
+            self.manifest["uia"]["parameter_automation_id_rule"],
+            "<sanitised parameter key>",
+        )
+
+    def _is_processor_catalog_automation_id(self, automation_id: Any) -> bool:
+        return self._matches_dynamic_automation_id(
+            automation_id,
+            self.manifest["uia"]["processor_catalog_automation_id_rule"],
+            "<sanitised processor slug>",
+        )
+
+    @staticmethod
+    def _matches_dynamic_automation_id(
+        automation_id: Any, rule: str, placeholder: str
+    ) -> bool:
         if not isinstance(automation_id, str):
             return False
 
-        rule = self.manifest["uia"]["parameter_automation_id_rule"]
-        prefix = rule.removesuffix("<sanitised parameter key>")
-        return re.fullmatch(re.escape(prefix) + r"[a-z0-9]+(?:_[a-z0-9]+)*", automation_id) is not None
+        prefix = rule.removesuffix(placeholder)
+        return (
+            re.fullmatch(
+                re.escape(prefix) + r"[a-z0-9]+(?:_[a-z0-9]+)*",
+                automation_id,
+            )
+            is not None
+        )
 
 
 def run_stdio(server: McpServer) -> None:

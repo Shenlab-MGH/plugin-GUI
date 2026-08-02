@@ -163,6 +163,22 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertEqual(payload["transport"], "windows_uia")
         self.assertEqual(payload["rule"], self.manifest["uia"]["automation_id_rule"])
 
+        root_response = server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "oe_uia_locator",
+                    "arguments": {"capability": self.manifest["uia"]["root_id"]},
+                },
+            }
+        )
+        self.assertNotIn("error", root_response)
+        root_payload = json.loads(root_response["result"]["content"][0]["text"])
+        self.assertEqual(root_payload["automation_id"], self.manifest["uia"]["root_id"])
+        self.assertEqual(root_payload["rule"], self.manifest["uia"]["automation_id_rule"])
+
     def test_mcp_initialize_derives_server_version_from_loaded_contract(self):
         server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
 
@@ -192,10 +208,33 @@ class AgentNativeManifestTests(unittest.TestCase):
             server.manifest["uia"]["parameter_automation_id_rule"],
         )
 
+        catalog_response = server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tools/call",
+                "params": {
+                    "name": "oe_uia_locator",
+                    "arguments": {
+                        "automation_id": "oe.processor_catalog.bandpass_filter",
+                    },
+                },
+            }
+        )
+        self.assertNotIn("error", catalog_response)
+        catalog_payload = json.loads(catalog_response["result"]["content"][0]["text"])
+        self.assertEqual(
+            catalog_payload["rule"],
+            server.manifest["uia"]["processor_catalog_automation_id_rule"],
+        )
+
         for invalid_arguments in (
             {"capability": "oe.processor.parameter"},
             {"automation_id": "oe.control.recording"},
             {"automation_id": "oe.parameter."},
+            {"automation_id": "oe.processor_catalog."},
+            {"automation_id": "oe.processor_catalog.Bandpass"},
+            {"automation_id": "oe.processor_catalog.bandpass-filter"},
             {"automation_id": "anything-else"},
         ):
             with self.subTest(arguments=invalid_arguments):
@@ -252,6 +291,16 @@ class AgentNativeContractParityTests(unittest.TestCase):
             "oe.parameter.<sanitised parameter key>",
         )
         self.assertEqual(self.manifest["uia"]["parameter_automation_id_rule"], "oe.parameter.<sanitised parameter key>")
+        self.assertIn("processor_catalog_automation_id_rule", self.contract["uia"])
+        self.assertIn("processor_catalog_automation_id_rule", self.manifest["uia"])
+        self.assertEqual(
+            self.contract["uia"].get("processor_catalog_automation_id_rule"),
+            "oe.processor_catalog.<sanitised processor slug>",
+        )
+        self.assertEqual(
+            self.manifest["uia"].get("processor_catalog_automation_id_rule"),
+            "oe.processor_catalog.<sanitised processor slug>",
+        )
 
     def test_skill_matches_parameter_contract_discovery_workflow(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
@@ -338,6 +387,22 @@ class AgentNativeContractParityTests(unittest.TestCase):
             (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "parameter UIA"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_mismatched_processor_catalog_uia_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            fixture = json.loads(json.dumps(self.contract))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture["contract"]["fixture"] = "contract.json"
+            manifest["uia"]["processor_catalog_automation_id_rule"] = (
+                "oe.processor_catalog.<wrong slug>"
+            )
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "processor catalog UIA"):
                 mcp.load_manifest(temp_root / "manifest.json")
 
     def test_manifest_rejects_a_mismatched_parameter_response_contract(self):

@@ -84,6 +84,7 @@
   "uia": {
     "root_id": "oe.window.main",
     "parameter_automation_id_rule": "oe.parameter.<sanitised parameter key>",
+    "processor_catalog_automation_id_rule": "oe.processor_catalog.<sanitised processor slug>",
     "required_ids": [
       {
         "id": "oe.window.main",

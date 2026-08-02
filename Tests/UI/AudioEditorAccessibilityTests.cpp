@@ -71,14 +71,16 @@ TEST (AudioEditorAccessibilityTests, ExposesAudioMonitorParameterControls)
         "Choose the monitored audio output channel.",
         { "Left", "Both", "Right" },
         1);
-    outputParameter.setKey ("106|audio_output");
+    outputParameter.setKey ("106|Audio Output: Left/Right");
 
     AudioOutputSelector outputSelector (&outputParameter);
-    auto* outputGroup = outputSelector.findChildWithID ("oe.parameter.106_audio_output");
+    const auto outputAutomationId = outputParameter.getAutomationId();
+    auto* outputGroup = outputSelector.findChildWithID (outputAutomationId);
     ASSERT_NE (outputGroup, nullptr);
-    EXPECT_NE (findDescendantWithId (*outputGroup, "oe.parameter.106_audio_output.left"), nullptr);
-    EXPECT_NE (findDescendantWithId (*outputGroup, "oe.parameter.106_audio_output.both"), nullptr);
-    EXPECT_NE (findDescendantWithId (*outputGroup, "oe.parameter.106_audio_output.right"), nullptr);
+    EXPECT_EQ (outputGroup->getComponentID(), outputAutomationId);
+    EXPECT_NE (findDescendantWithId (*outputGroup, outputAutomationId + ".left"), nullptr);
+    EXPECT_NE (findDescendantWithId (*outputGroup, outputAutomationId + ".both"), nullptr);
+    EXPECT_NE (findDescendantWithId (*outputGroup, outputAutomationId + ".right"), nullptr);
 
     BooleanParameter muteParameter (
         nullptr,
@@ -87,11 +89,13 @@ TEST (AudioEditorAccessibilityTests, ExposesAudioMonitorParameterControls)
         "Mute audio",
         "Mute monitored audio output.",
         false);
-    muteParameter.setKey ("106|mute_audio");
+    muteParameter.setKey ("106|Mute Audio: Main");
 
     MonitorMuteButton mute (&muteParameter);
-    auto* muteControl = mute.findChildWithID ("oe.parameter.106_mute_audio");
+    const auto muteAutomationId = muteParameter.getAutomationId();
+    auto* muteControl = mute.findChildWithID (muteAutomationId);
     ASSERT_NE (muteControl, nullptr);
+    EXPECT_EQ (muteControl->getComponentID(), muteAutomationId);
     EXPECT_EQ (muteControl->getTitle(), "Mute audio");
     EXPECT_EQ (muteControl->getDescription(), "Mute monitored audio output.");
 }

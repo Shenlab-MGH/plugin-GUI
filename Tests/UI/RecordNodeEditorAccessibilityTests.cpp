@@ -170,7 +170,7 @@ TEST_F (RecordNodeEditorAccessibilityTests,
             settings[2],
             true);
         parameter.setKey (
-            "100|" + std::string (settings[0]));
+            "100|" + std::string (settings[0]) + ": Main");
         Parameter::registerParameter (&parameter);
         RecordToggleParameterEditor editor (&parameter);
         auto* toggle = editor.getEditor();
@@ -178,7 +178,7 @@ TEST_F (RecordNodeEditorAccessibilityTests,
 
         EXPECT_EQ (
             toggle->getComponentID(),
-            "oe.parameter.100_" + String (settings[0]));
+            parameter.getAutomationId());
         EXPECT_EQ (toggle->getTitle(), settings[1]);
         EXPECT_EQ (toggle->getDescription(), settings[2]);
         auto* label =
