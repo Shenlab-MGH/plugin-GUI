@@ -4266,9 +4266,12 @@ void LfpDisplay::mouseDown (const MouseEvent& event)
 
     if (event.mods.isRightButtonDown())
     { // if right click
-        PopupMenu channelMenu = drawableChannels[closest].channel->getOptions();
+        auto* selectedChannel = drawableChannels[closest].channel;
+        PopupMenu channelMenu = selectedChannel->getOptions();
+        const auto inputInvertedBeforePopup = selectedChannel->getInputInverted();
         const int result = channelMenu.show();
-        drawableChannels[closest].channel->changeParameter (result);
+        if (result != 1 || selectedChannel->getInputInverted() == inputInvertedBeforePopup)
+            selectedChannel->changeParameter (result);
     }
     else // if left click
     {
