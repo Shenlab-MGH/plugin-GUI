@@ -330,6 +330,35 @@ String createProcessorControlSemanticId (int nodeId, StringRef controlName)
            + sanitiseSemanticSegment (controlName);
 }
 
+String createStreamSemanticSegment (
+    int sourceNodeId,
+    StringRef identifier,
+    StringRef displayNameFallback)
+{
+    const String identitySegment (
+        String (identifier).isNotEmpty()
+            ? identifier
+            : displayNameFallback);
+
+    return "source_" + String (sourceNodeId)
+           + ".stream_"
+           + sanitiseSemanticSegment (identitySegment);
+}
+
+String createStreamSelectorRowSemanticId (
+    StringRef tableSemanticId,
+    int sourceNodeId,
+    StringRef identifier,
+    StringRef displayNameFallback)
+{
+    return String (tableSemanticId)
+           + "."
+           + createStreamSemanticSegment (
+               sourceNodeId,
+               identifier,
+               displayNameFallback);
+}
+
 std::unique_ptr<AccessibilityHandler>
 createReadOnlyProgressAccessibilityHandler (
     Component& component,

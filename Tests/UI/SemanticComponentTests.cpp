@@ -106,6 +106,24 @@ TEST (SemanticComponentTests, SanitisesDynamicIdSegments)
                "oe.processor.101.fifo_drawer");
 }
 
+TEST (SemanticComponentTests, BuildsConfigurationScopedStreamRowIds)
+{
+    EXPECT_EQ (
+        createStreamSelectorRowSemanticId (
+            "oe.processor.100.streams.table",
+            101,
+            "probe.ap",
+            "Probe AP fallback"),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap");
+    EXPECT_EQ (
+        createStreamSelectorRowSemanticId (
+            "oe.processor.100.streams.table",
+            101,
+            "",
+            "Probe AP fallback"),
+        "oe.processor.100.streams.table.source_101.stream_probe_ap_fallback");
+}
+
 TEST (SemanticComponentTests, AppliesStableAccessibleMeaning)
 {
     TextButton button ("R");

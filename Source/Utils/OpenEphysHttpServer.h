@@ -38,6 +38,7 @@
 #include "../AccessClass.h"
 #include "../MainWindow.h"
 #include "../UI/ProcessorList.h"
+#include "../UI/SemanticComponent.h"
 
 #include "AcquisitionRecordingRuntime.h"
 #include "ControlCapabilityJson.h"
@@ -1716,6 +1717,23 @@ private:
             { "scope", "configuration" },
             { "source_id", stream->getSourceNodeId() },
             { "identifier", stream->getIdentifier().toStdString() }
+        };
+        const auto streamTableSemanticId =
+            createProcessorControlSemanticId (
+                processor->getNodeId(),
+                "streams")
+            + ".table";
+        (*stream_json)["uia"] = {
+            { "automation_id",
+              createStreamSelectorRowSemanticId (
+                  streamTableSemanticId,
+                  stream->getSourceNodeId(),
+                  stream->getIdentifier(),
+                  stream->getName())
+                  .toStdString() },
+            { "scope", "configuration" },
+            { "uses_display_name_fallback",
+              stream->getIdentifier().isEmpty() }
         };
 
         std::vector<json> parameters_json;

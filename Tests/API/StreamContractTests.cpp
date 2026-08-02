@@ -154,6 +154,7 @@ TEST (StreamContractTests, CompoundIdentityDistinguishesSameNamedStreams)
 TEST (StreamContractTests, EmptyIdentifierDoesNotFabricateStableIdentity)
 {
     StreamContractProcessor processor;
+    processor.setNodeId (100);
     const auto* stream = processor.addStream (
         probeStreamSettings (""), 101, "Neuropixels PXI");
 
@@ -165,6 +166,29 @@ TEST (StreamContractTests, EmptyIdentifierDoesNotFabricateStableIdentity)
     EXPECT_EQ (document["identity"]["scope"], "configuration");
     EXPECT_EQ (document["identity"]["source_id"], 101);
     EXPECT_EQ (document["identity"]["identifier"], "");
+    EXPECT_EQ (
+        document["uia"],
+        json ({ { "automation_id",
+                  "oe.processor.100.streams.table.source_101.stream_probe_ap" },
+                { "scope", "configuration" },
+                { "uses_display_name_fallback", true } }));
+}
+
+TEST (StreamContractTests, ExposesMatchingConfigurationScopedUiaLocator)
+{
+    StreamContractProcessor processor;
+    processor.setNodeId (100);
+    const auto* stream = processor.addStream (
+        probeStreamSettings ("imec.ap"), 101, "Neuropixels PXI");
+
+    const auto document = serialiseStream (processor, stream);
+
+    EXPECT_EQ (
+        document["uia"],
+        json ({ { "automation_id",
+                  "oe.processor.100.streams.table.source_101.stream_imec_ap" },
+                { "scope", "configuration" },
+                { "uses_display_name_fallback", false } }));
 }
 
 TEST (StreamContractTests, ReorderingChangesLocatorButNotIdentityFacts)

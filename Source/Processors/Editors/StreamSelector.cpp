@@ -175,13 +175,10 @@ String getStreamSelectorSemanticId (const GenericEditor& editor)
 
 String getStreamSemanticSegment (const DataStream& stream)
 {
-    const auto identifier =
-        stream.getIdentifier().isNotEmpty()
-            ? stream.getIdentifier()
-            : stream.getName();
-
-    return "source_" + String (stream.getSourceNodeId())
-           + ".stream_" + sanitiseSemanticSegment (identifier);
+    return createStreamSemanticSegment (
+        stream.getSourceNodeId(),
+        stream.getIdentifier(),
+        stream.getName());
 }
 
 String getStreamSemanticId (const GenericEditor& editor,
@@ -868,9 +865,11 @@ String StreamTableModel::getSemanticIdForRow (
     if (! isPositiveAndBelow (rowNumber, streams.size()))
         return {};
 
-    return tableSemanticId
-           + "."
-           + getStreamSemanticSegment (*streams[rowNumber]);
+    return createStreamSelectorRowSemanticId (
+        tableSemanticId,
+        streams[rowNumber]->getSourceNodeId(),
+        streams[rowNumber]->getIdentifier(),
+        streams[rowNumber]->getName());
 }
 
 String StreamTableModel::getDescriptionForRow (int rowNumber) const

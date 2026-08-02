@@ -31,6 +31,23 @@ TESTABLE bool isValidSemanticId (StringRef id);
 TESTABLE String sanitiseSemanticSegment (StringRef segment);
 TESTABLE String createProcessorControlSemanticId (int nodeId,
                                                   StringRef controlName);
+
+/** Returns the configuration-scoped semantic segment for a stream.
+    The non-empty identifier is preferred; displayNameFallback is used only
+    when the stream has no identifier. The fallback form is not durable
+    identity and must be rediscovered after configuration changes. */
+TESTABLE String createStreamSemanticSegment (
+    int sourceNodeId,
+    StringRef identifier,
+    StringRef displayNameFallback);
+
+/** Returns the Windows UIA AutomationId for a stream selector table row.
+    This locator is scoped to the processor's current configuration. */
+TESTABLE String createStreamSelectorRowSemanticId (
+    StringRef tableSemanticId,
+    int sourceNodeId,
+    StringRef identifier,
+    StringRef displayNameFallback);
 TESTABLE std::unique_ptr<AccessibilityHandler>
 createReadOnlyProgressAccessibilityHandler (
     Component& component,
