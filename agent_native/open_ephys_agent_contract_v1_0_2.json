@@ -1,7 +1,7 @@
 {
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "fixture": "open_ephys_agent_contract_v1_0_2.json"
   },
   "baseline": {
@@ -29,6 +29,12 @@
         "deactivate_during_acquisition",
         "uia.automation_id"
       ]
+    },
+    "parameter_name_segment_policy": {
+      "field": "parameter_name",
+      "input": "raw",
+      "render": "percent_encode_utf8_once",
+      "reject": ["empty", "slash", "backslash", "dot_segment", "control_character"]
     },
     "required_routes": [
       {
@@ -74,10 +80,28 @@
         "capability": "oe.processor.parameters"
       },
       {
+        "command": "get_parameter",
+        "method": "GET",
+        "path": "/api/processors/{processor_id}/parameters/{parameter_name}",
+        "capability": "oe.processor.parameter"
+      },
+      {
         "command": "set_parameter",
         "method": "PUT",
         "path": "/api/processors/{processor_id}/parameters/{parameter_name}",
         "capability": "oe.processor.parameter"
+      },
+      {
+        "command": "get_stream_parameter",
+        "method": "GET",
+        "path": "/api/processors/{processor_id}/streams/{stream_index}/parameters/{parameter_name}",
+        "capability": "oe.processor.stream.parameter"
+      },
+      {
+        "command": "set_stream_parameter",
+        "method": "PUT",
+        "path": "/api/processors/{processor_id}/streams/{stream_index}/parameters/{parameter_name}",
+        "capability": "oe.processor.stream.parameter"
       }
     ]
   },

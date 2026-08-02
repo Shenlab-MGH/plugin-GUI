@@ -24,7 +24,7 @@ they are not the `oe.control.recording` start/stop toggle. A `RECORD` command
 also requires an explicit same-run `confirm_recording: true` argument.
 
 The OE agent surface is versioned as a contract. For the current Windows
-baseline, use the `open-ephys-agent` contract `0.1.1` against Open Ephys GUI
+baseline, use the `open-ephys-agent` contract `0.1.2` against Open Ephys GUI
 `1.0.2` (commit `c91afebcfb0678a667fb93f6312ed33c56ec640f`). Keep these files
 together and reject a mixed-version setup:
 
@@ -46,6 +46,13 @@ Each parameter response includes `key`, `display_name`, `description`,
 `enabled`, `deactivate_during_acquisition`, and `uia.automation_id` alongside
 the legacy `name`, `type`, and string `value` fields. Pass that returned
 `uia.automation_id` to `oe_uia_locator` as `automation_id`.
+
+For a parameter GET or PUT, discover the parameter first and use its returned
+`key` as the raw `parameter_name`. The MCP bridge rejects empty names, slashes,
+backslashes, dot-segments, and control characters, then renders the raw key as
+one percent-encoded path segment. Do not pre-encode or decode the key: a
+literal `%20` key is sent as `%2520`. This workflow does not validate a real
+device; it only describes the contract-level request path.
 
 Parameter AutomationIds follow `oe.parameter.<sanitised parameter key>`, but
 do not construct or guess them from a parameter name or key. The API response

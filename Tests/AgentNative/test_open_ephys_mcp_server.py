@@ -30,13 +30,54 @@ class AgentNativeManifestTests(unittest.TestCase):
             if method in {"PUT", "POST"} or command["name"] in {"clear_processors", "undo", "redo"}:
                 self.assertTrue(command.get("post_command"), command["name"])
 
-    def test_path_rendering_quotes_dynamic_fields(self):
-        command = mcp.command_index(self.manifest)["set_parameter"]
-        path = mcp.render_path(
-            command,
-            {"processor_id": 101, "parameter_name": "gain mode", "value": 2},
+    def test_parameter_routes_render_raw_names_as_one_percent_encoded_segment(self):
+        commands = mcp.command_index(self.manifest)
+        expected_paths = {
+            "get_parameter": "/api/processors/101/parameters/gain%20mode",
+            "set_parameter": "/api/processors/101/parameters/gain%20mode",
+            "get_stream_parameter": "/api/processors/101/streams/7/parameters/gain%20mode",
+            "set_stream_parameter": "/api/processors/101/streams/7/parameters/gain%20mode",
+        }
+
+        for name, expected_path in expected_paths.items():
+            with self.subTest(command=name):
+                self.assertEqual(
+                    mcp.render_path(
+                        commands[name],
+                        {"processor_id": 101, "stream_index": 7, "parameter_name": "gain mode"},
+                    ),
+                    expected_path,
+                )
+
+        self.assertEqual(
+            mcp.render_path(
+                commands["get_parameter"],
+                {"processor_id": 101, "parameter_name": "%20"},
+            ),
+            "/api/processors/101/parameters/%2520",
         )
-        self.assertEqual(path, "/api/processors/101/parameters/gain%20mode")
+
+    def test_parameter_routes_reject_unsafe_raw_parameter_name_segments(self):
+        commands = mcp.command_index(self.manifest)
+        for name in ("get_parameter", "set_parameter", "get_stream_parameter", "set_stream_parameter"):
+            for parameter_name in ("", "bad/name", "bad\\name", ".", "..", "bad\nname"):
+                with self.subTest(command=name, parameter_name=repr(parameter_name)):
+                    with self.assertRaisesRegex(ValueError, "(?i)parameter name"):
+                        mcp.render_path(
+                            commands[name],
+                            {
+                                "processor_id": 101,
+                                "stream_index": 7,
+                                "parameter_name": parameter_name,
+                            },
+                        )
+
+    def test_parameter_name_segment_policy_does_not_apply_to_other_path_fields(self):
+        command = mcp.command_index(self.manifest)["get_processor"]
+        self.assertEqual(
+            mcp.render_path(command, {"processor_id": "101/diagnostic"}),
+            "/api/processors/101%2Fdiagnostic",
+        )
 
     def test_execute_command_maps_post_style_to_compatibility_http_route(self):
         with mock.patch.object(mcp, "call_http") as call_http:
@@ -184,7 +225,7 @@ class AgentNativeManifestTests(unittest.TestCase):
 
         response = server.handle({"jsonrpc": "2.0", "id": 3, "method": "initialize"})
 
-        self.assertEqual(response["result"]["serverInfo"]["version"], "0.1.1")
+        self.assertEqual(response["result"]["serverInfo"]["version"], "0.1.2")
 
     def test_uia_locator_allows_only_declared_static_ids_or_parameter_automation_ids(self):
         server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
@@ -258,7 +299,7 @@ class AgentNativeContractParityTests(unittest.TestCase):
     def test_contract_metadata_matches_manifest_baseline_and_version(self):
         contract = self.contract["contract"]
         self.assertEqual(contract["id"], "open-ephys-agent")
-        self.assertEqual(contract["version"], "0.1.1")
+        self.assertEqual(contract["version"], "0.1.2")
         self.assertEqual(self.contract["scope"], "core")
         self.assertEqual(self.manifest["contract"], contract)
         self.assertEqual(self.manifest["baseline"], self.contract["baseline"])
@@ -266,6 +307,16 @@ class AgentNativeContractParityTests(unittest.TestCase):
             self.manifest["transport"]["http_base_url"],
             self.contract["transport"]["http_base_url"],
         )
+
+    def test_contract_declares_canonical_parameter_name_segment_policy(self):
+        policy = {
+            "field": "parameter_name",
+            "input": "raw",
+            "render": "percent_encode_utf8_once",
+            "reject": ["empty", "slash", "backslash", "dot_segment", "control_character"],
+        }
+        self.assertEqual(self.contract["api"]["parameter_name_segment_policy"], policy)
+        self.assertEqual(self.manifest["parameter_name_segment_policy"], policy)
 
     def test_contract_declares_parameter_response_and_dynamic_uia_rule(self):
         self.assertIn("parameter_response", self.contract["api"])
@@ -305,10 +356,13 @@ class AgentNativeContractParityTests(unittest.TestCase):
     def test_skill_matches_parameter_contract_discovery_workflow(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("`open-ephys-agent` contract `0.1.1`", skill)
+        self.assertIn("`open-ephys-agent` contract `0.1.2`", skill)
         self.assertIn("`get_stream_parameters`, `get_parameter`, or `get_stream_parameter` first.", skill)
         self.assertIn("Pass that returned\n`uia.automation_id` to `oe_uia_locator` as `automation_id`.", skill)
         self.assertIn("do not construct or guess them from a parameter name or key", skill)
+        self.assertIn("use its returned\n`key` as the raw `parameter_name`", skill)
+        self.assertIn("one percent-encoded path segment", skill)
+        self.assertIn("does not validate a real\ndevice", skill)
 
     def test_contract_route_matrix_matches_manifest_for_required_commands(self):
         commands = mcp.command_index(self.manifest)
@@ -330,6 +384,19 @@ class AgentNativeContractParityTests(unittest.TestCase):
             )
             declared = command.get("capabilities") or [command.get("capability")]
             self.assertIn(entry["capability"], declared, entry["command"])
+
+    def test_contract_route_matrix_covers_all_parameter_get_and_put_routes(self):
+        route_names = {
+            entry["command"] for entry in self.contract["api"]["required_routes"]
+        }
+        self.assertTrue(
+            {
+                "get_parameter",
+                "set_parameter",
+                "get_stream_parameter",
+                "set_stream_parameter",
+            }.issubset(route_names)
+        )
 
     def test_contract_declares_unique_manifest_routes_and_command_count(self):
         routes = []
@@ -417,6 +484,35 @@ class AgentNativeContractParityTests(unittest.TestCase):
             (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "parameter response"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_mismatched_parameter_name_segment_policy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            fixture = json.loads(json.dumps(self.contract))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture["contract"]["fixture"] = "contract.json"
+            manifest["parameter_name_segment_policy"]["input"] = "decoded"
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "parameter name segment policy"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_noncanonical_parameter_name_segment_policy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            fixture = json.loads(json.dumps(self.contract))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture["contract"]["fixture"] = "contract.json"
+            manifest["parameter_name_segment_policy"]["input"] = "decoded"
+            fixture["api"]["parameter_name_segment_policy"]["input"] = "decoded"
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "parameter name segment policy is not canonical"):
                 mcp.load_manifest(temp_root / "manifest.json")
 
     def test_manifest_rejects_a_missing_contract_fixture(self):

@@ -12,6 +12,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,6 +39,12 @@ PARAMETER_RESPONSE_REQUIRED_FIELDS = [
     "deactivate_during_acquisition",
     "uia.automation_id",
 ]
+PARAMETER_NAME_SEGMENT_POLICY = {
+    "field": "parameter_name",
+    "input": "raw",
+    "render": "percent_encode_utf8_once",
+    "reject": ["empty", "slash", "backslash", "dot_segment", "control_character"],
+}
 
 
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -129,6 +136,16 @@ def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) ->
     if manifest.get("parameter_response") != parameter_response:
         raise ValueError("Open Ephys agent contract parameter response does not match the manifest.")
 
+    fixture_parameter_name_segment_policy = (fixture.get("api") or {}).get(
+        "parameter_name_segment_policy"
+    )
+    if fixture_parameter_name_segment_policy != PARAMETER_NAME_SEGMENT_POLICY:
+        raise ValueError("Open Ephys agent contract parameter name segment policy is not canonical.")
+    if manifest.get("parameter_name_segment_policy") != fixture_parameter_name_segment_policy:
+        raise ValueError(
+            "Open Ephys agent contract parameter name segment policy does not match the manifest."
+        )
+
     required_ids = fixture_uia.get("required_ids")
     if not isinstance(required_ids, list) or any(
         not isinstance(entry, dict) or not isinstance(entry.get("id"), str)
@@ -205,6 +222,22 @@ def validate_raw_api_request(method: str, path: str, body: dict[str, Any] | None
             raise ValueError("Raw RECORD requests require confirm_recording=true.")
 
 
+def render_parameter_name_segment(value: Any) -> str:
+    """Validate a raw parameter name before encoding it as one URL path segment."""
+
+    if not isinstance(value, str) or not value:
+        raise ValueError("Parameter name must be a non-empty raw path segment.")
+    if "/" in value:
+        raise ValueError("Parameter name must not contain a slash.")
+    if "\\" in value:
+        raise ValueError("Parameter name must not contain a backslash.")
+    if value in {".", ".."}:
+        raise ValueError("Parameter name must not be a dot segment.")
+    if any(unicodedata.category(character) == "Cc" for character in value):
+        raise ValueError("Parameter name must not contain control characters.")
+    return urllib.parse.quote(value, safe="")
+
+
 def render_path(command: dict[str, Any], arguments: dict[str, Any]) -> str:
     http = command["http"]
     template = http.get("path_template", http.get("path"))
@@ -215,7 +248,11 @@ def render_path(command: dict[str, Any], arguments: dict[str, Any]) -> str:
     for field in http.get("path_fields", []):
         if field not in arguments:
             raise ValueError(f"Missing path field: {field}")
-        result = result.replace("{" + field + "}", urllib.parse.quote(str(arguments[field]), safe=""))
+        if field == "parameter_name":
+            value = render_parameter_name_segment(arguments[field])
+        else:
+            value = urllib.parse.quote(str(arguments[field]), safe="")
+        result = result.replace("{" + field + "}", value)
     return result
 
 

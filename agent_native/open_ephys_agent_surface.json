@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.1",
+  "schema_version": "0.1.2",
   "product": "Open Ephys GUI",
   "fork": "Shenlab-MGH/plugin-GUI",
   "baseline": {
@@ -9,7 +9,7 @@
   },
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "fixture": "open_ephys_agent_contract_v1_0_2.json"
   },
   "transport": {
@@ -29,6 +29,12 @@
       "deactivate_during_acquisition",
       "uia.automation_id"
     ]
+  },
+  "parameter_name_segment_policy": {
+    "field": "parameter_name",
+    "input": "raw",
+    "render": "percent_encode_utf8_once",
+    "reject": ["empty", "slash", "backslash", "dot_segment", "control_character"]
   },
   "principles": [
     "Prefer the HTTP API for state and deterministic commands.",
