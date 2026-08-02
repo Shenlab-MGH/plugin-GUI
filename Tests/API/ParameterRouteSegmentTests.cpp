@@ -57,6 +57,8 @@ DeleteProcessor::~DeleteProcessor() = default;
 bool DeleteProcessor::perform() { return false; }
 bool DeleteProcessor::undo() { return false; }
 
+float LatencyMeter::getLatestLatency (uint16) { return 0.0f; }
+
 namespace
 {
 using json = nlohmann::json;
