@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.2",
+  "schema_version": "0.1.3",
   "product": "Open Ephys GUI",
   "fork": "Shenlab-MGH/plugin-GUI",
   "baseline": {
@@ -9,7 +9,7 @@
   },
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "fixture": "open_ephys_agent_contract_v1_0_2.json"
   },
   "transport": {
@@ -31,6 +31,48 @@
     ],
     "route_lookup_field": "name",
     "stable_identity_field": "key"
+  },
+  "stream_response": {
+    "required_fields": [
+      "name",
+      "source_id",
+      "sample_rate",
+      "channel_count",
+      "parameters",
+      "stream_index",
+      "runtime_id",
+      "source_name",
+      "description",
+      "identifier",
+      "generates_timestamps",
+      "identity.available",
+      "identity.scope",
+      "identity.source_id",
+      "identity.identifier",
+      "uia.automation_id",
+      "uia.scope",
+      "uia.uses_display_name_fallback"
+    ],
+    "route_lookup_field": "stream_index",
+    "identity": {
+      "fields": ["source_id", "identifier"],
+      "available_when": "identifier_nonempty",
+      "scope": "configuration"
+    },
+    "non_durable_fields": {
+      "stream_index": "current_configuration_order",
+      "runtime_id": "process_lifetime"
+    }
+  },
+  "typed_tools": {
+    "oe_list_streams": {
+      "backend_command": "get_processor",
+      "readback": "response.streams"
+    },
+    "oe_get_stream": {
+      "backend_command": "get_stream",
+      "readback": "response"
+    }
   },
   "parameter_name_segment_policy": {
     "field": "parameter_name",
@@ -393,6 +435,7 @@
     "automation_id_rule": "Capability id is the Windows UIA AutomationId when the control exists in the visible GUI tree.",
     "parameter_automation_id_rule": "oe.parameter.<sanitised parameter key>",
     "processor_catalog_automation_id_rule": "oe.processor_catalog.<sanitised processor slug>",
+    "stream_row_automation_id_rule": "oe.processor.<processor_id>.streams.table.source_<source_id>.stream_<sanitised identifier-or-display-name>[.index_<nonnegative stream_index on collision>]",
     "root_id": "oe.window.main",
     "capability_ids": [
       "oe.control.acquisition",

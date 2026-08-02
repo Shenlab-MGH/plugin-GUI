@@ -28,6 +28,11 @@ understand and control the existing software through explicit API/UIA contracts.
    prompts that are not API-safe.
 4. Use screenshots only for diagnosis, never as the primary control surface.
 
+For stream discovery, use the typed `oe_list_streams` and `oe_get_stream`
+tools. Stream indexes are valid only for the current running configuration, so
+discover streams again after a graph or stream-order change. Use only the
+API-returned stream AutomationId for UIA lookup.
+
 ## Local MCP
 
 Run:

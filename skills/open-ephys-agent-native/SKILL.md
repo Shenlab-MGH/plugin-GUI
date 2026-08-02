@@ -24,7 +24,7 @@ they are not the `oe.control.recording` start/stop toggle. A `RECORD` command
 also requires an explicit same-run `confirm_recording: true` argument.
 
 The OE agent surface is versioned as a contract. For the current Windows
-baseline, use the `open-ephys-agent` contract `0.1.2` against Open Ephys GUI
+baseline, use the `open-ephys-agent` contract `0.1.3` against Open Ephys GUI
 `1.0.2` (commit `c91afebcfb0678a667fb93f6312ed33c56ec640f`). Keep these files
 together and reject a mixed-version setup:
 
@@ -61,6 +61,28 @@ Parameter AutomationIds follow `oe.parameter.<sanitised parameter key>`, but
 do not construct or guess them from a parameter name or key. The API response
 is the authority. Generic route capabilities such as `oe.processor.parameter`
 are not parameter UIA AutomationIds and cannot be passed to `oe_uia_locator`.
+
+## Stream discovery workflow
+
+To discover streams, call `list_processors`, then `oe_list_streams` with the
+returned processor id. Select a stream from that response and call
+`oe_get_stream` with its returned `stream_index` only in the same running
+configuration. Verify the returned `stream_index` and configuration-scoped
+`identity` before relying on the readback. If the processor graph or stream
+order changes, discover the streams again before any further lookup.
+
+The pair `identity.source_id` and `identity.identifier` describes identity only
+within the current configuration, and only when `identity.available` is true.
+The `stream_index` is the current processor stream order, while `runtime_id` is process-lifetime only; neither is durable across configuration or process
+changes. When `identity.available` is false, do not treat the display-name fallback as durable identity.
+
+For Windows UIA, pass the API-returned `uia.automation_id` to
+`oe_uia_locator`. Do not construct a stream AutomationId from a name,
+identifier, source id, or index. The locator is configuration-scoped and may
+refer to a display-name fallback. When sanitised sibling identities collide,
+the returned locator includes `.index_<stream_index>`; preserve that suffix
+exactly and rediscover after reordering. Stop if the exact control is absent,
+ambiguous, or unavailable.
 
 ## Safety boundaries
 

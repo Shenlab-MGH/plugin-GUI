@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 import unicodedata
@@ -24,12 +25,23 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = ROOT / "open_ephys_agent_surface.json"
 DEFAULT_BASE_URL = "http://127.0.0.1:37497"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
-SUPPORTED_SCHEMA_VERSION = "0.1.2"
+SUPPORTED_SCHEMA_VERSION = "0.1.3"
 SUPPORTED_CONTRACT_ID = "open-ephys-agent"
-SUPPORTED_CONTRACT_VERSION = "0.1.2"
+SUPPORTED_CONTRACT_VERSION = "0.1.3"
 PARAMETER_AUTOMATION_ID_RULE = "oe.parameter.<sanitised parameter key>"
 PROCESSOR_CATALOG_AUTOMATION_ID_RULE = (
     "oe.processor_catalog.<sanitised processor slug>"
+)
+STREAM_ROW_AUTOMATION_ID_RULE = (
+    "oe.processor.<processor_id>.streams.table.source_<source_id>."
+    "stream_<sanitised identifier-or-display-name>"
+    "[.index_<nonnegative stream_index on collision>]"
+)
+STREAM_ROW_AUTOMATION_ID_PATTERN = re.compile(
+    r"oe\.processor\.(?P<processor_id>[0-9]+)\.streams\.table\."
+    r"source_(?P<source_id>[0-9]+)\."
+    r"stream_(?P<semantic_segment>[a-z0-9]+(?:_[a-z0-9]+)*)"
+    r"(?:\.index_(?P<collision_index>[0-9]+))?"
 )
 PARAMETER_RESPONSE_REQUIRED_FIELDS = [
     "name",
@@ -46,6 +58,48 @@ PARAMETER_RESPONSE_CONTRACT = {
     "required_fields": PARAMETER_RESPONSE_REQUIRED_FIELDS,
     "route_lookup_field": "name",
     "stable_identity_field": "key",
+}
+STREAM_RESPONSE_CONTRACT = {
+    "required_fields": [
+        "name",
+        "source_id",
+        "sample_rate",
+        "channel_count",
+        "parameters",
+        "stream_index",
+        "runtime_id",
+        "source_name",
+        "description",
+        "identifier",
+        "generates_timestamps",
+        "identity.available",
+        "identity.scope",
+        "identity.source_id",
+        "identity.identifier",
+        "uia.automation_id",
+        "uia.scope",
+        "uia.uses_display_name_fallback",
+    ],
+    "route_lookup_field": "stream_index",
+    "identity": {
+        "fields": ["source_id", "identifier"],
+        "available_when": "identifier_nonempty",
+        "scope": "configuration",
+    },
+    "non_durable_fields": {
+        "stream_index": "current_configuration_order",
+        "runtime_id": "process_lifetime",
+    },
+}
+TYPED_STREAM_TOOLS = {
+    "oe_list_streams": {
+        "backend_command": "get_processor",
+        "readback": "response.streams",
+    },
+    "oe_get_stream": {
+        "backend_command": "get_stream",
+        "readback": "response",
+    },
 }
 PARAMETER_NAME_SEGMENT_POLICY = {
     "field": "parameter_name",
@@ -173,6 +227,24 @@ def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) ->
         raise ValueError(
             "Open Ephys agent contract parameter name segment policy does not match the manifest."
         )
+
+    stream_response = (fixture.get("api") or {}).get("stream_response")
+    if stream_response != STREAM_RESPONSE_CONTRACT:
+        raise ValueError("Open Ephys agent contract stream response is invalid.")
+    if manifest.get("stream_response") != stream_response:
+        raise ValueError("Open Ephys agent contract stream response does not match the manifest.")
+
+    typed_tools = (fixture.get("api") or {}).get("typed_tools")
+    if typed_tools != TYPED_STREAM_TOOLS:
+        raise ValueError("Open Ephys agent contract typed stream tools are invalid.")
+    if manifest.get("typed_tools") != typed_tools:
+        raise ValueError("Open Ephys agent typed stream tools do not match the manifest.")
+
+    fixture_stream_rule = fixture_uia.get("stream_row_automation_id_rule")
+    if fixture_stream_rule != STREAM_ROW_AUTOMATION_ID_RULE:
+        raise ValueError("Open Ephys agent contract stream UIA rule is invalid.")
+    if manifest_uia.get("stream_row_automation_id_rule") != fixture_stream_rule:
+        raise ValueError("Open Ephys agent contract stream UIA rule does not match the manifest.")
 
     required_ids = fixture_uia.get("required_ids")
     if not isinstance(required_ids, list) or any(
@@ -380,6 +452,204 @@ def execute_command(
     return result
 
 
+def typed_stream_tool_schema(name: str) -> dict[str, Any]:
+    properties = {"processor_id": {"type": "integer", "minimum": 0}}
+    required = ["processor_id"]
+    if name == "oe_get_stream":
+        properties["stream_index"] = {"type": "integer", "minimum": 0}
+        required.append("stream_index")
+    return {
+        "type": "object",
+        "required": required,
+        "properties": properties,
+        "additionalProperties": False,
+    }
+
+
+def validate_typed_stream_arguments(name: str, arguments: dict[str, Any]) -> None:
+    if not isinstance(arguments, dict):
+        raise ValueError("Typed stream tool arguments must be an object.")
+    schema = typed_stream_tool_schema(name)
+    allowed = set(schema["properties"])
+    unexpected = set(arguments) - allowed
+    if unexpected:
+        raise ValueError(f"Unexpected typed stream argument(s): {', '.join(sorted(unexpected))}")
+    for field in schema["required"]:
+        value = arguments.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{field} must be a non-negative integer.")
+
+
+def _has_dotted_field(payload: dict[str, Any], dotted_field: str) -> bool:
+    current: Any = payload
+    for field in dotted_field.split("."):
+        if not isinstance(current, dict) or field not in current:
+            return False
+        current = current[field]
+    return True
+
+
+def _is_nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def parse_stream_row_automation_id(automation_id: Any) -> dict[str, Any] | None:
+    if not isinstance(automation_id, str):
+        return None
+    match = STREAM_ROW_AUTOMATION_ID_PATTERN.fullmatch(automation_id)
+    if match is None:
+        return None
+    collision_index = match.group("collision_index")
+    return {
+        "processor_id": int(match.group("processor_id")),
+        "source_id": int(match.group("source_id")),
+        "semantic_segment": match.group("semantic_segment"),
+        "collision_index": int(collision_index) if collision_index is not None else None,
+    }
+
+
+def validate_stream_response(
+    stream: Any,
+    *,
+    processor_id: int,
+    expected_stream_index: int,
+) -> dict[str, Any]:
+    if not isinstance(stream, dict):
+        raise ValueError("Open Ephys stream response must be an object.")
+    missing = [
+        field
+        for field in STREAM_RESPONSE_CONTRACT["required_fields"]
+        if not _has_dotted_field(stream, field)
+    ]
+    if missing:
+        raise ValueError(f"Open Ephys stream response is missing field(s): {', '.join(missing)}")
+
+    for field in ("name", "source_name", "description", "identifier"):
+        if not isinstance(stream[field], str):
+            raise ValueError(f"Open Ephys stream field {field} must be a string.")
+    for field in ("source_id", "channel_count", "stream_index", "runtime_id"):
+        if not _is_nonnegative_integer(stream[field]):
+            raise ValueError(f"Open Ephys stream field {field} must be a non-negative integer.")
+    sample_rate = stream["sample_rate"]
+    if (
+        isinstance(sample_rate, bool)
+        or not isinstance(sample_rate, (int, float))
+        or not math.isfinite(sample_rate)
+        or sample_rate <= 0
+    ):
+        raise ValueError("Open Ephys stream field sample_rate must be a positive number.")
+    if not isinstance(stream["parameters"], list):
+        raise ValueError("Open Ephys stream field parameters must be an array.")
+    if not isinstance(stream["generates_timestamps"], bool):
+        raise ValueError("Open Ephys stream field generates_timestamps must be a boolean.")
+    if stream["stream_index"] != expected_stream_index:
+        raise ValueError("Open Ephys stream_index does not match the requested current order.")
+
+    identity = stream["identity"]
+    if not isinstance(identity["available"], bool):
+        raise ValueError("Open Ephys stream identity.available must be a boolean.")
+    if identity["scope"] != "configuration":
+        raise ValueError("Open Ephys stream identity scope must be configuration.")
+    if not _is_nonnegative_integer(identity["source_id"]):
+        raise ValueError("Open Ephys stream identity.source_id must be a non-negative integer.")
+    if not isinstance(identity["identifier"], str):
+        raise ValueError("Open Ephys stream identity.identifier must be a string.")
+    if identity["source_id"] != stream["source_id"]:
+        raise ValueError("Open Ephys stream identity source_id does not match the stream.")
+    if identity["identifier"] != stream["identifier"]:
+        raise ValueError("Open Ephys stream identity identifier does not match the stream.")
+    if identity["available"] != bool(stream["identifier"]):
+        raise ValueError("Open Ephys stream identity availability does not match its identifier.")
+
+    uia = stream["uia"]
+    if uia["scope"] != "configuration":
+        raise ValueError("Open Ephys stream UIA scope must be configuration.")
+    if not isinstance(uia["uses_display_name_fallback"], bool):
+        raise ValueError("Open Ephys stream UIA fallback flag must be a boolean.")
+    if uia["uses_display_name_fallback"] != (stream["identifier"] == ""):
+        raise ValueError("Open Ephys stream UIA fallback does not match its identifier.")
+    parsed_locator = parse_stream_row_automation_id(uia["automation_id"])
+    if parsed_locator is None:
+        raise ValueError("Open Ephys stream UIA AutomationId is invalid.")
+    if parsed_locator["processor_id"] != processor_id:
+        raise ValueError("Open Ephys stream UIA processor id does not match the request.")
+    if parsed_locator["source_id"] != stream["source_id"]:
+        raise ValueError("Open Ephys stream UIA source id does not match the stream.")
+    if (
+        parsed_locator["collision_index"] is not None
+        and parsed_locator["collision_index"] != stream["stream_index"]
+    ):
+        raise ValueError("Open Ephys stream UIA collision index does not match stream_index.")
+    return parsed_locator
+
+
+def validate_stream_list_locators(parsed_locators: list[dict[str, Any]]) -> None:
+    base_counts: dict[tuple[int, int, str], int] = {}
+    for locator in parsed_locators:
+        key = (
+            locator["processor_id"],
+            locator["source_id"],
+            locator["semantic_segment"],
+        )
+        base_counts[key] = base_counts.get(key, 0) + 1
+    for locator in parsed_locators:
+        key = (
+            locator["processor_id"],
+            locator["source_id"],
+            locator["semantic_segment"],
+        )
+        has_collision = base_counts[key] > 1
+        if has_collision != (locator["collision_index"] is not None):
+            raise ValueError("Open Ephys stream UIA collision suffix does not match sibling locators.")
+
+
+def execute_typed_stream_tool(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    manifest: dict[str, Any],
+    base_url: str,
+) -> dict[str, Any]:
+    validate_typed_stream_arguments(name, arguments)
+    declaration = manifest["typed_tools"][name]
+    result = execute_command(
+        declaration["backend_command"],
+        arguments,
+        manifest=manifest,
+        base_url=base_url,
+    )
+    result["tool"] = name
+    result["backend_command"] = declaration["backend_command"]
+    result["readback"] = declaration["readback"]
+    if result.get("ok") is not True:
+        return result
+
+    if name == "oe_list_streams":
+        response = result.get("response")
+        if not isinstance(response, dict) or not isinstance(response.get("streams"), list):
+            raise ValueError("Open Ephys processor response must contain a streams array.")
+        if not _is_nonnegative_integer(response.get("id")):
+            raise ValueError("Open Ephys processor response id must be a non-negative integer.")
+        if response["id"] != arguments["processor_id"]:
+            raise ValueError("Open Ephys processor response id does not match the request.")
+        parsed_locators = [
+            validate_stream_response(
+                stream,
+                processor_id=arguments["processor_id"],
+                expected_stream_index=stream_index,
+            )
+            for stream_index, stream in enumerate(response["streams"])
+        ]
+        validate_stream_list_locators(parsed_locators)
+    else:
+        validate_stream_response(
+            result.get("response"),
+            processor_id=arguments["processor_id"],
+            expected_stream_index=arguments["stream_index"],
+        )
+    return result
+
+
 def mcp_tool_list(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     enum = sorted(command_index(manifest))
     return [
@@ -428,11 +698,24 @@ def mcp_tool_list(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                 ],
             },
         },
+        {
+            "name": "oe_list_streams",
+            "description": "List streams for one processor with configuration-scoped identity and UIA metadata.",
+            "inputSchema": typed_stream_tool_schema("oe_list_streams"),
+        },
+        {
+            "name": "oe_get_stream",
+            "description": "Read one stream by its current configuration order index.",
+            "inputSchema": typed_stream_tool_schema("oe_get_stream"),
+        },
     ]
 
 
-def text_result(payload: Any) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, sort_keys=True)}]}
+def text_result(payload: Any, *, is_error: bool = False) -> dict[str, Any]:
+    result = {"content": [{"type": "text", "text": json.dumps(payload, indent=2, sort_keys=True)}]}
+    if is_error:
+        result["isError"] = True
+    return result
 
 
 class McpServer:
@@ -492,6 +775,14 @@ class McpServer:
                     base_url=self.base_url,
                 )
             )
+        if name in self.manifest["typed_tools"]:
+            payload = execute_typed_stream_tool(
+                name,
+                arguments,
+                manifest=self.manifest,
+                base_url=self.base_url,
+            )
+            return text_result(payload, is_error=payload.get("ok") is not True)
         if name == "oe_uia_locator":
             capability = arguments.get("capability")
             automation_id = arguments.get("automation_id")
@@ -511,6 +802,8 @@ class McpServer:
                 rule = self.manifest["uia"]["parameter_automation_id_rule"]
             elif self._is_processor_catalog_automation_id(automation_id):
                 rule = self.manifest["uia"]["processor_catalog_automation_id_rule"]
+            elif self._is_stream_row_automation_id(automation_id):
+                rule = self.manifest["uia"]["stream_row_automation_id_rule"]
             else:
                 raise ValueError(
                     "AutomationId must match a declared dynamic UIA rule."
@@ -542,6 +835,10 @@ class McpServer:
             self.manifest["uia"]["processor_catalog_automation_id_rule"],
             "<sanitised processor slug>",
         )
+
+    @staticmethod
+    def _is_stream_row_automation_id(automation_id: Any) -> bool:
+        return parse_stream_row_automation_id(automation_id) is not None
 
     @staticmethod
     def _matches_dynamic_automation_id(

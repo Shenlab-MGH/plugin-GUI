@@ -68,7 +68,7 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
             bundle["bundle"],
             {
                 "id": "open-ephys-agent-native",
-                "version": "0.1.2",
+                "version": "0.1.3",
                 "platform": "windows",
                 "coverage": "contracted-core-only",
             },
@@ -175,8 +175,8 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
         contract = bundle["contract"]
 
         self.assertEqual(contract["id"], "open-ephys-agent")
-        self.assertEqual(contract["schema_version"], "0.1.2")
-        self.assertEqual(contract["version"], "0.1.2")
+        self.assertEqual(contract["schema_version"], "0.1.3")
+        self.assertEqual(contract["version"], "0.1.3")
         self.assertEqual(contract["fixture"], "agent_native/open_ephys_agent_contract_v1_0_2.json")
         self.assertEqual(surface["schema_version"], contract["schema_version"])
         self.assertEqual(fixture["schema_version"], contract["schema_version"])
