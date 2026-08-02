@@ -170,6 +170,30 @@ void LfpDisplayNode::setSplitDisplays (Array<LfpDisplaySplitter*> splits)
     splitDisplays = splits;
 }
 
+void LfpDisplayNode::clearSplitDisplays (
+    const Array<LfpDisplaySplitter*>&
+        expectedSplits)
+{
+    if (splitDisplays.size()
+        != expectedSplits.size())
+    {
+        return;
+    }
+
+    for (int index = 0;
+         index < splitDisplays.size();
+         ++index)
+    {
+        if (splitDisplays[index]
+            != expectedSplits[index])
+        {
+            return;
+        }
+    }
+
+    splitDisplays.clear();
+}
+
 uint16 LfpDisplayNode::getEventSourceId (const EventChannel* event)
 {
     return event->getStreamId();

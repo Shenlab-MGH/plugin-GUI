@@ -93,6 +93,9 @@ public:
     /** Sets an array of pointers to the 3 available split displays*/
     void setSplitDisplays (Array<LfpDisplaySplitter*>);
 
+    /** Clears split display pointers if they belong to a canvas being destroyed. */
+    void clearSplitDisplays (const Array<LfpDisplaySplitter*>&);
+
     /** Returns the latest sample number that triggered a given split display*/
     int64 getLatestTriggerTime (int splitId) const;
 

@@ -4808,6 +4808,8 @@ TEST_F (LfpDisplayNodeTests,
     }
 
     EXPECT_TRUE (
+        processor->stopAcquisition());
+    EXPECT_TRUE (
         invokeLfpActionFromWorker (
             retainedActions,
             AccessibilityActionType::

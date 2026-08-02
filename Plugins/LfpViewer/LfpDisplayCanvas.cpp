@@ -199,14 +199,25 @@ LfpDisplayCanvas::~LfpDisplayCanvas()
         retireOwnerState (
             stableChannelActionOwnerState);
 
+    Array<LfpDisplaySplitter*>
+        splitsBeingDestroyed;
     for (auto* split :
          displaySplits)
     {
+        splitsBeingDestroyed.add (
+            split);
         split->lfpDisplay
             ->invalidateStableChannelIdentities();
     }
 
-    if (! processor->getHeadlessMode())
+    if (processor != nullptr)
+    {
+        processor->clearSplitDisplays (
+            splitsBeingDestroyed);
+    }
+
+    if (processor != nullptr
+        && ! processor->getHeadlessMode())
     {
         juce::TopLevelWindow::getTopLevelWindow (0)->removeKeyListener (this);
     }
