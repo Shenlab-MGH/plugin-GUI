@@ -21,6 +21,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = ROOT / "open_ephys_agent_surface.json"
 DEFAULT_BASE_URL = "http://127.0.0.1:37497"
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -29,6 +30,55 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
 
 def command_index(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {command["name"]: command for command in manifest["commands"]}
+
+
+def command_capabilities(command: dict[str, Any]) -> list[str]:
+    capabilities = command.get("capabilities")
+    if capabilities is not None:
+        return list(capabilities)
+
+    capability = command.get("capability")
+    return [capability] if capability else []
+
+
+def validate_base_url(base_url: str) -> str:
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in LOOPBACK_HOSTS:
+        raise ValueError("Open Ephys MCP transport must use a loopback HTTP(S) URL.")
+    return base_url
+
+
+def validate_command_arguments(command: dict[str, Any], arguments: dict[str, Any]) -> None:
+    required_fields = command["http"].get("required_body_fields", [])
+    missing = [field for field in required_fields if field not in arguments]
+    if missing:
+        raise ValueError(f"Missing required field(s): {', '.join(missing)}")
+
+    constraints = command.get("constraints", {})
+    allowed_modes = constraints.get("mode")
+    if allowed_modes and "mode" in arguments and arguments["mode"] not in allowed_modes:
+        raise ValueError(f"Unsupported mode: {arguments['mode']}")
+
+    if arguments.get("mode") == "RECORD":
+        policy = constraints.get("record_policy", {})
+        confirmation_argument = policy.get("confirmation_argument", "confirm_recording")
+        if arguments.get(confirmation_argument) is not True:
+            raise ValueError(
+                "RECORD requires explicit confirmation in the current command arguments."
+            )
+
+
+def validate_raw_api_request(method: str, path: str, body: dict[str, Any] | None = None) -> None:
+    if not path.startswith("/api/"):
+        raise ValueError("Only /api/* paths are allowed.")
+
+    normalized_method = method.upper()
+    if normalized_method == "PUT" and path == "/api/quit":
+        raise ValueError("Raw application quit is not available through the MCP escape hatch.")
+
+    if path == "/api/status" and normalized_method == "PUT":
+        if body and body.get("mode") == "RECORD" and body.get("confirm_recording") is not True:
+            raise ValueError("Raw RECORD requests require confirm_recording=true.")
 
 
 def render_path(command: dict[str, Any], arguments: dict[str, Any]) -> str:
@@ -59,8 +109,8 @@ def call_http(
     base_url: str = DEFAULT_BASE_URL,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
-    if not path.startswith("/api/"):
-        raise ValueError("Only /api/* paths are allowed.")
+    validate_raw_api_request(method, path, body)
+    validate_base_url(base_url)
 
     url = base_url.rstrip("/") + path
     data = None
@@ -122,6 +172,7 @@ def execute_command(
 
     arguments = arguments or {}
     command = commands[name]
+    validate_command_arguments(command, arguments)
     path = render_path(command, arguments)
     result = call_http(
         command["http"]["method"],
@@ -131,7 +182,9 @@ def execute_command(
         timeout=timeout,
     )
     result["command"] = name
-    result["capability"] = command["capability"]
+    capabilities = command_capabilities(command)
+    result["capabilities"] = capabilities
+    result["capability"] = capabilities[0] if len(capabilities) == 1 else None
     result["operation"] = command["operation"]
     result["agent_command_style"] = "POST" if command.get("post_command") else command["http"]["method"]
     result["readback"] = command.get("readback")
@@ -189,7 +242,7 @@ def text_result(payload: Any) -> dict[str, Any]:
 
 class McpServer:
     def __init__(self, *, base_url: str = DEFAULT_BASE_URL, manifest_path: Path = DEFAULT_MANIFEST) -> None:
-        self.base_url = base_url
+        self.base_url = validate_base_url(base_url)
         self.manifest = load_manifest(manifest_path)
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:

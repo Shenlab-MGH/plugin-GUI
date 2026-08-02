@@ -18,6 +18,11 @@ Use this skill when controlling the Shenlab `plugin-GUI` fork as an agent.
 5. Stop on mismatched readback, unavailable controls, HTTP errors, or any GUI
    safety prompt that requires human approval.
 
+The MCP bridge accepts only loopback HTTP(S) endpoints. Composite recording
+settings report their individual directory, filename, and engine capability IDs;
+they are not the `oe.control.recording` start/stop toggle. A `RECORD` command
+also requires an explicit same-run `confirm_recording: true` argument.
+
 ## Safety boundaries
 
 - Treat `RECORD` as a high-risk action. Do not enter recording without explicit

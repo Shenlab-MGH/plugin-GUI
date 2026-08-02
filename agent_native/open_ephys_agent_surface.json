@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.1.1",
   "product": "Open Ephys GUI",
   "fork": "Shenlab-MGH/plugin-GUI",
   "baseline": {
@@ -40,12 +40,16 @@
       "http": {
         "method": "PUT",
         "path": "/api/status",
+        "required_body_fields": ["mode"],
         "body_fields": ["mode"]
       },
       "post_command": true,
       "constraints": {
         "mode": ["IDLE", "ACQUIRE", "RECORD"],
-        "record_policy": "Only request RECORD after explicit human approval and same-run readback; prefer UIA when a GUI safety prompt is required."
+        "record_policy": {
+          "confirmation_argument": "confirm_recording",
+          "message": "Only request RECORD after explicit human approval and same-run readback; prefer UIA when a GUI safety prompt is required."
+        }
       },
       "readback": "response.mode"
     },
@@ -72,14 +76,16 @@
     },
     {
       "name": "get_recording",
-      "capability": "oe.control.recording",
+      "capability": null,
+      "capabilities": ["oe.control.recording.directory", "oe.control.recording.filename", "oe.control.recording.engine"],
       "operation": "read",
       "http": { "method": "GET", "path": "/api/recording" },
       "readback": "response"
     },
     {
       "name": "set_recording",
-      "capability": "oe.control.recording",
+      "capability": null,
+      "capabilities": ["oe.control.recording.directory", "oe.control.recording.filename", "oe.control.recording.engine"],
       "operation": "set",
       "http": {
         "method": "PUT",

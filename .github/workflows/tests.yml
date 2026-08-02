@@ -9,6 +9,8 @@ on:
       - 'Resources/**'
       - 'Source/**'
       - 'Tests/**'
+      - 'agent_native/**'
+      - 'skills/**'
       - 'CMakeLists.txt'
       - 'HelperFunctions.cmake'
     branches:
@@ -26,6 +28,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+    - name: Run agent-native MCP contract tests
+      run: python3 -m unittest discover -s Tests/AgentNative -p 'test_*.py' -v
     - name: build
       env:
         CC: gcc-10

@@ -53,6 +53,81 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertEqual(result["agent_command_style"], "POST")
         self.assertEqual(result["capability"], "oe.control.acquisition")
 
+    def test_recording_settings_do_not_claim_the_record_toggle_identity(self):
+        settings_capabilities = {
+            "oe.control.recording.directory",
+            "oe.control.recording.filename",
+            "oe.control.recording.engine",
+        }
+        for name in ("get_recording", "set_recording"):
+            command = mcp.command_index(self.manifest)[name]
+            self.assertNotEqual(command.get("capability"), "oe.control.recording")
+            self.assertEqual(set(command["capabilities"]), settings_capabilities)
+
+    def test_set_mode_rejects_invalid_mode_without_http(self):
+        with mock.patch.object(mcp, "call_http") as call_http:
+            with self.assertRaises(ValueError):
+                mcp.execute_command(
+                    "set_mode",
+                    {"mode": "RUNNING"},
+                    manifest=self.manifest,
+                )
+
+        call_http.assert_not_called()
+
+    def test_set_mode_record_requires_explicit_confirmation(self):
+        with mock.patch.object(mcp, "call_http") as call_http:
+            with self.assertRaises(ValueError):
+                mcp.execute_command(
+                    "set_mode",
+                    {"mode": "RECORD"},
+                    manifest=self.manifest,
+                )
+
+            call_http.assert_not_called()
+            call_http.return_value = {"ok": True, "status": 200, "response": {"mode": "RECORD"}}
+            result = mcp.execute_command(
+                "set_mode",
+                {"mode": "RECORD", "confirm_recording": True},
+                manifest=self.manifest,
+            )
+
+        call_http.assert_called_once_with(
+            "PUT",
+            "/api/status",
+            {"mode": "RECORD"},
+            base_url=mcp.DEFAULT_BASE_URL,
+            timeout=5.0,
+        )
+        self.assertEqual(result["capability"], "oe.control.acquisition")
+
+    def test_raw_api_request_blocks_quit_and_unconfirmed_record(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+        with self.assertRaises(ValueError):
+            server._call_tool(
+                {
+                    "name": "oe_api_request",
+                    "arguments": {"method": "PUT", "path": "/api/quit"},
+                }
+            )
+
+        with self.assertRaises(ValueError):
+            server._call_tool(
+                {
+                    "name": "oe_api_request",
+                    "arguments": {
+                        "method": "PUT",
+                        "path": "/api/status",
+                        "body": {"mode": "RECORD"},
+                    },
+                }
+            )
+
+    def test_mcp_rejects_non_loopback_base_urls(self):
+        with self.assertRaises(ValueError):
+            mcp.validate_base_url("https://example.invalid")
+
     def test_mcp_lists_tools_and_resolves_uia_locator(self):
         server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
         response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
