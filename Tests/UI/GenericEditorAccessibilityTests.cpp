@@ -2285,6 +2285,101 @@ TEST (GenericEditorAccessibilityTests,
 }
 
 TEST (GenericEditorAccessibilityTests,
+      SharedStreamModelKeepsNormalAndExpandedChildIdsDistinctWhenCellsAreReused)
+{
+    TestStreamProcessor processor;
+    processor.setNodeId (100);
+    TestDataStream dotted ({ "Dotted AP", "", "probe.ap", 30000.0f, true }, 101);
+    TestDataStream underscored ({ "Underscored AP", "", "probe_ap", 30000.0f, true }, 101);
+    TestDataStream fallback ({ "Probe AP", "", "", 30000.0f, true }, 101);
+    InspectableGenericEditor editor (&processor);
+    auto& selector = editor.getStreamSelector();
+
+    StreamTableModel sharedModel (&selector);
+    std::unique_ptr<TableListBox> normalTable (
+        createAccessibleStreamTableListBox (
+            "Normal stream table",
+            sharedModel,
+            "oe.processor.100.streams.table"));
+    std::unique_ptr<TableListBox> expandedTable (
+        createAccessibleStreamTableListBox (
+            "Expanded stream table",
+            sharedModel,
+            "oe.processor.100.streams.expanded_table"));
+    normalTable->setComponentID ("oe.processor.100.streams.table");
+    expandedTable->setComponentID ("oe.processor.100.streams.expanded_table");
+
+    const auto addComponentColumns = [] (TableListBox& table)
+    {
+        table.getHeader().addColumn ("ON", StreamTableModel::Columns::ENABLED, 50);
+        table.getHeader().addColumn ("DELAY", StreamTableModel::Columns::DELAY, 70);
+        table.getHeader().addColumn ("TTL", StreamTableModel::Columns::TTL_LINE_STATES, 70);
+        table.getHeader().addColumn ("START", StreamTableModel::Columns::START_TIME, 70);
+        table.getHeader().addColumn ("LATEST", StreamTableModel::Columns::LATEST_SYNC, 70);
+        table.getHeader().addColumn ("SYNC", StreamTableModel::Columns::SYNC_ACCURACY, 70);
+    };
+    addComponentColumns (*normalTable);
+    addComponentColumns (*expandedTable);
+
+    Component host;
+    host.addAndMakeVisible (*normalTable);
+    host.addAndMakeVisible (*expandedTable);
+    host.setBounds (0, 0, 900, 300);
+    normalTable->setBounds (0, 0, 430, 200);
+    expandedTable->setBounds (450, 0, 430, 200);
+
+    sharedModel.table = normalTable.get();
+    sharedModel.update ({ &dotted, &underscored, &fallback });
+    expandedTable->updateContent();
+
+    struct CellExpectation
+    {
+        int column;
+        const char* suffix;
+    };
+    const CellExpectation expectations[] {
+        { StreamTableModel::Columns::ENABLED, "processing_enabled" },
+        { StreamTableModel::Columns::DELAY, "processing_delay" },
+        { StreamTableModel::Columns::TTL_LINE_STATES, "ttl_lines" },
+        { StreamTableModel::Columns::START_TIME, "sync_start_offset" },
+        { StreamTableModel::Columns::LATEST_SYNC, "last_sync_event" },
+        { StreamTableModel::Columns::SYNC_ACCURACY, "sync_accuracy" }
+    };
+
+    std::array<Component*, 6> originalNormalChildren {};
+    for (size_t index = 0; index < std::size (expectations); ++index)
+    {
+        originalNormalChildren[index] = normalTable->getCellComponent (
+            expectations[index].column, 1);
+        ASSERT_NE (originalNormalChildren[index], nullptr);
+    }
+
+    sharedModel.table = expandedTable.get();
+    expandedTable->updateContent();
+    normalTable->updateContent();
+
+    for (size_t index = 0; index < std::size (expectations); ++index)
+    {
+        auto* normalChild = normalTable->getCellComponent (
+            expectations[index].column, 1);
+        auto* expandedChild = expandedTable->getCellComponent (
+            expectations[index].column, 1);
+        ASSERT_NE (normalChild, nullptr);
+        ASSERT_NE (expandedChild, nullptr);
+        EXPECT_EQ (normalChild, originalNormalChildren[index]);
+        EXPECT_EQ (
+            normalChild->getComponentID(),
+            "oe.processor.100.streams.table.source_101.stream_probe_ap.index_1."
+                + String (expectations[index].suffix));
+        EXPECT_EQ (
+            expandedChild->getComponentID(),
+            "oe.processor.100.streams.expanded_table.source_101.stream_probe_ap.index_1."
+                + String (expectations[index].suffix));
+        EXPECT_NE (normalChild->getComponentID(), expandedChild->getComponentID());
+    }
+}
+
+TEST (GenericEditorAccessibilityTests,
       PublishesCurrentStreamAsReadOnlyValue)
 {
     ScopedGenericEditorTestApplication application;

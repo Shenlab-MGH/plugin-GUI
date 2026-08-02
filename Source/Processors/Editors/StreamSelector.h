@@ -50,6 +50,7 @@ class ExpandedTableComponent;
 
 class StreamSelectorTable;
 class StreamSelectorAccessibilityValueState;
+class AccessibleStreamTableListBox;
 
 /**
 *   TableListBoxModel for selecting streams
@@ -119,8 +120,11 @@ public:
     TableListBox* table;
 
 private:
+    friend class AccessibleStreamTableListBox;
+
     Array<const DataStream*> streams;
     StringArray streamSemanticSegments;
+    String currentTableSemanticId;
 
     StreamSelectorTable* owner;
 
@@ -128,6 +132,12 @@ private:
 
     bool acquisitionIsActive;
 };
+
+/** Creates a stream table whose cell UIA metadata is scoped to that view. */
+TESTABLE TableListBox* createAccessibleStreamTableListBox (
+    const String& name,
+    StreamTableModel& model,
+    String semanticId);
 
 /**
 

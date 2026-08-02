@@ -542,6 +542,8 @@ StreamEnableButtonAccessibilityHandler::
             });
 }
 
+} // namespace
+
 class AccessibleStreamTableListBox final : public TableListBox
 {
 public:
@@ -560,6 +562,9 @@ public:
         bool isRowSelected,
         Component* existingComponentToUpdate) override
     {
+        const ScopedValueSetter<String> semanticTableScope (
+            streamModel.currentTableSemanticId,
+            tableSemanticId);
         auto* row = TableListBox::refreshComponentForRow (
             rowNumber,
             isRowSelected,
@@ -587,9 +592,19 @@ public:
 
 private:
     StreamTableModel& streamModel;
-    String tableSemanticId;
+    const String tableSemanticId;
 };
-} // namespace
+
+TableListBox* createAccessibleStreamTableListBox (
+    const String& name,
+    StreamTableModel& model,
+    String semanticId)
+{
+    return new AccessibleStreamTableListBox (
+        name,
+        model,
+        std::move (semanticId));
+}
 
 StreamTableModel::StreamTableModel (StreamSelectorTable* owner_)
     : owner (owner_)
@@ -633,7 +648,9 @@ Component* StreamTableModel::refreshComponentForCell (int rowNumber,
     const auto rowSemanticId =
         getSemanticIdForRow (
             rowNumber,
-            table->getComponentID());
+            currentTableSemanticId.isNotEmpty()
+                ? currentTableSemanticId
+                : table->getComponentID());
 
     if (columnId == StreamTableModel::Columns::DELAY)
     {
@@ -939,7 +956,7 @@ TableListBox* StreamSelectorTable::createTableView (bool expanded)
     const auto processorId = editor->getProcessor()->getNodeId();
     const auto semanticId = getStreamSelectorSemanticId (*editor)
                             + (expanded ? ".expanded_table" : ".table");
-    TableListBox* table = new AccessibleStreamTableListBox (
+    TableListBox* table = createAccessibleStreamTableListBox (
         "Stream Table",
         *tableModel,
         semanticId);
