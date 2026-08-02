@@ -738,7 +738,14 @@ def mcp_tool_list(manifest: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def text_result(payload: Any, *, is_error: bool = False) -> dict[str, Any]:
-    result = {"content": [{"type": "text", "text": json.dumps(payload, indent=2, sort_keys=True)}]}
+    result = {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(payload, indent=2, sort_keys=True, allow_nan=False),
+            }
+        ]
+    }
     if is_error:
         result["isError"] = True
     return result
@@ -812,7 +819,11 @@ class McpServer:
         if not isinstance(request, dict) or "id" not in request:
             return None
         request_id = request["id"]
-        if isinstance(request_id, bool) or not isinstance(request_id, (str, int, float, type(None))):
+        if (
+            isinstance(request_id, bool)
+            or not isinstance(request_id, (str, int, float, type(None)))
+            or (isinstance(request_id, float) and not math.isfinite(request_id))
+        ):
             return None
         return request_id
 
@@ -835,11 +846,14 @@ class McpServer:
         if "id" in request and (
             isinstance(request["id"], bool)
             or not isinstance(request["id"], (str, int, float, type(None)))
+            or (isinstance(request["id"], float) and not math.isfinite(request["id"]))
         ):
             raise JsonRpcError(-32600, "Invalid Request")
 
     def _validate_known_method_params(self, method: str, request: dict[str, Any]) -> None:
         if not self._params_are_an_object(request):
+            raise InvalidParamsError()
+        if method == "tools/call" and not isinstance(request.get("params"), dict):
             raise InvalidParamsError()
         if method == "initialize":
             params = request.get("params")
@@ -1059,12 +1073,23 @@ class McpServer:
         )
 
 
+def decode_stdio_line(line: str) -> Any:
+    def reject_nonstandard_constant(constant: str) -> None:
+        raise json.JSONDecodeError(
+            f"Invalid constant: {constant}",
+            line,
+            line.find(constant),
+        )
+
+    return json.loads(line, parse_constant=reject_nonstandard_constant)
+
+
 def run_stdio(server: McpServer) -> None:
     for line in sys.stdin:
         if not line.strip():
             continue
         try:
-            request = json.loads(line)
+            request = decode_stdio_line(line)
         except json.JSONDecodeError:
             response = {
                 "jsonrpc": "2.0",
@@ -1074,7 +1099,9 @@ def run_stdio(server: McpServer) -> None:
         else:
             response = server.handle(request)
         if response is not None:
-            sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
+            sys.stdout.write(
+                json.dumps(response, separators=(",", ":"), allow_nan=False) + "\n"
+            )
             sys.stdout.flush()
 
 

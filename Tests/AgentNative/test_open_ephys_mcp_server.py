@@ -193,6 +193,13 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertEqual(malformed["error"]["code"], -32602)
         self.assertEqual(unknown_tool["error"]["code"], -32602)
 
+    def test_tools_call_requires_params_object_when_ready(self):
+        server = self.initialized_server()
+
+        response = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call"})
+
+        self.assertEqual(response["error"], {"code": -32602, "message": "Invalid params"})
+
     def test_raw_api_request_rejects_unsupported_methods_as_invalid_params(self):
         server = self.initialized_server()
         with mock.patch.object(
@@ -216,17 +223,35 @@ class AgentNativeManifestTests(unittest.TestCase):
     def test_raw_api_request_rejects_nonobject_bodies_as_invalid_params(self):
         server = self.initialized_server()
 
-        response = server.handle({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "oe_api_request",
-                "arguments": {"method": "PUT", "path": "/api/status", "body": [1]},
-            },
-        })
+        with mock.patch.object(mcp, "call_http") as call_http:
+            response = server.handle({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "oe_api_request",
+                    "arguments": {"method": "PUT", "path": "/api/status", "body": [1]},
+                },
+            })
 
         self.assertEqual(response["error"]["code"], -32602)
+        call_http.assert_not_called()
+
+    def test_nonfinite_request_ids_are_invalid_requests(self):
+        server = self.initialized_server()
+        for request_id in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(request_id=request_id):
+                response = server.handle({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/list",
+                })
+
+                self.assertEqual(response, {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32600, "message": "Invalid Request"},
+                })
 
     def test_unexpected_value_errors_are_internal_errors(self):
         server = self.initialized_server()
@@ -281,6 +306,25 @@ class AgentNativeManifestTests(unittest.TestCase):
             "id": None,
             "error": {"code": -32700, "message": "Parse error"},
         })
+        self.assertEqual(responses[1]["result"]["protocolVersion"], "2024-11-05")
+
+    def test_stdio_recovers_from_nonstandard_numeric_constants(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        nan_line = json.dumps(self.initialize_request(request_id=float("nan")))
+        initialize_line = json.dumps(self.initialize_request(request_id=2))
+        stdin = io.StringIO(nan_line + "\n" + initialize_line + "\n")
+        stdout = io.StringIO()
+
+        with mock.patch.object(mcp.sys, "stdin", stdin), mock.patch.object(mcp.sys, "stdout", stdout):
+            mcp.run_stdio(server)
+
+        responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual(responses[0], {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {"code": -32700, "message": "Parse error"},
+        })
+        self.assertEqual(responses[1]["id"], 2)
         self.assertEqual(responses[1]["result"]["protocolVersion"], "2024-11-05")
 
     def test_manifest_has_unique_commands_and_no_screenshot_control(self):
