@@ -73,12 +73,20 @@ AudioComponent::AudioComponent() : isPlaying (false)
     // the error string doesn't tell you if there's no audio device found...
     if (aIOd == 0)
     {
-        String titleMessage = String ("No audio device found");
-        String contentMessage = String ("Couldn't find an audio device. ") + String ("Perhaps some other program has control of the default one.");
-        AlertWindow::showMessageBox (AlertWindow::InfoIcon,
-                                     titleMessage,
-                                     contentMessage);
-        JUCEApplication::quit();
+        LOGE ("No audio device found.");
+        graphPlayer = std::make_unique<AudioProcessorPlayer>();
+
+        if (JUCEApplicationBase::getInstance() != nullptr)
+        {
+            String titleMessage = String ("No audio device found");
+            String contentMessage = String ("Couldn't find an audio device. ") + String ("Perhaps some other program has control of the default one.");
+            AlertWindow::showMessageBox (AlertWindow::InfoIcon,
+                                         titleMessage,
+                                         contentMessage);
+            JUCEApplication::quit();
+        }
+
+        return;
     }
 
     String devName = aIOd->getName();
