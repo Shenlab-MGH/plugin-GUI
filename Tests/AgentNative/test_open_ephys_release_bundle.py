@@ -1,7 +1,8 @@
 import json
 import re
+import subprocess
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import sys
 
@@ -11,10 +12,33 @@ BUNDLE_PATH = ROOT / "agent_native" / "open_ephys_agent_release_bundle.json"
 SURFACE_PATH = ROOT / "agent_native" / "open_ephys_agent_surface.json"
 FIXTURE_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2.json"
 INSTALLER_PATH = ROOT / "Resources" / "Installers" / "Windows" / "windows_installer_script.iss"
+TESTS_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
 
 sys.path.insert(0, str(ROOT / "agent_native"))
 
 import open_ephys_mcp_server as mcp
+
+
+def repository_artifact_path(root, artifact):
+    if not isinstance(artifact, str) or not artifact:
+        raise ValueError("Artifact path must be a non-empty string")
+
+    posix_path = PurePosixPath(artifact)
+    windows_path = PureWindowsPath(artifact)
+    if (
+        "\\" in artifact
+        or posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or ".." in posix_path.parts
+        or ".." in windows_path.parts
+    ):
+        raise ValueError(f"Artifact path must be repository-relative POSIX syntax: {artifact}")
+
+    resolved = (root / Path(*posix_path.parts)).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ValueError(f"Artifact path escapes repository: {artifact}")
+    return resolved
 
 
 class OpenEphysReleaseBundleTests(unittest.TestCase):
@@ -29,6 +53,10 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
         bundle = self.load_bundle()
 
         self.assertEqual(bundle["format_version"], "1.0.0")
+        self.assertEqual(
+            bundle.get("format_semantics"),
+            "Repository-local document shape for this release bundle; versioned independently from the agent contract.",
+        )
         self.assertEqual(
             bundle["bundle"],
             {
@@ -65,11 +93,44 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
         self.assertIsNotNone(cmake_match, "CMake GUI_VERSION is missing")
         self.assertEqual(cmake_match.group(1), expected_version)
 
-        if INSTALLER_PATH.is_file():
-            installer = INSTALLER_PATH.read_text(encoding="utf-8")
-            installer_match = re.search(r"^AppVersion=(.+)$", installer, re.MULTILINE)
-            self.assertIsNotNone(installer_match, "Windows installer AppVersion is missing")
-            self.assertEqual(installer_match.group(1).strip(), expected_version)
+        self.assertTrue(INSTALLER_PATH.is_file(), f"Missing authoritative installer: {INSTALLER_PATH}")
+        installer = INSTALLER_PATH.read_text(encoding="utf-8")
+        installer_match = re.search(r"^AppVersion=(.+)$", installer, re.MULTILINE)
+        self.assertIsNotNone(installer_match, "Windows installer AppVersion is missing")
+        self.assertEqual(installer_match.group(1).strip(), expected_version)
+
+    def test_upstream_tag_resolves_to_bundle_commit_and_is_ancestral(self):
+        bundle = self.load_bundle()
+        upstream = bundle["official_upstream"]
+        tagged_commit = subprocess.run(
+            ["git", "rev-parse", "--verify", f"refs/tags/{upstream['tag']}^{{commit}}"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        self.assertEqual(tagged_commit, upstream["commit"])
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", upstream["commit"], "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            ancestry.returncode,
+            0,
+            ancestry.stderr or f"{upstream['commit']} is not an ancestor of HEAD",
+        )
+
+    def test_unit_ci_fetches_history_required_for_provenance(self):
+        workflow = TESTS_WORKFLOW_PATH.read_text(encoding="utf-8")
+        unit_job = workflow.split("\n  integration-tests:", maxsplit=1)[0]
+
+        self.assertRegex(
+            unit_job,
+            r"(?m)^    - uses: actions/checkout@v4[ \t]*\n      with:[ \t]*\n        fetch-depth: 0[ \t]*$",
+        )
 
     def test_bundle_baseline_matches_surface_and_fixture(self):
         bundle = self.load_bundle()
@@ -84,15 +145,11 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
         self.assertEqual(surface["baseline"], expected_baseline)
         self.assertEqual(fixture["baseline"], expected_baseline)
 
-    def test_contract_identity_is_synchronized_across_all_machine_sources(self):
+    def test_contract_identity_matches_surface_fixture_and_mcp_machine_sources(self):
         bundle = self.load_bundle()
         surface = json.loads(SURFACE_PATH.read_text(encoding="utf-8"))
         fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         contract = bundle["contract"]
-        expected_requirement = {
-            "id": contract["id"],
-            "version": contract["version"],
-        }
 
         self.assertEqual(contract["id"], "open-ephys-agent")
         self.assertEqual(contract["schema_version"], "0.1.2")
@@ -108,9 +165,23 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
         self.assertEqual(mcp.SUPPORTED_CONTRACT_ID, contract["id"])
         self.assertEqual(mcp.SUPPORTED_CONTRACT_VERSION, contract["version"])
 
+    def test_components_declare_contract_compatibility_without_overclaiming_source_proof(self):
+        bundle = self.load_bundle()
+        contract = bundle["contract"]
+        expected_requirement = {"id": contract["id"], "version": contract["version"]}
+        expected_evidence = {
+            "api": "declared-compatibility",
+            "uia": "declared-compatibility",
+            "mcp": "machine-synchronized",
+            "skill": "declared-compatibility",
+        }
+
         for component_name, component in bundle["components"].items():
             with self.subTest(component=component_name):
                 self.assertEqual(component["requires_contract"], expected_requirement)
+                self.assertEqual(component.get("contract_evidence"), expected_evidence[component_name])
+
+        self.assertEqual(bundle["components"]["skill"]["source_contract_pin"], "prose")
 
     def test_component_artifacts_are_existing_repository_files(self):
         bundle = self.load_bundle()
@@ -118,16 +189,27 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
         self.assertEqual(set(bundle["components"]), {"api", "uia", "mcp", "skill"})
         for component_name, component in bundle["components"].items():
             artifact = component["artifact"]
-            artifact_path = Path(artifact)
             with self.subTest(component=component_name, artifact=artifact):
-                self.assertNotIn("\\", artifact, "Artifact paths must use repository-relative POSIX syntax")
-                self.assertFalse(artifact_path.is_absolute())
-                self.assertNotIn("..", artifact_path.parts)
-                resolved = (ROOT / artifact_path).resolve()
-                self.assertTrue(resolved.is_relative_to(ROOT.resolve()))
+                resolved = repository_artifact_path(ROOT, artifact)
                 self.assertTrue(resolved.is_file(), f"Missing component artifact: {artifact}")
 
-        self.assertEqual(bundle["components"]["skill"]["source_contract_pin"], "prose")
+    def test_artifact_path_validator_rejects_posix_and_windows_escape_forms(self):
+        invalid_paths = (
+            "../outside",
+            "nested/../../outside",
+            "/absolute/path",
+            "C:/absolute/path",
+            "C:drive-relative",
+            "folder\\windows-separator",
+            "\\rooted",
+            "\\\\server\\share\\file",
+            "//server/share/file",
+        )
+
+        for artifact in invalid_paths:
+            with self.subTest(artifact=artifact):
+                with self.assertRaises(ValueError):
+                    repository_artifact_path(ROOT, artifact)
 
     def test_mcp_metadata_matches_running_initialize_behavior(self):
         bundle = self.load_bundle()
