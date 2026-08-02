@@ -11826,8 +11826,12 @@ TEST_F (LfpDisplayNodeTests,
     EXPECT_FALSE (
         LfpChannelSelectionProbe::read (
             *source));
-    EXPECT_FALSE (
-        target->getInputInverted());
+    const auto inversionBeforeDirectAction =
+        target->getInputInverted();
+    target->changeParameter (1);
+    EXPECT_NE (
+        target->getInputInverted(),
+        inversionBeforeDirectAction);
     for (int index = 0;
          index < display->channels.size();
          ++index)

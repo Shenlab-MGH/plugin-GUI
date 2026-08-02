@@ -632,6 +632,7 @@ TEST_F (ParameterEditorAccessibilityTests,
 
     TrackingMessageThreadComboBox comboBox;
     TextButton sibling ("Sibling");
+    sibling.setWantsKeyboardFocus (true);
     comboBox.setEditableText (true);
     comboBox.addItem ("OFF", 1);
     comboBox.addItem ("-100", 2);
