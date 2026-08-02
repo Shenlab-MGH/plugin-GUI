@@ -1,7 +1,7 @@
 {
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "fixture": "open_ephys_agent_contract_v1_0_2.json"
   },
   "baseline": {
@@ -17,6 +17,19 @@
   "api": {
     "route_source": "agent_native/open_ephys_agent_surface.json",
     "command_count": 33,
+    "parameter_response": {
+      "required_fields": [
+        "name",
+        "type",
+        "value",
+        "key",
+        "display_name",
+        "description",
+        "enabled",
+        "deactivate_during_acquisition",
+        "uia.automation_id"
+      ]
+    },
     "required_routes": [
       {
         "command": "get_capabilities",
@@ -70,6 +83,7 @@
   },
   "uia": {
     "root_id": "oe.window.main",
+    "parameter_automation_id_rule": "oe.parameter.<sanitised parameter key>",
     "required_ids": [
       {
         "id": "oe.window.main",

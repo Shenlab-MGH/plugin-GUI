@@ -9,13 +9,26 @@
   },
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "fixture": "open_ephys_agent_contract_v1_0_2.json"
   },
   "transport": {
     "http_base_url": "http://127.0.0.1:37497",
     "windows_uia": true,
     "screenshot_control": "not_required"
+  },
+  "parameter_response": {
+    "required_fields": [
+      "name",
+      "type",
+      "value",
+      "key",
+      "display_name",
+      "description",
+      "enabled",
+      "deactivate_during_acquisition",
+      "uia.automation_id"
+    ]
   },
   "principles": [
     "Prefer the HTTP API for state and deterministic commands.",
@@ -369,6 +382,7 @@
   ],
   "uia": {
     "automation_id_rule": "Capability id is the Windows UIA AutomationId when the control exists in the visible GUI tree.",
+    "parameter_automation_id_rule": "oe.parameter.<sanitised parameter key>",
     "root_id": "oe.window.main",
     "capability_ids": [
       "oe.control.acquisition",
@@ -387,7 +401,7 @@
       "oe.control.recording",
       "oe.control.recording.options",
       "oe.processor_catalog.<processor_slug>",
-      "oe.processor.<node_id>.parameter.<parameter_key>"
+      "oe.parameter.<sanitised parameter key>"
     ]
   }
 }

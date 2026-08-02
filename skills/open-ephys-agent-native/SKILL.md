@@ -24,7 +24,7 @@ they are not the `oe.control.recording` start/stop toggle. A `RECORD` command
 also requires an explicit same-run `confirm_recording: true` argument.
 
 The OE agent surface is versioned as a contract. For the current Windows
-baseline, use the `open-ephys-agent` contract `0.1.0` against Open Ephys GUI
+baseline, use the `open-ephys-agent` contract `0.1.1` against Open Ephys GUI
 `1.0.2` (commit `c91afebcfb0678a667fb93f6312ed33c56ec640f`). Keep these files
 together and reject a mixed-version setup:
 
@@ -37,6 +37,20 @@ The manifest is the source of truth for the full API route list. The contract
 fixture intentionally checks only the core parity slice; API-only commands and
 GUI-only UIA controls remain explicit in their respective surfaces and must not
 be assumed to have a one-to-one mapping.
+
+## Parameter UIA workflow
+
+Before locating a parameter in the GUI, call `get_processor_parameters`,
+`get_stream_parameters`, `get_parameter`, or `get_stream_parameter` first.
+Each parameter response includes `key`, `display_name`, `description`,
+`enabled`, `deactivate_during_acquisition`, and `uia.automation_id` alongside
+the legacy `name`, `type`, and string `value` fields. Pass that returned
+`uia.automation_id` to `oe_uia_locator` as `automation_id`.
+
+Parameter AutomationIds follow `oe.parameter.<sanitised parameter key>`, but
+do not construct or guess them from a parameter name or key. The API response
+is the authority. Generic route capabilities such as `oe.processor.parameter`
+are not parameter UIA AutomationIds and cannot be passed to `oe_uia_locator`.
 
 ## Safety boundaries
 

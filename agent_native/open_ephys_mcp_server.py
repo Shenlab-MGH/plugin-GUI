@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -22,6 +23,18 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = ROOT / "open_ephys_agent_surface.json"
 DEFAULT_BASE_URL = "http://127.0.0.1:37497"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+PARAMETER_AUTOMATION_ID_RULE = "oe.parameter.<sanitised parameter key>"
+PARAMETER_RESPONSE_REQUIRED_FIELDS = [
+    "name",
+    "type",
+    "value",
+    "key",
+    "display_name",
+    "description",
+    "enabled",
+    "deactivate_during_acquisition",
+    "uia.automation_id",
+]
 
 
 def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
@@ -90,6 +103,20 @@ def validate_manifest_contract(manifest: dict[str, Any], manifest_path: Path) ->
     fixture_uia = fixture.get("uia") or {}
     if fixture_uia.get("root_id") != manifest_uia.get("root_id"):
         raise ValueError("Open Ephys agent contract UIA root does not match the manifest.")
+
+    fixture_parameter_rule = fixture_uia.get("parameter_automation_id_rule")
+    if fixture_parameter_rule != PARAMETER_AUTOMATION_ID_RULE:
+        raise ValueError("Open Ephys agent contract parameter UIA rule is invalid.")
+    if manifest_uia.get("parameter_automation_id_rule") != fixture_parameter_rule:
+        raise ValueError("Open Ephys agent contract parameter UIA rule does not match the manifest.")
+
+    parameter_response = (fixture.get("api") or {}).get("parameter_response")
+    if not isinstance(parameter_response, dict) or (
+        parameter_response.get("required_fields") != PARAMETER_RESPONSE_REQUIRED_FIELDS
+    ):
+        raise ValueError("Open Ephys agent contract parameter response is invalid.")
+    if manifest.get("parameter_response") != parameter_response:
+        raise ValueError("Open Ephys agent contract parameter response does not match the manifest.")
 
     required_ids = fixture_uia.get("required_ids")
     if not isinstance(required_ids, list) or any(
@@ -312,11 +339,17 @@ def mcp_tool_list(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         },
         {
             "name": "oe_uia_locator",
-            "description": "Resolve a capability id to its Windows UIA AutomationId contract.",
+            "description": "Resolve an allowlisted capability id or API-returned parameter AutomationId.",
             "inputSchema": {
                 "type": "object",
-                "required": ["capability"],
-                "properties": {"capability": {"type": "string"}},
+                "properties": {
+                    "capability": {"type": "string"},
+                    "automation_id": {"type": "string"},
+                },
+                "oneOf": [
+                    {"required": ["capability"]},
+                    {"required": ["automation_id"]},
+                ],
             },
         },
     ]
@@ -339,7 +372,10 @@ class McpServer:
                 result = {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "open-ephys-agent-native", "version": "0.1.0"},
+                    "serverInfo": {
+                        "name": "open-ephys-agent-native",
+                        "version": self.manifest["contract"]["version"],
+                    },
                 }
             elif method == "tools/list":
                 result = {"tools": mcp_tool_list(self.manifest)}
@@ -381,17 +417,43 @@ class McpServer:
                 )
             )
         if name == "oe_uia_locator":
-            capability = arguments["capability"]
+            capability = arguments.get("capability")
+            automation_id = arguments.get("automation_id")
+            if capability is not None and automation_id is not None:
+                raise ValueError("Provide either capability or automation_id, not both.")
+
+            if capability is not None:
+                allowed_capabilities = set(self.manifest["uia"]["capability_ids"])
+                if capability not in allowed_capabilities:
+                    raise ValueError("UIA capability is not allowlisted by the manifest.")
+                automation_id = capability
+            elif not self._is_parameter_automation_id(automation_id):
+                raise ValueError("Parameter AutomationId must match the declared parameter UIA rule.")
+
+            payload = {
+                "automation_id": automation_id,
+                "transport": "windows_uia",
+                "rule": (
+                    self.manifest["uia"]["automation_id_rule"]
+                    if capability is not None
+                    else self.manifest["uia"]["parameter_automation_id_rule"]
+                ),
+                "inspect_script": self.manifest["uia"]["script"],
+            }
+            if capability is not None:
+                payload["capability"] = capability
             return text_result(
-                {
-                    "capability": capability,
-                    "automation_id": capability,
-                    "transport": "windows_uia",
-                    "rule": self.manifest["uia"]["automation_id_rule"],
-                    "inspect_script": self.manifest["uia"]["script"],
-                }
+                payload
             )
         raise ValueError(f"Unknown tool: {name}")
+
+    def _is_parameter_automation_id(self, automation_id: Any) -> bool:
+        if not isinstance(automation_id, str):
+            return False
+
+        rule = self.manifest["uia"]["parameter_automation_id_rule"]
+        prefix = rule.removesuffix("<sanitised parameter key>")
+        return re.fullmatch(re.escape(prefix) + r"[a-z0-9]+(?:_[a-z0-9]+)*", automation_id) is not None
 
 
 def run_stdio(server: McpServer) -> None:

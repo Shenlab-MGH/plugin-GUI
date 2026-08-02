@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "agent_native"))
 
 CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2.json"
+SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
 
 import open_ephys_mcp_server as mcp
 
@@ -137,6 +138,14 @@ class AgentNativeManifestTests(unittest.TestCase):
         tool_names = {tool["name"] for tool in response["result"]["tools"]}
         self.assertIn("oe_post_command", tool_names)
         self.assertIn("oe_uia_locator", tool_names)
+        uia_tool = next(tool for tool in response["result"]["tools"] if tool["name"] == "oe_uia_locator")
+        self.assertIn("automation_id", uia_tool["inputSchema"]["properties"])
+        self.assertNotIn("required", uia_tool["inputSchema"])
+        self.assertEqual(
+            uia_tool["inputSchema"]["oneOf"],
+            [{"required": ["capability"]}, {"required": ["automation_id"]}],
+        )
+        self.assertNotIn("anyOf", uia_tool["inputSchema"])
 
         response = server.handle(
             {
@@ -152,6 +161,53 @@ class AgentNativeManifestTests(unittest.TestCase):
         payload = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(payload["automation_id"], "oe.control.recording")
         self.assertEqual(payload["transport"], "windows_uia")
+        self.assertEqual(payload["rule"], self.manifest["uia"]["automation_id_rule"])
+
+    def test_mcp_initialize_derives_server_version_from_loaded_contract(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+        response = server.handle({"jsonrpc": "2.0", "id": 3, "method": "initialize"})
+
+        self.assertEqual(response["result"]["serverInfo"]["version"], "0.1.1")
+
+    def test_uia_locator_allows_only_declared_static_ids_or_parameter_automation_ids(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+        dynamic_response = server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": "oe_uia_locator",
+                    "arguments": {"automation_id": "oe.parameter.gain"},
+                },
+            }
+        )
+        self.assertNotIn("error", dynamic_response)
+        dynamic_payload = json.loads(dynamic_response["result"]["content"][0]["text"])
+        self.assertEqual(dynamic_payload["automation_id"], "oe.parameter.gain")
+        self.assertEqual(
+            dynamic_payload["rule"],
+            server.manifest["uia"]["parameter_automation_id_rule"],
+        )
+
+        for invalid_arguments in (
+            {"capability": "oe.processor.parameter"},
+            {"automation_id": "oe.control.recording"},
+            {"automation_id": "oe.parameter."},
+            {"automation_id": "anything-else"},
+        ):
+            with self.subTest(arguments=invalid_arguments):
+                response = server.handle(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 5,
+                        "method": "tools/call",
+                        "params": {"name": "oe_uia_locator", "arguments": invalid_arguments},
+                    }
+                )
+                self.assertIn("error", response)
 
 
 class AgentNativeContractParityTests(unittest.TestCase):
@@ -163,7 +219,7 @@ class AgentNativeContractParityTests(unittest.TestCase):
     def test_contract_metadata_matches_manifest_baseline_and_version(self):
         contract = self.contract["contract"]
         self.assertEqual(contract["id"], "open-ephys-agent")
-        self.assertRegex(contract["version"], r"^\d+\.\d+\.\d+$")
+        self.assertEqual(contract["version"], "0.1.1")
         self.assertEqual(self.contract["scope"], "core")
         self.assertEqual(self.manifest["contract"], contract)
         self.assertEqual(self.manifest["baseline"], self.contract["baseline"])
@@ -171,6 +227,39 @@ class AgentNativeContractParityTests(unittest.TestCase):
             self.manifest["transport"]["http_base_url"],
             self.contract["transport"]["http_base_url"],
         )
+
+    def test_contract_declares_parameter_response_and_dynamic_uia_rule(self):
+        self.assertIn("parameter_response", self.contract["api"])
+        self.assertIn("parameter_response", self.manifest)
+        parameter_response = self.contract["api"]["parameter_response"]
+        self.assertEqual(self.manifest["parameter_response"], parameter_response)
+        self.assertEqual(
+            parameter_response["required_fields"],
+            [
+                "name",
+                "type",
+                "value",
+                "key",
+                "display_name",
+                "description",
+                "enabled",
+                "deactivate_during_acquisition",
+                "uia.automation_id",
+            ],
+        )
+        self.assertEqual(
+            self.contract["uia"]["parameter_automation_id_rule"],
+            "oe.parameter.<sanitised parameter key>",
+        )
+        self.assertEqual(self.manifest["uia"]["parameter_automation_id_rule"], "oe.parameter.<sanitised parameter key>")
+
+    def test_skill_matches_parameter_contract_discovery_workflow(self):
+        skill = SKILL_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("`open-ephys-agent` contract `0.1.1`", skill)
+        self.assertIn("`get_stream_parameters`, `get_parameter`, or `get_stream_parameter` first.", skill)
+        self.assertIn("Pass that returned\n`uia.automation_id` to `oe_uia_locator` as `automation_id`.", skill)
+        self.assertIn("do not construct or guess them from a parameter name or key", skill)
 
     def test_contract_route_matrix_matches_manifest_for_required_commands(self):
         commands = mcp.command_index(self.manifest)
@@ -235,6 +324,34 @@ class AgentNativeContractParityTests(unittest.TestCase):
             (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "contract"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_mismatched_parameter_uia_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            fixture = json.loads(json.dumps(self.contract))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture["contract"]["fixture"] = "contract.json"
+            manifest["uia"]["parameter_automation_id_rule"] = "oe.parameter.<wrong key>"
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "parameter UIA"):
+                mcp.load_manifest(temp_root / "manifest.json")
+
+    def test_manifest_rejects_a_mismatched_parameter_response_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest = json.loads(json.dumps(self.manifest))
+            fixture = json.loads(json.dumps(self.contract))
+            manifest["contract"]["fixture"] = "contract.json"
+            fixture["contract"]["fixture"] = "contract.json"
+            manifest["parameter_response"] = {"required_fields": ["name"]}
+            (temp_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (temp_root / "contract.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "parameter response"):
                 mcp.load_manifest(temp_root / "manifest.json")
 
     def test_manifest_rejects_a_missing_contract_fixture(self):
