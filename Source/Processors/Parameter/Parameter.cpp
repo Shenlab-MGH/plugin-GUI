@@ -75,6 +75,39 @@ String Parameter::getParameterTypeString() const
     return String();
 }
 
+String Parameter::getAutomationId() const
+{
+    const String key (m_identifier);
+    String sanitisedKey;
+
+    for (int index = 0; index < key.length(); ++index)
+    {
+        auto character = key[index];
+
+        if (character >= 'A' && character <= 'Z')
+            character = character - 'A' + 'a';
+
+        const bool isLowercaseLetter = character >= 'a' && character <= 'z';
+        const bool isDigit = character >= '0' && character <= '9';
+
+        if (isLowercaseLetter || isDigit)
+        {
+            sanitisedKey += character;
+        }
+        else if (sanitisedKey.isNotEmpty()
+                 && ! sanitisedKey.endsWithChar ('_'))
+        {
+            sanitisedKey += '_';
+        }
+    }
+
+    sanitisedKey = sanitisedKey.trimCharactersAtEnd ("_");
+    return "oe.parameter."
+           + (sanitisedKey.isNotEmpty()
+                  ? sanitisedKey
+                  : "unnamed");
+}
+
 uint16 Parameter::getStreamId()
 {
     if (parameterOwner->getType() == ParameterOwner::DATASTREAM)

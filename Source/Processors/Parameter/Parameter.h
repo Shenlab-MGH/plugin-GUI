@@ -206,6 +206,9 @@ public:
     /** Returns a globally unique key of the parameter */
     std::string getKey() { return m_identifier; }
 
+    /** Returns the canonical UI AutomationId for this parameter. */
+    String getAutomationId() const;
+
     /** Returns the common name of the parameter. */
     String getName() const noexcept { return m_name; }
 

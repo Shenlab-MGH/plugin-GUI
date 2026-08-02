@@ -815,7 +815,7 @@ void applyParameterSemanticMetadata (Component& component, Parameter& parameter)
                            : parameter.getName().replace ("_", " ");
 
     applySemanticMetadata (component,
-                           "oe.parameter." + sanitiseSemanticSegment (String (parameter.getKey())),
+                           parameter.getAutomationId(),
                            title,
                            parameter.getDescription());
 }

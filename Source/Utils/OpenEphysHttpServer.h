@@ -1603,6 +1603,12 @@ private:
         (*parameter_json)["name"] = parameter->getName().toStdString();
         (*parameter_json)["type"] = parameter->getParameterTypeString().toStdString();
         (*parameter_json)["value"] = parameter->getValue().toString().toStdString();
+        (*parameter_json)["key"] = parameter->getKey();
+        (*parameter_json)["display_name"] = parameter->getDisplayName().toStdString();
+        (*parameter_json)["description"] = parameter->getDescription().toStdString();
+        (*parameter_json)["enabled"] = parameter->isEnabled();
+        (*parameter_json)["deactivate_during_acquisition"] = parameter->shouldDeactivateDuringAcquisition();
+        (*parameter_json)["uia"]["automation_id"] = parameter->getAutomationId().toStdString();
     }
 
     inline static void parameters_to_json (GenericProcessor* processor, std::vector<json>* parameters_json)
