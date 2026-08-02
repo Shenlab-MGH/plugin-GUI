@@ -37,6 +37,7 @@
 #include "../MainWindow.h"
 #include "../UI/ProcessorList.h"
 
+#include "ControlCapabilityJson.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
@@ -49,6 +50,10 @@ using json = nlohmann::json;
  *
  * The API is "RESTful", such that the resource URLs are:
  * 
+ * - GET /api/capabilities :
+ *          returns a discovery-only JSON capability manifest (contract_version 0.1.0).
+ *          This surface does not authorize or prove mutation behavior.
+ *
  * - GET /api/config :
  *          returns an XML string with the current configuration of the GUI
  *
@@ -150,6 +155,11 @@ public:
 
     void run() override
     {
+        svr_->Get ("/api/capabilities", [] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+            res.set_content (document.dump(), "application/json"); });
+
         svr_->Get ("/api/config", [this] (const httplib::Request&, httplib::Response& res)
                    {
             std::unique_ptr<XmlElement> xmlElement = std::make_unique<XmlElement> ("SETTINGS");
