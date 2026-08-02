@@ -238,7 +238,18 @@ class OpenEphysReleaseBundleTests(unittest.TestCase):
         bundle = self.load_bundle()
         mcp_component = bundle["components"]["mcp"]
         server = mcp.McpServer(manifest_path=SURFACE_PATH)
-        response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        response = server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "agent-native-tests", "version": "1.0.0"},
+                },
+            }
+        )
         result = response["result"]
 
         self.assertEqual(mcp_component["implementation"], "python-stdio")

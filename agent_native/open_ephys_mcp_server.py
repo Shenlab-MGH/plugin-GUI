@@ -28,6 +28,8 @@ LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 SUPPORTED_SCHEMA_VERSION = "0.1.3"
 SUPPORTED_CONTRACT_ID = "open-ephys-agent"
 SUPPORTED_CONTRACT_VERSION = "0.1.3"
+MCP_PROTOCOL_VERSION = "2024-11-05"
+SERVER_NOT_INITIALIZED = -32002
 PARAMETER_AUTOMATION_ID_RULE = "oe.parameter.<sanitised parameter key>"
 PROCESSOR_CATALOG_AUTOMATION_ID_RULE = (
     "oe.processor_catalog.<sanitised processor slug>"
@@ -742,39 +744,158 @@ def text_result(payload: Any, *, is_error: bool = False) -> dict[str, Any]:
     return result
 
 
+class JsonRpcError(Exception):
+    def __init__(self, code: int, message: str, data: Any = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.data = data
+
+
 class McpServer:
     def __init__(self, *, base_url: str = DEFAULT_BASE_URL, manifest_path: Path = DEFAULT_MANIFEST) -> None:
         self.base_url = validate_base_url(base_url)
         self.manifest = load_manifest(manifest_path)
+        self.connection_state = "new"
 
-    def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
-        method = request.get("method")
-        request_id = request.get("id")
+    def handle(self, request: Any) -> dict[str, Any] | None:
+        request_id = self._request_id_for_error(request)
         try:
+            self._validate_envelope(request)
+            method = request["method"]
+            is_notification = "id" not in request
+
+            if method not in {"initialize", "tools/list", "tools/call", "notifications/initialized"}:
+                if is_notification:
+                    return None
+                raise JsonRpcError(-32601, "Method not found")
+
+            if method == "notifications/initialized":
+                if not is_notification:
+                    raise JsonRpcError(-32600, "Invalid Request")
+                if not self._params_are_an_object(request):
+                    return None
+                if self.connection_state == "initialize_responded":
+                    self.connection_state = "ready"
+                return None
+
+            if is_notification:
+                return None
+
+            self._validate_known_method_params(method, request)
             if method == "initialize":
-                result = {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {
-                        "name": "open-ephys-agent-native",
-                        "version": self.manifest["contract"]["version"],
-                    },
-                }
+                result = self._initialize(request["params"])
             elif method == "tools/list":
+                self._require_ready()
                 result = {"tools": mcp_tool_list(self.manifest)}
             elif method == "tools/call":
-                result = self._call_tool(request.get("params", {}))
-            elif method == "notifications/initialized":
-                return None
-            else:
-                raise ValueError(f"Unsupported MCP method: {method}")
+                self._require_ready()
+                self._validate_tool_call_params(request["params"])
+                result = self._call_tool(request["params"])
             return {"jsonrpc": "2.0", "id": request_id, "result": result}
-        except Exception as exc:  # MCP servers should return structured failures.
+        except JsonRpcError as exc:
+            return self._error_response(request_id, exc)
+        except ValueError as exc:
+            return self._error_response(request_id, JsonRpcError(-32602, str(exc)))
+        except Exception:
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {"code": -32000, "message": str(exc)},
+                "error": {"code": -32603, "message": "Internal error"},
             }
+
+    @staticmethod
+    def _request_id_for_error(request: Any) -> str | int | float | None:
+        if not isinstance(request, dict) or "id" not in request:
+            return None
+        request_id = request["id"]
+        if isinstance(request_id, bool) or not isinstance(request_id, (str, int, float, type(None))):
+            return None
+        return request_id
+
+    @staticmethod
+    def _error_response(request_id: str | int | float | None, error: JsonRpcError) -> dict[str, Any]:
+        payload: dict[str, Any] = {"code": error.code, "message": error.message}
+        if error.data is not None:
+            payload["data"] = error.data
+        return {"jsonrpc": "2.0", "id": request_id, "error": payload}
+
+    @staticmethod
+    def _params_are_an_object(request: dict[str, Any]) -> bool:
+        return "params" not in request or isinstance(request["params"], dict)
+
+    def _validate_envelope(self, request: Any) -> None:
+        if not isinstance(request, dict):
+            raise JsonRpcError(-32600, "Invalid Request")
+        if request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
+            raise JsonRpcError(-32600, "Invalid Request")
+        if "id" in request and (
+            isinstance(request["id"], bool)
+            or not isinstance(request["id"], (str, int, float, type(None)))
+        ):
+            raise JsonRpcError(-32600, "Invalid Request")
+
+    def _validate_known_method_params(self, method: str, request: dict[str, Any]) -> None:
+        if not self._params_are_an_object(request):
+            raise JsonRpcError(-32602, "Invalid params")
+        if method == "initialize":
+            params = request.get("params")
+            if not isinstance(params, dict):
+                raise JsonRpcError(-32602, "Invalid params")
+            protocol_version = params.get("protocolVersion")
+            capabilities = params.get("capabilities")
+            client_info = params.get("clientInfo")
+            if (
+                not isinstance(protocol_version, str)
+                or not isinstance(capabilities, dict)
+                or not isinstance(client_info, dict)
+                or not isinstance(client_info.get("name"), str)
+                or not isinstance(client_info.get("version"), str)
+            ):
+                raise JsonRpcError(-32602, "Invalid params")
+
+    def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.connection_state != "new":
+            raise JsonRpcError(SERVER_NOT_INITIALIZED, "Invalid lifecycle order")
+        requested_version = params["protocolVersion"]
+        if requested_version != MCP_PROTOCOL_VERSION:
+            raise JsonRpcError(
+                -32602,
+                "Invalid params",
+                {"supported": MCP_PROTOCOL_VERSION, "requested": requested_version},
+            )
+        self.connection_state = "initialize_responded"
+        return {
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {"tools": {}},
+            "serverInfo": {
+                "name": "open-ephys-agent-native",
+                "version": self.manifest["contract"]["version"],
+            },
+        }
+
+    def _require_ready(self) -> None:
+        if self.connection_state != "ready":
+            raise JsonRpcError(SERVER_NOT_INITIALIZED, "Server not initialized")
+
+    def _validate_tool_call_params(self, params: dict[str, Any]) -> None:
+        name = params.get("name")
+        arguments = params.get("arguments", {})
+        known_tools = {
+            "oe_list_commands",
+            "oe_post_command",
+            "oe_api_request",
+            "oe_uia_locator",
+            *self.manifest["typed_tools"],
+        }
+        if not isinstance(name, str) or name not in known_tools or not isinstance(arguments, dict):
+            raise JsonRpcError(-32602, "Invalid params")
+        if name == "oe_post_command" and not isinstance(arguments.get("command"), str):
+            raise JsonRpcError(-32602, "Invalid params")
+        if name == "oe_api_request" and (
+            not isinstance(arguments.get("method"), str) or not isinstance(arguments.get("path"), str)
+        ):
+            raise JsonRpcError(-32602, "Invalid params")
 
     def _call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
@@ -885,7 +1006,16 @@ def run_stdio(server: McpServer) -> None:
     for line in sys.stdin:
         if not line.strip():
             continue
-        response = server.handle(json.loads(line))
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError:
+            response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "Parse error"},
+            }
+        else:
+            response = server.handle(request)
         if response is not None:
             sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
             sys.stdout.flush()

@@ -1,3 +1,4 @@
+import io
 import json
 import tempfile
 import unittest
@@ -18,6 +19,222 @@ import open_ephys_mcp_server as mcp
 class AgentNativeManifestTests(unittest.TestCase):
     def setUp(self):
         self.manifest = mcp.load_manifest(ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+    @staticmethod
+    def initialize_request(request_id=1, *, params=None):
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "initialize",
+            "params": (
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "agent-native-tests", "version": "1.0.0"},
+                }
+                if params is None
+                else params
+            ),
+        }
+
+    def initialized_server(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        response = server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "agent-native-tests", "version": "1.0.0"},
+                },
+            }
+        )
+        self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
+        self.assertIsNone(
+            server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        )
+        return server
+
+    def test_tools_are_unavailable_until_initialize_handshake_completes(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        before = server.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
+        self.assertEqual(before.get("error", {}).get("code"), -32002)
+
+        init = server.handle(self.initialize_request(request_id=8))
+        self.assertEqual(init["result"]["protocolVersion"], "2024-11-05")
+        between = server.handle({"jsonrpc": "2.0", "id": 9, "method": "tools/list"})
+        self.assertEqual(between["error"]["code"], -32002)
+
+        self.assertIsNone(server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        after = server.handle({"jsonrpc": "2.0", "id": 10, "method": "tools/list"})
+        self.assertIn("tools", after["result"])
+
+    def test_initialize_returns_complete_legacy_success_fields(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+        response = server.handle(self.initialize_request())
+
+        self.assertEqual(
+            response["result"],
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "open-ephys-agent-native", "version": "0.1.3"},
+            },
+        )
+
+    def test_initialize_rejects_missing_or_malformed_required_parameters(self):
+        invalid_params = (
+            {},
+            {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {}},
+            {"protocolVersion": 1, "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}},
+            {"protocolVersion": "2024-11-05", "capabilities": [], "clientInfo": {"name": "test", "version": "1"}},
+            {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": []},
+            {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": 1, "version": "1"}},
+            {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": 1}},
+        )
+        for params in invalid_params:
+            with self.subTest(params=params):
+                server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+                response = server.handle(self.initialize_request(params=params))
+                self.assertEqual(response["error"]["code"], -32602)
+
+    def test_initialize_rejects_an_unsupported_protocol_version_with_negotiation_data(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+        response = server.handle(
+            self.initialize_request(
+                params={
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "agent-native-tests", "version": "1.0.0"},
+                }
+            )
+        )
+
+        self.assertEqual(response["error"]["code"], -32602)
+        self.assertEqual(response["error"]["data"], {"supported": "2024-11-05", "requested": "2025-03-26"})
+
+    def test_initialized_before_initialize_does_not_advance_connection_state(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+        self.assertIsNone(server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+
+        self.assertEqual(response["error"]["code"], -32002)
+
+    def test_initialized_notification_with_an_id_is_invalid(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+
+        response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "notifications/initialized"})
+
+        self.assertEqual(response["error"], {"code": -32600, "message": "Invalid Request"})
+
+    def test_duplicate_initialize_is_a_lifecycle_error(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        self.assertIn("result", server.handle(self.initialize_request()))
+
+        response = server.handle(self.initialize_request(request_id=2))
+
+        self.assertEqual(response["error"]["code"], -32002)
+
+    def test_invalid_json_rpc_envelopes_return_standard_invalid_request_errors(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        invalid_requests = (
+            (None, None),
+            ([], None),
+            ({"method": "tools/list", "id": 1}, 1),
+            ({"jsonrpc": "1.0", "method": "tools/list", "id": 2}, 2),
+            ({"jsonrpc": "2.0", "method": 3, "id": 3}, 3),
+            ({"jsonrpc": "2.0", "method": "tools/list", "id": True}, None),
+        )
+        for request, expected_id in invalid_requests:
+            with self.subTest(request=request):
+                response = server.handle(request)
+                self.assertEqual(response, {
+                    "jsonrpc": "2.0",
+                    "id": expected_id,
+                    "error": {"code": -32600, "message": "Invalid Request"},
+                })
+
+    def test_unknown_request_method_returns_method_not_found_and_unknown_notification_is_silent(self):
+        server = self.initialized_server()
+
+        response = server.handle({"jsonrpc": "2.0", "id": 4, "method": "unknown/method"})
+
+        self.assertEqual(response["id"], 4)
+        self.assertEqual(response["error"], {"code": -32601, "message": "Method not found"})
+        self.assertIsNone(server.handle({"jsonrpc": "2.0", "method": "unknown/method"}))
+
+    def test_idless_tools_call_is_silent_and_does_not_execute_http(self):
+        server = self.initialized_server()
+        with mock.patch.object(mcp, "call_http") as call_http:
+            response = server.handle({
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {"name": "oe_api_request", "arguments": {"method": "GET", "path": "/api/status"}},
+            })
+
+        self.assertIsNone(response)
+        call_http.assert_not_called()
+
+    def test_malformed_known_method_params_and_unknown_tools_are_invalid_params(self):
+        server = self.initialized_server()
+        malformed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": []})
+        unknown_tool = server.handle({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "not-a-tool", "arguments": {}},
+        })
+
+        self.assertEqual(malformed["error"]["code"], -32602)
+        self.assertEqual(unknown_tool["error"]["code"], -32602)
+
+    def test_unexpected_tool_failure_is_an_internal_error(self):
+        server = self.initialized_server()
+        with mock.patch.object(server, "_call_tool", side_effect=RuntimeError("unexpected")):
+            response = server.handle({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "oe_list_commands", "arguments": {}},
+            })
+
+        self.assertEqual(response["error"], {"code": -32603, "message": "Internal error"})
+
+    def test_typed_transport_failure_remains_a_tool_error_result(self):
+        server = self.initialized_server()
+        with mock.patch.object(
+            mcp, "call_http", return_value={"ok": False, "status": None, "error": {"code": "connection_failed"}}
+        ):
+            response = server.handle({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "oe_list_streams", "arguments": {"processor_id": 101}},
+            })
+
+        self.assertTrue(response["result"]["isError"])
+
+    def test_stdio_recovers_from_parse_errors_and_processes_the_next_request(self):
+        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        initialize_line = json.dumps(self.initialize_request())
+        stdin = io.StringIO("not json\n" + initialize_line + "\n")
+        stdout = io.StringIO()
+
+        with mock.patch.object(mcp.sys, "stdin", stdin), mock.patch.object(mcp.sys, "stdout", stdout):
+            mcp.run_stdio(server)
+
+        responses = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual(responses[0], {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {"code": -32700, "message": "Parse error"},
+        })
+        self.assertEqual(responses[1]["result"]["protocolVersion"], "2024-11-05")
 
     def test_manifest_has_unique_commands_and_no_screenshot_control(self):
         names = [command["name"] for command in self.manifest["commands"]]
@@ -182,7 +399,7 @@ class AgentNativeManifestTests(unittest.TestCase):
             mcp.validate_base_url("https://example.invalid")
 
     def test_mcp_lists_tools_and_resolves_uia_locator(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         tool_names = {tool["name"] for tool in response["result"]["tools"]}
         self.assertIn("oe_post_command", tool_names)
@@ -231,12 +448,12 @@ class AgentNativeManifestTests(unittest.TestCase):
     def test_mcp_initialize_derives_server_version_from_loaded_contract(self):
         server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
 
-        response = server.handle({"jsonrpc": "2.0", "id": 3, "method": "initialize"})
+        response = server.handle(self.initialize_request(request_id=3))
 
         self.assertEqual(response["result"]["serverInfo"]["version"], "0.1.3")
 
     def test_mcp_exposes_strict_typed_stream_tools(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         response = server.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
         tools = {tool["name"]: tool for tool in response["result"]["tools"]}
 
@@ -263,7 +480,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         )
 
     def test_typed_stream_tools_use_declared_backends_and_readbacks(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         listed_stream = self._valid_stream(stream_index=0)
         fetched_stream = self._valid_stream(stream_index=1)
 
@@ -290,7 +507,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         )
 
     def test_typed_stream_tools_reject_invalid_arguments_before_http(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         invalid_calls = (
             ("oe_list_streams", {}, "processor_id"),
             ("oe_list_streams", {"processor_id": True}, "processor_id"),
@@ -319,7 +536,7 @@ class AgentNativeManifestTests(unittest.TestCase):
             call_http.assert_not_called()
 
     def test_typed_stream_tools_fail_closed_on_malformed_success_payloads(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         malformed = (
             ("oe_list_streams", {"processor_id": 101}, {"id": 101}),
             ("oe_list_streams", {"processor_id": 101}, {"streams": [{}]}),
@@ -344,7 +561,7 @@ class AgentNativeManifestTests(unittest.TestCase):
                 self.assertIn("error", response)
 
     def test_typed_stream_tools_strictly_validate_stream_semantics(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         mutations = []
         for field, invalid_value in (
             ("name", None),
@@ -426,7 +643,7 @@ class AgentNativeManifestTests(unittest.TestCase):
                 self.assertEqual(mcp.sanitise_stream_semantic_segment(raw), expected)
 
     def test_typed_stream_tools_derive_locator_segment_from_identifier_or_name(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         streams = (
             self._valid_stream(
                 identifier="Probe.AP", name="Ignored fallback", semantic_segment="probe_ap"
@@ -460,7 +677,7 @@ class AgentNativeManifestTests(unittest.TestCase):
                 self.assertNotIn("error", response)
 
     def test_typed_stream_tools_reject_a_self_reported_wrong_semantic_segment(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         stream = self._valid_stream(identifier="imec.ap", name="Probe AP")
         stream["uia"]["automation_id"] = (
             "oe.processor.101.streams.table.source_101.stream_probe_ap"
@@ -484,7 +701,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertIn("error", response)
 
     def test_typed_stream_list_recomputes_collision_from_metadata(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         dotted = self._valid_stream(
             stream_index=0, identifier="probe.ap", semantic_segment="probe_ap"
         )
@@ -551,7 +768,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertIn("sibling locators", rejected["error"]["message"].lower())
 
     def test_typed_get_stream_requires_collision_flag_to_match_suffix_presence(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         invalid = []
         unique_with_suffix = self._valid_stream()
         unique_with_suffix["uia"]["automation_id"] += ".index_0"
@@ -581,7 +798,7 @@ class AgentNativeManifestTests(unittest.TestCase):
                 self.assertIn("error", response)
 
     def test_typed_stream_tools_validate_request_response_identity(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         cases = (
             ("oe_list_streams", {"processor_id": 101}, {"id": 202, "streams": []}),
             (
@@ -613,7 +830,7 @@ class AgentNativeManifestTests(unittest.TestCase):
                 self.assertIn("error", response)
 
     def test_typed_stream_tools_preserve_http_failures(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         failure = {"ok": False, "status": 404, "response": {"error": "not found"}}
         with mock.patch.object(mcp, "call_http", return_value=failure):
             response = server.handle(
@@ -634,7 +851,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertEqual(payload["response"], {"error": "not found"})
 
     def test_typed_stream_tools_mark_indeterminate_transport_results_as_errors(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         with mock.patch.object(
             mcp,
             "call_http",
@@ -657,7 +874,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "transport_contract_error")
 
     def test_typed_stream_list_allows_an_empty_success(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         with mock.patch.object(
             mcp,
             "call_http",
@@ -680,7 +897,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertEqual(payload["response"]["streams"], [])
 
     def test_typed_stream_list_accepts_collision_suffixes_only_for_colliding_siblings(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         first = self._valid_stream(stream_index=0)
         second = self._valid_stream(stream_index=1)
         first["uia"]["automation_id"] += ".index_0"
@@ -734,7 +951,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         self.assertIn("error", rejected)
 
     def test_stream_uia_locator_accepts_only_declared_compact_row_ids(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
         valid_ids = (
             "oe.processor.100.streams.table.source_101.stream_imec_ap",
             "oe.processor.100.streams.table.source_101.stream_imec_ap.index_0",
@@ -836,7 +1053,7 @@ class AgentNativeManifestTests(unittest.TestCase):
         return json.loads(response["result"]["content"][0]["text"])
 
     def test_uia_locator_allows_only_declared_static_ids_or_parameter_automation_ids(self):
-        server = mcp.McpServer(manifest_path=ROOT / "agent_native" / "open_ephys_agent_surface.json")
+        server = self.initialized_server()
 
         dynamic_response = server.handle(
             {
