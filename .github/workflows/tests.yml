@@ -137,11 +137,43 @@ jobs:
           cd C:\test-suite
           $process = $null
           $pythonExitCode = 1
+          $openEphysExe = "$env:GITHUB_WORKSPACE\Build\Release\open-ephys.exe"
+          $openEphysConfig = "$env:GITHUB_WORKSPACE\Build\Release\configs\file_reader_config.xml"
+          $openEphysWorkingDirectory = "$env:GITHUB_WORKSPACE\Build\Release"
           try
           {
-            $process = Start-Process -FilePath "Build\Release\open-ephys.exe" -ArgumentList "Build\Release\configs\file_reader_config.xml" -NoNewWindow -PassThru
+            $process = Start-Process -FilePath $openEphysExe -ArgumentList $openEphysConfig -WorkingDirectory $openEphysWorkingDirectory -NoNewWindow -PassThru
             Write-Host "Started open-ephys process with ID: $($process.Id)"
-            Start-Sleep -Seconds 10
+            $ready = $false
+            for ($attempt = 1; $attempt -le 30; ++$attempt)
+            {
+              if ($process.HasExited)
+              {
+                break
+              }
+              try
+              {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:37497/api/status' -UseBasicParsing -TimeoutSec 1
+                if ($response.StatusCode -eq 200)
+                {
+                  $ready = $true
+                  break
+                }
+              }
+              catch
+              {
+              }
+              Start-Sleep -Seconds 1
+            }
+            if (! $ready)
+            {
+              Write-Host "Open Ephys readiness check failed after $attempt attempts."
+              Write-Host "Process: id=$($process.Id) hasExited=$($process.HasExited)"
+              Write-Host "Paths: executable=$openEphysExe config=$openEphysConfig workingDirectory=$openEphysWorkingDirectory"
+              Write-Host "Port 37497 diagnostics:"
+              netstat -ano | Select-String ':37497'
+              throw "Open Ephys did not become ready at http://127.0.0.1:37497/api/status."
+            }
             Write-Host "Starting Python script..."
             python run_all.py 2>&1 | Tee-Object -FilePath "python_output.log"
             $pythonExitCode = $LASTEXITCODE
