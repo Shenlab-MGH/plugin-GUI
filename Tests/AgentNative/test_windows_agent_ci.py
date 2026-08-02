@@ -58,8 +58,37 @@ class WindowsAgentCiTests(unittest.TestCase):
             with self.subTest(component=component):
                 self.assertRegex(self.job, pattern)
 
-    def test_job_does_not_install_audio_or_external_plugin_dependencies(self):
-        forbidden = ("Scream", "OEPlugins", "open-ephys-data-format", "OpenEphysHDF5Lib", "nwb-format")
+    def test_job_provides_the_proven_virtual_audio_device_before_running_tests(self):
+        self.assertIn("- name: Start Windows Audio Engine", self.job)
+        self.assertIn("- name: Install Scream", self.job)
+        audio_engine = self.job.index("- name: Start Windows Audio Engine")
+        scream_install = self.job.index("- name: Install Scream")
+        agent_tests = self.job.index("- name: Run agent-native contract tests")
+        self.assertLess(audio_engine, scream_install)
+        self.assertLess(scream_install, agent_tests)
+
+        expected_install_commands = (
+            "Start-Service audio*",
+            "Invoke-WebRequest https://github.com/duncanthrax/scream/releases/download/3.6/Scream3.6.zip -OutFile C:\\Scream3.6.zip",
+            "Expand-7ZipArchive -Path C:\\Scream3.6.zip -DestinationPath C:\\Scream",
+            "$cert = (Get-AuthenticodeSignature C:\\Scream\\Install\\driver\\Scream.sys).SignerCertificate",
+            '$store = [System.Security.Cryptography.X509Certificates.X509Store]::new("TrustedPublisher", "LocalMachine")',
+            '$store.Open("ReadWrite")',
+            "$store.Add($cert)",
+            "$store.Close()",
+            "cd C:\\Scream\\Install\\driver",
+            "C:\\Scream\\Install\\helpers\\devcon install Scream.inf *Scream",
+        )
+        for command in expected_install_commands:
+            with self.subTest(command=command):
+                self.assertIn(command, self.job)
+        self.assertRegex(
+            self.job,
+            r"C:\\Scream\\Install\\helpers\\devcon install Scream\.inf \*Scream\s*\n\s*if \(\$LASTEXITCODE -ne 0\)",
+        )
+
+    def test_job_does_not_install_external_plugin_dependencies(self):
+        forbidden = ("OEPlugins", "open-ephys-data-format", "OpenEphysHDF5Lib", "nwb-format")
         for text in forbidden:
             with self.subTest(text=text):
                 self.assertNotIn(text, self.job)

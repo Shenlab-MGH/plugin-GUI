@@ -80,6 +80,24 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Start Windows Audio Engine
+        run: net start audiosrv
+      - name: Install Scream
+        shell: powershell
+        run: |
+          Start-Service audio*
+          Invoke-WebRequest https://github.com/duncanthrax/scream/releases/download/3.6/Scream3.6.zip -OutFile C:\Scream3.6.zip
+          Expand-7ZipArchive -Path C:\Scream3.6.zip -DestinationPath C:\Scream
+          $cert = (Get-AuthenticodeSignature C:\Scream\Install\driver\Scream.sys).SignerCertificate
+          $store = [System.Security.Cryptography.X509Certificates.X509Store]::new("TrustedPublisher", "LocalMachine")
+          $store.Open("ReadWrite")
+          $store.Add($cert)
+          $store.Close()
+          cd C:\Scream\Install\driver
+          C:\Scream\Install\helpers\devcon install Scream.inf *Scream
+          if ($LASTEXITCODE -ne 0) {
+            throw "Scream device installation failed with exit code $LASTEXITCODE."
+          }
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
       - name: Run agent-native contract tests
