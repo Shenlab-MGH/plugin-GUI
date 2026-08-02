@@ -4805,6 +4805,10 @@ TEST_F (LfpDisplayNodeTests,
             canvas->isPaneActive (0));
         EXPECT_FALSE (
             canvas->isPaneActive (1));
+
+        canvas->endAnimation();
+        canvas->setVisible (false);
+        canvas->removeFromDesktop();
     }
 
     EXPECT_TRUE (
