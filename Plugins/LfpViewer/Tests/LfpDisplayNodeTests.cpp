@@ -4696,6 +4696,15 @@ TEST_F (LfpDisplayNodeTests,
 TEST_F (LfpDisplayNodeTests,
         PaneSelectorRetainedActionsHonourLatestAvailabilityAndDestruction)
 {
+    const auto mark = [] (const char* label)
+    {
+        ::fprintf (
+            stderr,
+            "[ci41] retained:%s\n",
+            label);
+        ::fflush (stderr);
+    };
+    mark ("test-begin");
     AccessibilityActions
         retainedActions;
     {
@@ -4806,19 +4815,29 @@ TEST_F (LfpDisplayNodeTests,
         EXPECT_FALSE (
             canvas->isPaneActive (1));
 
+        mark ("old-endAnimation-begin");
         canvas->endAnimation();
+        mark ("old-endAnimation-end");
+        mark ("old-setVisible-false-begin");
         canvas->setVisible (false);
+        mark ("old-setVisible-false-end");
+        mark ("old-removeFromDesktop-begin");
         canvas->removeFromDesktop();
+        mark ("old-removeFromDesktop-end");
     }
 
+    mark ("old-scope-exited");
+    mark ("stopAcquisition-begin");
     EXPECT_TRUE (
         processor->stopAcquisition());
+    mark ("stopAcquisition-end");
     EXPECT_TRUE (
         invokeLfpActionFromWorker (
             retainedActions,
             AccessibilityActionType::
                 press));
 
+    mark ("replacement-create-begin");
     auto replacement =
         std::make_unique<
             LfpViewer::
@@ -4828,6 +4847,7 @@ TEST_F (LfpDisplayNodeTests,
                 SplitLayouts::
                     TWO_VERT,
             false);
+    mark ("replacement-create-end");
     replacement->updateSettings();
     replacement->setSize (
         900,
@@ -4849,9 +4869,16 @@ TEST_F (LfpDisplayNodeTests,
         replacement
             ->isPaneActive (1));
 
+    mark ("replacement-endAnimation-begin");
     replacement->endAnimation();
+    mark ("replacement-endAnimation-end");
+    mark ("replacement-setVisible-false-begin");
     replacement->setVisible (false);
+    mark ("replacement-setVisible-false-end");
+    mark ("replacement-removeFromDesktop-begin");
     replacement->removeFromDesktop();
+    mark ("replacement-removeFromDesktop-end");
+    mark ("test-end");
 }
 
 #if JUCE_WINDOWS
