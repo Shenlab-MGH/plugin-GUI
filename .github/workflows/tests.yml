@@ -135,24 +135,43 @@ jobs:
           New-Item -Path 'C:\open-ephys\data' -ItemType Directory
           git clone --branch main https://github.com/open-ephys/open-ephys-test-suite.git C:\test-suite
           cd C:\test-suite
-          $process = Start-Process -FilePath "Build\Release\open-ephys.exe" -ArgumentList "Build\Release\configs\file_reader_config.xml" -NoNewWindow -PassThru
-          Write-Host "Started open-ephys process with ID: $($process.Id)"
-          Start-Sleep -Seconds 10
-          Write-Host "Starting Python script..."
-          python run_all.py 2>&1 | Tee-Object -FilePath "python_output.log"
-          Write-Host "Python script completed. Output saved to python_output.log"
-          Stop-Process -Id $process.Id -Force
+          $process = $null
+          $pythonExitCode = 1
+          try
+          {
+            $process = Start-Process -FilePath "Build\Release\open-ephys.exe" -ArgumentList "Build\Release\configs\file_reader_config.xml" -NoNewWindow -PassThru
+            Write-Host "Started open-ephys process with ID: $($process.Id)"
+            Start-Sleep -Seconds 10
+            Write-Host "Starting Python script..."
+            python run_all.py 2>&1 | Tee-Object -FilePath "python_output.log"
+            $pythonExitCode = $LASTEXITCODE
+            Write-Host "Python script completed. Output saved to python_output.log"
+          }
+          finally
+          {
+            if ($null -ne $process -and -not $process.HasExited)
+            {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+          if ($pythonExitCode -ne 0)
+          {
+            throw "Python test suite failed with exit code $pythonExitCode."
+          }
         env:
           OE_WINDOWS_GITHUB_RECORD_PATH: C:\open-ephys\data
       - name: Set timestamp
+        if: always()
         shell: powershell
         id: timestamp
         run: |
           $timestamp = Get-Date -Format 'yyyy_MM_dd_HH_mm_ss'
           "timestamp=$timestamp" >> $env:GITHUB_OUTPUT
       - name: Upload test results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows_${{ steps.timestamp.outputs.timestamp }}.log
-          path: python_output.log
+          path: C:\test-suite\python_output.log
+          if-no-files-found: warn
           retention-days: 7
