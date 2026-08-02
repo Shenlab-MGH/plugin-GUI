@@ -3,6 +3,7 @@ name: Tests
 on:
   pull_request:
     paths:
+      - '.github/workflows/**'
       - 'JuceLibraryCode/**'
       - 'Plugins/**'
       - 'Resources/**'
@@ -11,6 +12,10 @@ on:
       - 'HelperFunctions.cmake'
     branches:
       - 'development'
+      - 'testing'
+      - 'agent-native-v102-*'
+  push:
+    branches:
       - 'testing'
 
 jobs:
