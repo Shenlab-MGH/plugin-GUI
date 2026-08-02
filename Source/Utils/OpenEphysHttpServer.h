@@ -1195,7 +1195,7 @@ private:
             res.set_content(ret.dump(), "application/json"); });
 
         svr_->Put (R"(/api/processors/([0-9]+)/parameters/([A-Za-z0-9_\.\-]+))",
-                   [this] (const httplib::Request& req, httplib::Response& res)
+                   [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
                        auto processor = find_processor (req.matches[1]);
                        if (processor == nullptr)
@@ -1279,7 +1279,8 @@ private:
                                parameter->setNextValue (val);
                                return true;
                            },
-                           std::chrono::seconds (2));
+                           std::chrono::seconds (2),
+                           generation);
 
                        if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                            return;
@@ -1290,7 +1291,7 @@ private:
                    });
 
         svr_->Put (R"(/api/processors/([0-9]+)/streams/([0-9]+)/parameters/([A-Za-z0-9_\.\-]+))",
-                   [this] (const httplib::Request& req, httplib::Response& res)
+                   [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
                        auto processor = find_processor (req.matches[1]);
                        if (processor == nullptr)
@@ -1386,7 +1387,8 @@ private:
                                parameter->setNextValue (val);
                                return true;
                            },
-                           std::chrono::seconds (2));
+                           std::chrono::seconds (2),
+                           generation);
 
                        if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                            return;
