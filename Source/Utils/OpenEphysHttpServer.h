@@ -40,6 +40,7 @@
 #include "ControlCapabilityJson.h"
 #include "ControlRead.h"
 #include "RecordingOptionsControl.h"
+#include "StatusApiHandler.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
@@ -190,74 +191,69 @@ public:
             ret["info"] = xmlElement.get()->toString().toStdString();
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/status", [this] (const httplib::Request&, httplib::Response& res)
-                   {
-            json ret;
-            status_to_json(graph_, &ret);
-            res.set_content(ret.dump(), "application/json"); });
+        const StatusApiHandlers statusHandlers {
+            []
+            {
+                if (CoreServices::getRecordingStatus())
+                    return StatusMode::Record;
+                if (CoreServices::getAcquisitionStatus())
+                    return StatusMode::Acquire;
+                return StatusMode::Idle;
+            },
+            [] (StatusMode desiredMode)
+            {
+                if (desiredMode == StatusMode::Record && ! CoreServices::getRecordingStatus())
+                {
+                    std::promise<void> signalRecordingStarted;
+                    std::future<void> signalRecordingStartedFuture = signalRecordingStarted.get_future();
 
-        svr_->Put ("/api/status", [this] (const httplib::Request& req, httplib::Response& res)
-                   {
-            std::string desired_mode;
+                    MessageManager::callAsync ([&signalRecordingStarted]
+                                               {
+                        CoreServices::setRecordingStatus (true);
+                        signalRecordingStarted.set_value(); // Signal that recording has started
+                    });
 
-            LOGD("Received PUT request with content: ", req.body);
-            try {
-                LOGD("Trying to decode request");
-                json request_json;
-                request_json = json::parse(req.body);
-                LOGD("Successfully parsed body");
-                desired_mode = request_json["mode"];
-                LOGD("Found 'mode': ", desired_mode);
+                    // Wait for recording to start
+                    signalRecordingStartedFuture.wait();
+                }
+                else if (desiredMode == StatusMode::Acquire)
+                {
+                    std::promise<void> signalAcquisitionStarted;
+                    std::future<void> signalAcquisitionStartedFuture = signalAcquisitionStarted.get_future();
+
+                    MessageManager::callAsync ([&signalAcquisitionStarted]
+                                               {
+                        CoreServices::setRecordingStatus (false);
+                        CoreServices::setAcquisitionStatus (true);
+                        signalAcquisitionStarted.set_value(); // Signal that acquisition has started
+                    });
+
+                    // Wait for acquisition to start
+                    signalAcquisitionStartedFuture.wait();
+                }
+                else if (desiredMode == StatusMode::Idle)
+                {
+                    std::promise<void> signalAcquisitionStopped;
+                    std::future<void> signalAcquisitionStoppedFuture = signalAcquisitionStopped.get_future();
+
+                    MessageManager::callAsync ([&signalAcquisitionStopped]
+                                               {
+                        CoreServices::setRecordingStatus (false);
+                        CoreServices::setAcquisitionStatus (false);
+                        signalAcquisitionStopped.set_value(); // Signal that acquisition has stopped
+                    });
+
+                    // Wait for acquisition to stop
+                    signalAcquisitionStoppedFuture.wait();
+                }
             }
-            catch (json::exception& e) {
-                LOGD("Hit exception: ", String(e.what()));
-                res.set_content(e.what(), "text/plain");
-                res.status = 400;
-                return;
-            }
+        };
 
-            if (desired_mode == "RECORD" && !CoreServices::getRecordingStatus()) {
-                std::promise<void> signalRecordingStarted;
-                std::future<void> signalRecordingStartedFuture = signalRecordingStarted.get_future();
+        svr_->Get ("/api/status", [statusHandlers] (const httplib::Request& req, httplib::Response& res)
+                   { handleStatusGet (req, res, statusHandlers); });
 
-                MessageManager::callAsync([this, &signalRecordingStarted] {
-                    CoreServices::setRecordingStatus(true);
-                    signalRecordingStarted.set_value(); // Signal that recording has started
-                });
-
-                // Wait for recording to start
-                signalRecordingStartedFuture.wait();
-            }
-            else if (desired_mode == "ACQUIRE") {
-                std::promise<void> signalAcquisitionStarted;
-                std::future<void> signalAcquisitionStartedFuture = signalAcquisitionStarted.get_future();
-
-                MessageManager::callAsync([this, &signalAcquisitionStarted] {
-                    CoreServices::setRecordingStatus(false);
-                    CoreServices::setAcquisitionStatus(true);
-                    signalAcquisitionStarted.set_value(); // Signal that acquisition has started
-                });
-
-                // Wait for acquisition to start
-                signalAcquisitionStartedFuture.wait();
-            }
-            else if (desired_mode == "IDLE") {
-                std::promise<void> signalAcquisitionStopped;
-                std::future<void> signalAcquisitionStoppedFuture = signalAcquisitionStopped.get_future();
-
-                MessageManager::callAsync([this, &signalAcquisitionStopped] {
-                    CoreServices::setRecordingStatus(false);
-                    CoreServices::setAcquisitionStatus(false);
-                    signalAcquisitionStopped.set_value(); // Signal that acquisition has stopped
-                });
-
-                // Wait for acquisition to stop
-                signalAcquisitionStoppedFuture.wait();
-            }
-
-            json ret;
-            status_to_json(graph_, &ret);
-            res.set_content(ret.dump(), "application/json"); });
+        svr_->Put ("/api/status", [statusHandlers] (const httplib::Request& req, httplib::Response& res)
+                   { handleStatusPut (req, res, statusHandlers); });
 
         svr_->Get ("/api/cpu", [this] (const httplib::Request&, httplib::Response& res)
                    {
