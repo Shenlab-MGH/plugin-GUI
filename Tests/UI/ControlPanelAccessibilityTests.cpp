@@ -77,6 +77,22 @@ void expectSemanticButton (Button& button,
 }
 
 #if JUCE_WINDOWS
+Component* findDescendantByAutomationId (Component& root, const String& automationId)
+{
+    for (int index = 0; index < root.getNumChildComponents(); ++index)
+    {
+        auto* child = root.getChildComponent (index);
+
+        if (child->getComponentID() == automationId)
+            return child;
+
+        if (auto* descendant = findDescendantByAutomationId (*child, automationId))
+            return descendant;
+    }
+
+    return nullptr;
+}
+
 struct UiaButtonObservation
 {
     HRESULT result = E_FAIL;
@@ -405,6 +421,44 @@ TEST_F (ControlPanelAccessibilityTests, ExposesAcquisitionAndRecordingButtonsThr
                            "Recording",
                            "Start or stop writing data to disk.",
                            "Start/stop writing to disk");
+
+    window.setVisible (false);
+    window.removeFromDesktop();
+    MessageManager::getInstance()->runDispatchLoopUntil (50);
+}
+
+TEST_F (ControlPanelAccessibilityTests, ExposesRecordingDirectoryThroughWindowsUia)
+{
+    MainDocumentWindow window;
+    Component content;
+    ControlPanel panel (nullptr, nullptr, true);
+
+    panel.setBounds (0, 0, 900, 100);
+    panel.setRecordingOptionsExpanded (true);
+
+    auto* directory = findDescendantByAutomationId (panel, "oe.control.recording.directory");
+    ASSERT_NE (directory, nullptr);
+    EXPECT_EQ (directory->getTitle(), "Recording directory");
+    EXPECT_EQ (directory->getDescription(), "Read or edit the recording parent directory.");
+    EXPECT_TRUE (directory->isAccessible());
+
+    content.setBounds (0, 0, 900, 100);
+    content.addAndMakeVisible (panel);
+    window.setContentNonOwned (&content, false);
+    window.centreWithSize (900, 120);
+    window.addToDesktop();
+    window.setVisible (true);
+    window.toFront (true);
+    MessageManager::getInstance()->runDispatchLoopUntil (50);
+
+    const auto observation = observeWhilePumpingMessages (
+        static_cast<HWND> (window.getWindowHandle()),
+        L"oe.control.recording.directory");
+    ASSERT_TRUE (SUCCEEDED (observation.result));
+    ASSERT_TRUE (observation.found);
+    EXPECT_EQ (observation.automationId, "oe.control.recording.directory");
+    EXPECT_EQ (observation.name, "Recording directory");
+    EXPECT_EQ (observation.fullDescription, "Read or edit the recording parent directory.");
 
     window.setVisible (false);
     window.removeFromDesktop();

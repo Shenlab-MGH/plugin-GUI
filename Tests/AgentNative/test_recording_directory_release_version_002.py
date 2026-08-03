@@ -1,4 +1,4 @@
-"""Assert every ACTIVE integrated-core product version surface is literal 0.0.1.
+"""Assert every active recording-directory product surface is literal 0.0.2.
 
 MCP protocol 2024-11-05 is intentionally unchanged. This is the closeout pin for
 the integrated core release surfaces (agent contract, API capabilities contract,
@@ -21,12 +21,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
-PRODUCT_VERSION = "0.0.1"
+PRODUCT_VERSION = "0.0.2"
 MCP_PROTOCOL_VERSION = "2024-11-05"
 
 # Active product surfaces after closeout (no r0.1.0 / 0.1.1 prerelease tags).
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_1.json"
-PARITY_PATH = AGENT_DIR / "open_ephys_core_integration_parity_0_0_1.json"
+CORE_CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_1.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_2.json"
+PARITY_PATH = AGENT_DIR / "open_ephys_core_integration_parity_0_0_2.json"
 BUNDLE_PATH = AGENT_DIR / "open_ephys_agent_release_bundle.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 README_PATH = AGENT_DIR / "README.md"
@@ -83,8 +84,9 @@ def _step_conditions(step: list[str]) -> list[str]:
     return conditions
 
 
-class CoreReleaseVersion001Tests(unittest.TestCase):
-    def test_active_contract_and_parity_filenames_are_0_0_1(self):
+class RecordingDirectoryReleaseVersion002Tests(unittest.TestCase):
+    def test_active_contract_and_parity_filenames_are_0_0_2(self):
+        self.assertTrue(CORE_CONTRACT_PATH.is_file(), "immutable 0.0.1 core contract must remain available")
         self.assertTrue(CONTRACT_PATH.is_file(), f"missing active contract {CONTRACT_PATH.name}")
         self.assertTrue(PARITY_PATH.is_file(), f"missing active parity report {PARITY_PATH.name}")
         self.assertFalse(
@@ -95,12 +97,12 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
             LEGACY_PARITY_PATH.exists(),
             "legacy r0_1_0 parity filename must not remain active",
         )
-        self.assertIn("0_0_1", CONTRACT_PATH.name)
-        self.assertIn("0_0_1", PARITY_PATH.name)
+        self.assertIn("0_0_2", CONTRACT_PATH.name)
+        self.assertIn("0_0_2", PARITY_PATH.name)
         self.assertNotIn("r0_1_0", CONTRACT_PATH.name)
         self.assertNotIn("r0_1_0", PARITY_PATH.name)
 
-    def test_agent_contract_product_versions_are_literal_0_0_1(self):
+    def test_agent_contract_product_versions_are_literal_0_0_2(self):
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
         self.assertEqual(contract["schema_version"], PRODUCT_VERSION)
         self.assertEqual(contract["contract"]["version"], PRODUCT_VERSION)
@@ -114,14 +116,14 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
         self.assertNotIn("r0.1.0", json.dumps(contract))
         self.assertNotIn("0.1.1", json.dumps(contract))
 
-    def test_release_bundle_product_versions_are_literal_0_0_1(self):
+    def test_release_bundle_product_versions_are_literal_0_0_2(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(bundle["format_version"], PRODUCT_VERSION)
         self.assertEqual(bundle["bundle"]["version"], PRODUCT_VERSION)
         self.assertEqual(bundle["contract"]["version"], PRODUCT_VERSION)
         self.assertEqual(
             bundle["contract"]["fixture"],
-            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_1.json",
+            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_2.json",
         )
         self.assertEqual(
             bundle["components"]["mcp"]["protocol_version"],
@@ -130,12 +132,12 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
         self.assertNotIn("r0.1.0", json.dumps(bundle))
         self.assertNotIn("r0_1_0", json.dumps(bundle))
 
-    def test_parity_report_schema_version_is_literal_0_0_1(self):
+    def test_parity_report_schema_version_is_literal_0_0_2(self):
         report = json.loads(PARITY_PATH.read_text(encoding="utf-8"))
         self.assertEqual(report["schema_version"], PRODUCT_VERSION)
         self.assertNotIn("r0.1.0", json.dumps(report))
 
-    def test_mcp_server_constants_and_info_are_literal_0_0_1(self):
+    def test_mcp_server_constants_and_info_are_literal_0_0_2(self):
         source = SERVER_PATH.read_text(encoding="utf-8")
         module = ast.parse(source)
         constants: dict[str, object] = {}
@@ -146,14 +148,14 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
                         constants[target.id] = node.value.value
         self.assertEqual(constants.get("PROTOCOL_VERSION"), MCP_PROTOCOL_VERSION)
         self.assertEqual(constants.get("CONTRACT_VERSION"), PRODUCT_VERSION)
-        self.assertIn('open_ephys_agent_contract_v1_1_0_v0_0_1.json', source)
+        self.assertIn('open_ephys_agent_contract_v1_1_0_v0_0_2.json', source)
         self.assertNotIn("r0.1.0", source)
         self.assertNotIn("0.1.1", source)
         self.assertNotIn("r0_1_0", source)
         # serverInfo.version is sourced from CONTRACT_VERSION
         self.assertIn('"version":CONTRACT_VERSION', source.replace(" ", ""))
 
-    def test_skill_and_readme_pin_literal_0_0_1(self):
+    def test_skill_and_readme_pin_literal_0_0_2(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
         readme = README_PATH.read_text(encoding="utf-8")
         self.assertIn(f"contract: {PRODUCT_VERSION}", skill)
@@ -174,7 +176,7 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
         self.assertNotIn("r0.1.0", readme)
         self.assertNotIn("0.1.1", readme)
 
-    def test_cpp_api_capabilities_contract_version_is_literal_0_0_1(self):
+    def test_cpp_api_capabilities_contract_version_is_literal_0_0_2(self):
         cpp = CPP_CAPABILITY_JSON.read_text(encoding="utf-8")
         header = CPP_HTTP_SERVER_H.read_text(encoding="utf-8")
         self.assertIn(f'result["contract_version"] = "{PRODUCT_VERSION}"', cpp)

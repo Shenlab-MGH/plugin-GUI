@@ -4,8 +4,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT = ROOT / "agent_native" / "open_ephys_core_integration_parity_0_0_1.json"
-CONTRACT = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_1.json"
+REPORT = ROOT / "agent_native" / "open_ephys_core_integration_parity_0_0_2.json"
+CONTRACT = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_2.json"
 
 
 class CoreIntegrationParityTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class CoreIntegrationParityTests(unittest.TestCase):
         report = json.loads(REPORT.read_text(encoding="utf-8"))
         contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
 
-        self.assertEqual(report["schema_version"], "0.0.1")
+        self.assertEqual(report["schema_version"], "0.0.2")
         self.assertEqual(report["baseline"], {
             "version": "1.1.0",
             "upstream_release_commit": "c2ce076f5b2d4182222f9d0fd9bb9b97a60582e7",
@@ -47,6 +47,15 @@ class CoreIntegrationParityTests(unittest.TestCase):
             "platform": "windows",
             "automation_id": "oe.control.recording.filename",
         })
+        self.assertEqual(capabilities["oe.control.recording.directory"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.control.recording.directory"]["uia"], {
+            "platform": "windows",
+            "automation_id": "oe.control.recording.directory",
+        })
+        self.assertEqual(
+            capabilities["oe.control.recording.directory"]["mcp_tools"],
+            ["oe_get_recording_directory", "oe_set_recording_directory"],
+        )
         self.assertEqual(capabilities["oe.control.recording.new_directory"]["parity"], "BOTH")
         self.assertEqual(capabilities["oe.control.recording.force_new_directory"]["parity"], "BOTH")
         self.assertEqual(capabilities["oe.status.cpu_usage"]["parity"], "BOTH")
