@@ -14,6 +14,8 @@ struct FakeStatus
     int transitionCalls = 0;
     std::vector<StatusMode> requestedModes;
     bool rejectTransition = false;
+    bool recordNodesUnsynchronized = false;
+    StatusTransitionFailure operationFailure = StatusTransitionFailure::none;
 
     StatusApiHandlers handlers()
     {
@@ -23,8 +25,19 @@ struct FakeStatus
             {
                 ++transitionCalls;
                 requestedModes.push_back (requested);
-                if (! rejectTransition)
-                    mode = requested;
+                if (recordNodesUnsynchronized && requested == StatusMode::Record)
+                    return StatusTransitionResult {
+                        mode, StatusTransitionFailure::recordNodesNotSynchronized
+                    };
+                if (operationFailure != StatusTransitionFailure::none)
+                    return StatusTransitionResult { mode, operationFailure };
+                if (rejectTransition)
+                    return StatusTransitionResult {
+                        mode, StatusTransitionFailure::rejected
+                    };
+
+                mode = requested;
+                return StatusTransitionResult { mode, StatusTransitionFailure::none };
             }
         };
     }
@@ -38,7 +51,6 @@ httplib::Response put (FakeStatus& status, const std::string& body)
     handleStatusPut (request, response, status.handlers());
     return response;
 }
-
 json responseJson (const httplib::Response& response)
 {
     return json::parse (response.body);
@@ -217,4 +229,48 @@ TEST (StatusApiHandlerTests, ReturnsConflictWithRequestedAndActualModesWhenRejec
         EXPECT_EQ (body["mode"], rejection.actualText);
         EXPECT_EQ (status.transitionCalls, 1);
     }
+}
+
+TEST (StatusApiHandlerTests, MapsStatusOperationFailuresToStableHttpErrors)
+{
+    struct FailureCase
+    {
+        StatusTransitionFailure failure;
+        int httpStatus;
+        const char* errorCode;
+    };
+    const std::vector<FailureCase> cases {
+        { StatusTransitionFailure::operationUnavailable, 503, "operation_unavailable" },
+        { StatusTransitionFailure::operationTimedOut, 504, "operation_timeout" },
+        { StatusTransitionFailure::operationFailed, 500, "operation_failed" }
+    };
+
+    for (const auto& failure : cases)
+    {
+        FakeStatus status;
+        status.operationFailure = failure.failure;
+
+        const auto response = put (status, R"({"mode":"ACQUIRE"})");
+
+        expectJson (response, failure.httpStatus);
+        EXPECT_EQ (responseJson (response)["error"]["code"], failure.errorCode);
+        EXPECT_EQ (status.mode, StatusMode::Idle);
+    }
+}
+
+TEST (StatusApiHandlerTests, ReturnsStableConflictWhenRecordNodesAreUnsynchronized)
+{
+    FakeStatus status;
+    status.mode = StatusMode::Acquire;
+    status.recordNodesUnsynchronized = true;
+
+    const auto response = put (status, R"({"mode":"RECORD"})");
+
+    expectJson (response, 409);
+    const auto body = responseJson (response);
+    EXPECT_EQ (body["error"]["code"], "record_nodes_not_synchronized");
+    EXPECT_EQ (body["requested_mode"], "RECORD");
+    EXPECT_EQ (body["mode"], "ACQUIRE");
+    EXPECT_EQ (status.transitionCalls, 1);
+    EXPECT_EQ (status.mode, StatusMode::Acquire);
 }
