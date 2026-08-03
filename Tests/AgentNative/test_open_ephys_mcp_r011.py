@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import math
+import re
 import subprocess
 import sys
 import threading
@@ -401,6 +402,9 @@ class McpR011Tests(unittest.TestCase):
             self.assertIn(required, skill)
         for forbidden in ("oe_api_request", "uia locator", "processor", "parameter", "stream"):
             self.assertNotIn(forbidden, skill.lower())
+
+        tool_block = skill.split("Use only these tools:", 1)[1].split("Read the relevant state", 1)[0]
+        self.assertEqual(re.findall(r"`([^`]+)`", tool_block), TOOL_NAMES)
 
 
 if __name__ == "__main__": unittest.main()

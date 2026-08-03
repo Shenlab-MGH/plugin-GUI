@@ -46,6 +46,7 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertIn("Tests.AgentNative.test_open_ephys_release_bundle", workflow)
         self.assertRegex(workflow, r"fetch-depth:\s*0")
         self.assertIn("agent-native-v102-record-safety", workflow)
+        self.assertIn("agent-native-v102-core-r0-mcp-r010", workflow)
 
     def test_artifact_path_rejects_escape_forms(self):
         for value in ("../outside", "/absolute", "C:/absolute", "folder\\file", "nested/../../outside"):
@@ -63,8 +64,9 @@ class ReleaseBundleTests(unittest.TestCase):
         for document in (README_PATH.read_text(encoding="utf-8"), SKILL_PATH.read_text(encoding="utf-8")):
             with self.subTest(document=document[:40]):
                 normalized = " ".join(document.split())
-                for required in ("MCP bridge outbound client", "0.0.0.0", "raw Open Ephys API", "bypass MCP RECORD approval", "trusted network or firewall", "no listener or C++ change"):
+                for required in ("MCP bridge outbound client", "0.0.0.0", "raw Open Ephys API", "bypass MCP RECORD approval", "trusted network or firewall", "no HTTP listener or behavior change"):
                     self.assertIn(required, normalized)
+                self.assertNotIn("no listener or C++ change", normalized)
 
 
 if __name__ == "__main__": unittest.main()

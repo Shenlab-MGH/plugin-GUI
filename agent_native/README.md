@@ -10,7 +10,9 @@ Every call verifies the exact pinned capability document before accessing Open
 Ephys. Only the MCP bridge outbound client is loopback-only and refuses
 redirects. The raw Open Ephys API listener still binds `0.0.0.0`, remains
 network-exposed, and can bypass MCP RECORD approval. Run it only on a trusted
-network or firewall. There is no listener or C++ change in this slice.
+network or firewall. There is no HTTP listener or behavior change in this
+slice; its C++ change only adds semantic metadata to the existing
+recording-directory component.
 
 Status, options, filename, and directory mutations use pre-read, write, and post-read
 verification. RECORD requires same-call `approve_recording:true`, which is

@@ -10,16 +10,17 @@ capability contract `0.1.2`, and legacy MCP protocol `2024-11-05`.
 
 Use only these tools: `oe_get_capabilities`, `oe_get_status`, `oe_set_status`,
 `oe_get_recording_options`, `oe_set_recording_options`,
-`oe_get_recording_filename`, `oe_set_recording_filename`, `oe_get_cpu`,
-`oe_get_recording_directory`, `oe_set_recording_directory`, `oe_get_disk`, and
-`oe_get_time`.
+`oe_get_recording_filename`, `oe_set_recording_filename`,
+`oe_get_recording_directory`, `oe_set_recording_directory`, `oe_get_cpu`,
+`oe_get_disk`, and `oe_get_time`.
 
 Read the relevant state before a mutation and inspect its returned readback.
 Every tool independently verifies the exact ten Core R0.1.1 capabilities. Only
 the MCP bridge outbound client is loopback-only and rejects redirects. The raw
 Open Ephys API listener binds `0.0.0.0`, remains network-exposed, and can bypass
 MCP RECORD approval. Use a trusted network or firewall. This slice makes no
-listener or C++ change.
+HTTP listener or behavior change; its C++ change only adds semantic metadata to
+the existing recording-directory component.
 
 To request `RECORD`, include `approve_recording:true` in that same
 `oe_set_status` call. This approval is local safety metadata and is never sent
