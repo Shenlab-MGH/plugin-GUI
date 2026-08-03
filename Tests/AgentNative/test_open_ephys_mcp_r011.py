@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import math
+import ntpath
 import re
 import subprocess
 import sys
@@ -52,6 +53,10 @@ class FakeOpenEphysApi:
         self.recording = {
             "parent_directory": "C:/data", "prepend_text": "", "base_text": "Record Node",
             "append_text": "", "default_record_engine": "Binary", "record_nodes": [],
+        }
+        self.existing_directories = {
+            ntpath.normcase(ntpath.normpath(path))
+            for path in ("C:/data", "D:/Open Ephys", "D:/data", "E:/data")
         }
         self.cpu = {"usage": 0.25}
         self.disk = {"capability": "oe.status.disk_usage", "usage": 0.5, "minimum": 0.0, "maximum": 1.0, "read_only": True}
@@ -104,7 +109,12 @@ class FakeOpenEphysApi:
                     owner.options.update(body)
                     self.send_json(200, {"ok": True, **owner.options})
                 elif self.path == "/api/recording":
-                    owner.recording.update(body)
+                    if set(body) == {"parent_directory"}:
+                        normalized = ntpath.normpath(body["parent_directory"])
+                        if ntpath.normcase(normalized) in owner.existing_directories:
+                            owner.recording["parent_directory"] = normalized
+                    else:
+                        owner.recording.update(body)
                     self.send_json(200, owner.recording)
                 else:
                     self.send_json(404, {"error": "not found"})
@@ -139,6 +149,8 @@ class ContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, tool_names)
         for tool in contract["tools"]:
             self.assertFalse(tool["inputSchema"].get("additionalProperties", True), tool["name"])
+        directory_setter = next(tool for tool in contract["tools"] if tool["name"] == "oe_set_recording_directory")
+        self.assertEqual(directory_setter["inputSchema"]["properties"]["parent_directory"]["minLength"], 1)
 
 
 class McpR011Tests(unittest.TestCase):
@@ -264,25 +276,54 @@ class McpR011Tests(unittest.TestCase):
         self.ready_server()
         result, payload = self.call("oe_set_recording_directory", {"parent_directory": "D:/Open Ephys"})
         self.assertNotIn("isError", result)
-        self.assertEqual(payload, {"before": {"parent_directory": "C:/data"}, "requested": {"parent_directory": "D:/Open Ephys"}, "after": {"parent_directory": "D:/Open Ephys"}})
+        self.assertEqual(payload, {
+            "before": {"parent_directory": "C:/data"},
+            "requested": {"parent_directory": "D:/Open Ephys"},
+            "submitted": {"parent_directory": "D:\\Open Ephys"},
+            "after": {"parent_directory": "D:\\Open Ephys"},
+        })
         requests = [request for request in self.api.requests if request[1] == "/api/recording"]
         self.assertEqual([request[0] for request in requests[-3:]], ["GET", "PUT", "GET"])
-        self.assertEqual(requests[-2][2], {"parent_directory": "D:/Open Ephys"})
+        self.assertEqual(requests[-2][2], {"parent_directory": "D:\\Open Ephys"})
         self.api.mode = "RECORD"; self.api.requests.clear()
         self.assert_error("oe_set_recording_directory", {"parent_directory": "E:/data"}, "recording_active")
         self.assertFalse(any(request[0] == "PUT" and request[1] == "/api/recording" for request in self.api.requests))
 
-    def test_directory_preserves_path_forms_and_fails_closed_on_mismatch_or_4xx(self):
+    def test_directory_rejects_empty_relative_and_drive_relative_paths_before_http(self):
         self.ready_server()
-        for value in ("", "../official-decides"):
+        for value in ("", "../relative", "D:relative", "/current-drive-rooted"):
             with self.subTest(value=value):
-                result, payload = self.call("oe_set_recording_directory", {"parent_directory": value})
-                self.assertNotIn("isError", result); self.assertEqual(payload["after"], {"parent_directory": value})
-        self.api.recording_put_response = (200, self.api.recording)
-        self.assert_error("oe_set_recording_directory", {"parent_directory": "D:/unreadback"}, "postcondition_failed")
+                self.api.requests.clear()
+                self.assert_error("oe_set_recording_directory", {"parent_directory": value}, "invalid_arguments")
+                self.assertEqual(self.api.requests, [])
+
+    def test_directory_accepts_windows_equivalent_put_and_readback_forms(self):
+        self.ready_server()
+        original = self.server.api.request
+        def canonicalized_request(method, path, body=None):
+            response = original(method, path, body)
+            if path == "/api/recording" and method in {"PUT", "GET"} and response["parent_directory"] != "C:/data":
+                response = {**response, "parent_directory": "d:\\OPEN EPHYS\\."}
+                self.api.recording["parent_directory"] = response["parent_directory"]
+            return response
+        self.server.api.request = canonicalized_request
+        result, payload = self.call("oe_set_recording_directory", {"parent_directory": "D:/Open Ephys"})
+        self.assertNotIn("isError", result)
+        self.assertEqual(payload["requested"], {"parent_directory": "D:/Open Ephys"})
+        self.assertEqual(payload["submitted"], {"parent_directory": "D:\\Open Ephys"})
+        self.assertEqual(payload["after"], {"parent_directory": "d:\\OPEN EPHYS\\."})
+
+    def test_directory_nonexistent_noop_and_4xx_fail_transparently(self):
+        self.ready_server()
+        result, payload = self.call("oe_set_recording_directory", {"parent_directory": "D:/does-not-exist"})
+        self.assertTrue(result["isError"]); self.assertEqual(payload["error"]["code"], "postcondition_failed")
+        self.assertEqual(payload["error"]["requested"], {"parent_directory": "D:/does-not-exist"})
+        self.assertEqual(payload["error"]["submitted"], {"parent_directory": "D:\\does-not-exist"})
         self.api.recording_put_response = (409, {"error": "official refusal"})
         result, payload = self.call("oe_set_recording_directory", {"parent_directory": "D:/forbidden"})
         self.assertTrue(result["isError"]); self.assertEqual(payload["error"]["status"], 409)
+        self.assertEqual(payload["error"]["requested"], {"parent_directory": "D:/forbidden"})
+        self.assertEqual(payload["error"]["submitted"], {"parent_directory": "D:\\forbidden"})
 
     def test_committed_mutations_with_transport_failure_report_unknown_outcome(self):
         self.ready_server()
@@ -290,7 +331,7 @@ class McpR011Tests(unittest.TestCase):
             ("oe_set_status", {"mode": "ACQUIRE"}, "/api/status", "mode", "ACQUIRE"),
             ("oe_set_recording_options", {"expanded": True}, "/api/recording/options", "expanded", True),
             ("oe_set_recording_filename", {"base_text": "mouse"}, "/api/recording", "base_text", "mouse"),
-            ("oe_set_recording_directory", {"parent_directory": "D:/data"}, "/api/recording", "parent_directory", "D:/data"),
+            ("oe_set_recording_directory", {"parent_directory": "D:/data"}, "/api/recording", "parent_directory", "D:\\data"),
         )
         for name, arguments, path, field, expected in cases:
             with self.subTest(name=name):
@@ -307,6 +348,8 @@ class McpR011Tests(unittest.TestCase):
                 self.assertEqual(payload["error"]["code"], "mutation_outcome_unknown")
                 self.assertEqual(payload["error"]["requested"], arguments)
                 self.assertEqual(payload["error"]["observed"][field], expected)
+                if name == "oe_set_recording_directory":
+                    self.assertEqual(payload["error"]["submitted"], {"parent_directory": "D:\\data"})
 
     def test_committed_mutations_with_http_504_report_unknown_outcome(self):
         self.ready_server()
@@ -315,7 +358,7 @@ class McpR011Tests(unittest.TestCase):
             ("oe_set_status", {"mode": "ACQUIRE"}, "/api/status", "mode", "ACQUIRE"),
             ("oe_set_recording_options", {"expanded": True}, "/api/recording/options", "expanded", True),
             ("oe_set_recording_filename", {"base_text": "mouse"}, "/api/recording", "base_text", "mouse"),
-            ("oe_set_recording_directory", {"parent_directory": "D:/data"}, "/api/recording", "parent_directory", "D:/data"),
+            ("oe_set_recording_directory", {"parent_directory": "D:/data"}, "/api/recording", "parent_directory", "D:\\data"),
         )
         for name, arguments, path, field, expected in cases:
             with self.subTest(name=name):
@@ -333,6 +376,8 @@ class McpR011Tests(unittest.TestCase):
                 self.assertEqual(payload["error"]["put_error"]["status"], 504)
                 self.assertEqual(payload["error"]["put_error"]["body"], timeout_body)
                 self.assertEqual(payload["error"]["observed"][field], expected)
+                if name == "oe_set_recording_directory":
+                    self.assertEqual(payload["error"]["submitted"], {"parent_directory": "D:\\data"})
 
     def test_committed_mutations_with_invalid_put_response_report_unknown_outcome(self):
         self.ready_server()
@@ -340,7 +385,7 @@ class McpR011Tests(unittest.TestCase):
             ("oe_set_status", {"mode": "ACQUIRE"}, "/api/status", "mode", "ACQUIRE"),
             ("oe_set_recording_options", {"expanded": True}, "/api/recording/options", "expanded", True),
             ("oe_set_recording_filename", {"base_text": "mouse"}, "/api/recording", "base_text", "mouse"),
-            ("oe_set_recording_directory", {"parent_directory": "D:/data"}, "/api/recording", "parent_directory", "D:/data"),
+            ("oe_set_recording_directory", {"parent_directory": "D:/data"}, "/api/recording", "parent_directory", "D:\\data"),
         )
         for name, arguments, path, field, expected in cases:
             with self.subTest(name=name):
@@ -355,6 +400,8 @@ class McpR011Tests(unittest.TestCase):
                 self.assertEqual(payload["error"]["code"], "mutation_outcome_unknown")
                 self.assertEqual(payload["error"]["requested"], arguments)
                 self.assertEqual(payload["error"]["observed"][field], expected)
+                if name == "oe_set_recording_directory":
+                    self.assertEqual(payload["error"]["submitted"], {"parent_directory": "D:\\data"})
 
     def test_unknown_mutation_outcome_includes_readback_failure_details(self):
         self.ready_server()

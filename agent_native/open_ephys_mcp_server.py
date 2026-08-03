@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import ntpath
 import sys
 import urllib.error
 import urllib.parse
@@ -193,6 +194,20 @@ def directory_projection(payload: Any) -> dict[str, str]:
     return {"parent_directory": recording["parent_directory"]}
 
 
+def normalize_windows_directory(value: str) -> str:
+    if not value:
+        raise ToolError("invalid_arguments", "parent_directory must be a non-empty absolute Windows path.")
+    normalized = ntpath.normpath(value)
+    drive, _ = ntpath.splitdrive(normalized)
+    if not drive or not ntpath.isabs(normalized):
+        raise ToolError("invalid_arguments", "parent_directory must be a non-empty absolute Windows path.")
+    return normalized
+
+
+def windows_paths_equivalent(left: str, right: str) -> bool:
+    return ntpath.normcase(ntpath.normpath(left)) == ntpath.normcase(ntpath.normpath(right))
+
+
 def validate_cpu(payload: Any) -> dict[str, float | int]:
     value = expect_object(payload, "CPU")
     if set(value) != {"usage"} or not _is_number(value.get("usage")) or not 0.0 <= float(value["usage"]) <= 1.0:
@@ -331,6 +346,7 @@ class McpServer:
         elif name == "oe_set_recording_directory":
             if set(arguments) != {"parent_directory"} or not isinstance(arguments["parent_directory"], str):
                 raise ToolError("invalid_arguments", "parent_directory must be the only string argument.")
+            normalize_windows_directory(arguments["parent_directory"])
 
     def _verify_capabilities(self) -> dict[str, Any]:
         actual = self.api.request("GET", "/api/capabilities")
@@ -339,8 +355,10 @@ class McpServer:
             raise ToolError("capability_contract_mismatch", "Open Ephys capabilities do not exactly match the pinned Core R0 contract.")
         return actual
 
-    def _raise_mutation_outcome_unknown(self, requested: dict[str, Any], put_error: ToolError, path: str, validator) -> None:
+    def _raise_mutation_outcome_unknown(self, requested: dict[str, Any], put_error: ToolError, path: str, validator, *, submitted: dict[str, Any] | None = None) -> None:
         details: dict[str, Any] = {"requested": requested, "put_error": put_error.payload()["error"]}
+        if submitted is not None:
+            details["submitted"] = submitted
         try:
             details["observed"] = validator(self.api.request("GET", path))
         except ToolError as readback_error:
@@ -414,21 +432,24 @@ class McpServer:
                 raise ToolError("postcondition_failed", "Open Ephys did not confirm the requested recording filename after mutation.", requested=arguments, actual=after)
             return {"before": before, "requested": arguments, "after": after}
         if name == "oe_set_recording_directory":
+            submitted = {"parent_directory": normalize_windows_directory(arguments["parent_directory"])}
             if validate_status(self.api.request("GET", "/api/status"))["mode"] == "RECORD":
-                raise ToolError("recording_active", "Recording directory cannot be changed while Open Ephys is recording.")
+                raise ToolError("recording_active", "Recording directory cannot be changed while Open Ephys is recording.", requested=arguments, submitted=submitted)
             before = directory_projection(self.api.request("GET", "/api/recording"))
             try:
-                response = directory_projection(self.api.request("PUT", "/api/recording", arguments))
+                response = directory_projection(self.api.request("PUT", "/api/recording", submitted))
             except ApiHttpError as exc:
                 if self._is_authoritative_put_http_error(exc):
-                    raise
-                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", directory_projection)
+                    raise ToolError(exc.code, exc.message, **exc.details, requested=arguments, submitted=submitted)
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", directory_projection, submitted=submitted)
             except ToolError as exc:
-                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", directory_projection)
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", directory_projection, submitted=submitted)
             after = directory_projection(self.api.request("GET", "/api/recording"))
-            if response != arguments or after != arguments:
-                raise ToolError("postcondition_failed", "Open Ephys did not confirm the requested recording directory after mutation.", requested=arguments, actual=after)
-            return {"before": before, "requested": arguments, "after": after}
+            expected_path = submitted["parent_directory"]
+            if (not windows_paths_equivalent(response["parent_directory"], expected_path)
+                    or not windows_paths_equivalent(after["parent_directory"], expected_path)):
+                raise ToolError("postcondition_failed", "Open Ephys did not confirm the requested recording directory after mutation.", requested=arguments, submitted=submitted, actual=after)
+            return {"before": before, "requested": arguments, "submitted": submitted, "after": after}
         raise JsonRpcError(INVALID_PARAMS, "Unknown tool.")
 
 

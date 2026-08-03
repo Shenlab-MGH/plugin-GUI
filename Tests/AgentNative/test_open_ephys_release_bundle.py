@@ -58,6 +58,11 @@ class ReleaseBundleTests(unittest.TestCase):
         for required in ("v1.0.2", "r0.1.1", "2024-11-05", "exactly twelve", "hardware_verified:false", "scientific_verified:false"):
             self.assertIn(required, readme)
 
+        for document in (readme, SKILL_PATH.read_text(encoding="utf-8")):
+            normalized = " ".join(document.split())
+            for required in ("non-empty absolute Windows path", "does not preflight existence", "200 without applying the path"):
+                self.assertIn(required, normalized)
+
     def test_exposure_boundary_is_explicit_in_source_and_operator_docs(self):
         source = HTTP_SERVER_PATH.read_text(encoding="utf-8")
         self.assertIn('svr_->listen ("0.0.0.0", PORT)', source)

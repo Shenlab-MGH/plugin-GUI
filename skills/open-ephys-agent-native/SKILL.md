@@ -34,11 +34,14 @@ mutations use pre-read, write, and post-read verification and fail closed on a
 mismatch.
 
 Use `oe_get_recording_directory` to read the parent directory. Use
-`oe_set_recording_directory` only for the exact requested string; it sends only
-`parent_directory`, does not validate or create a path, and refuses while
-status is `RECORD`. A returned value does not establish that the path exists,
-is writable, has free space, applies to existing Record Nodes, or was used by
-a successful recording.
+`oe_set_recording_directory` only for a non-empty absolute Windows path. It
+retains the original request, normalizes and reports the submitted Windows path,
+sends only `parent_directory`, and refuses while status is `RECORD`. The bridge
+does not preflight existence or create a path. Official Open Ephys alone checks
+`File.exists()`; its raw API may return 200 without applying the path, so accept
+success only after an equivalent PUT response and GET readback. A returned
+value does not establish writability, free space, applicability to existing
+Record Nodes, or use by a successful recording.
 
 This bundle is offline-contract-and-ci verified only:
 `hardware_verified:false` and `scientific_verified:false`.
