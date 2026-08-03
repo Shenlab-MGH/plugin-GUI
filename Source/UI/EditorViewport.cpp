@@ -32,8 +32,128 @@
 #include "ProcessorList.h"
 #include "SemanticComponent.h"
 
+#include <set>
+
 const int BORDER_SIZE = 6;
 const int TAB_SIZE = 30;
+
+namespace
+{
+String processorAccessibilityId (int nodeId)
+{
+    return "oe.processor." + String (nodeId);
+}
+
+String processorAccessibilityDescription (const ProcessorAccessibilitySnapshotItem& item)
+{
+    return "Read-only loaded processor. Node ID: " + String (item.nodeId)
+           + ". Predecessor node ID: "
+           + (item.predecessorNodeId.has_value()
+                  ? String (*item.predecessorNodeId)
+                  : String ("none"))
+           + ".";
+}
+
+class ProcessorAccessibilityProxyHandler final : public AccessibilityHandler
+{
+public:
+    explicit ProcessorAccessibilityProxyHandler (Component& component)
+        : AccessibilityHandler (component, AccessibilityRole::listItem, AccessibilityActions {})
+    {
+    }
+
+    AccessibleState getCurrentState() const override
+    {
+        return AccessibilityHandler::getCurrentState().withAccessibleOffscreen();
+    }
+};
+
+class ProcessorAccessibilityProxy final : public Component
+{
+public:
+    explicit ProcessorAccessibilityProxy (const ProcessorAccessibilitySnapshotItem& item)
+    {
+        applySemanticMetadata (*this,
+                               processorAccessibilityId (item.nodeId),
+                               item.name,
+                               processorAccessibilityDescription (item));
+        setBounds (-10000, -10000, 1, 1);
+        setInterceptsMouseClicks (false, false);
+        setWantsKeyboardFocus (false);
+    }
+
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override
+    {
+        return std::make_unique<ProcessorAccessibilityProxyHandler> (*this);
+    }
+};
+
+class ProcessorAccessibilityTraverser final : public ComponentTraverser
+{
+public:
+    explicit ProcessorAccessibilityTraverser (std::vector<Component*> orderedItems)
+        : items (std::move (orderedItems))
+    {
+    }
+
+    Component* getDefaultComponent (Component*) override
+    {
+        return items.empty() ? nullptr : items.front();
+    }
+
+    Component* getNextComponent (Component* current) override
+    {
+        const auto iterator = std::find (items.begin(), items.end(), current);
+        if (iterator == items.end())
+            return nullptr;
+        const auto next = std::next (iterator);
+        return next == items.end() ? nullptr : *next;
+    }
+
+    Component* getPreviousComponent (Component* current) override
+    {
+        const auto iterator = std::find (items.begin(), items.end(), current);
+        if (iterator == items.end() || iterator == items.begin())
+            return nullptr;
+        return *std::prev (iterator);
+    }
+
+    std::vector<Component*> getAllComponents (Component*) override
+    {
+        return items;
+    }
+
+private:
+    std::vector<Component*> items;
+};
+} // namespace
+
+std::vector<ProcessorAccessibilitySnapshotItem>
+buildProcessorAccessibilitySnapshot (const Array<GenericProcessor*>& processors)
+{
+    std::vector<ProcessorAccessibilitySnapshotItem> snapshot;
+    std::set<int> seenNodeIds;
+
+    for (auto* processor : processors)
+    {
+        if (processor == nullptr || processor->isEmpty())
+            continue;
+
+        const auto nodeId = processor->getNodeId();
+        if (seenNodeIds.count (nodeId) != 0)
+            continue;
+
+        seenNodeIds.insert (nodeId);
+        const auto* predecessor = processor->getSourceNode();
+        snapshot.push_back ({ nodeId,
+                              processor->getName(),
+                              predecessor == nullptr
+                                  ? std::optional<int> {}
+                                  : std::optional<int> { predecessor->getNodeId() } });
+    }
+
+    return snapshot;
+}
 
 EditorViewport::EditorViewport (SignalChainTabComponent* s_)
     : message ("Drag-and-drop some rows from the top-left box onto this component!"),
@@ -55,6 +175,7 @@ EditorViewport::EditorViewport (SignalChainTabComponent* s_)
     setFocusContainerType (FocusContainerType::focusContainer);
 
     addMouseListener (this, true);
+    setWantsKeyboardFocus (true);
 
     sourceDropImage = ImageCache::getFromMemory (BinaryData::SourceDrop_png,
                                                  BinaryData::SourceDrop_pngSize);
@@ -72,6 +193,177 @@ EditorViewport::EditorViewport (SignalChainTabComponent* s_)
 std::unique_ptr<AccessibilityHandler> EditorViewport::createAccessibilityHandler()
 {
     return std::make_unique<AccessibilityHandler> (*this, AccessibilityRole::list);
+}
+
+void EditorViewport::updateAccessibleProcessorInventory (
+    const std::vector<ProcessorAccessibilitySnapshotItem>& snapshot)
+{
+    jassert (MessageManager::getInstance()->isThisTheMessageThread());
+
+    std::vector<ProcessorAccessibilitySnapshotItem> normalized;
+    std::set<int> seenNodeIds;
+    for (const auto& item : snapshot)
+    {
+        if (seenNodeIds.insert (item.nodeId).second)
+            normalized.push_back (item);
+    }
+
+    const auto previous = processorAccessibilitySnapshot;
+    processorAccessibilitySnapshot = std::move (normalized);
+    hasProcessorAccessibilitySnapshot = true;
+    reconcileProcessorAccessibilityComponents();
+
+    bool structureChanged = previous.size() != processorAccessibilitySnapshot.size();
+    const auto commonSize = jmin (previous.size(), processorAccessibilitySnapshot.size());
+    for (size_t index = 0; index < commonSize; ++index)
+    {
+        const auto& oldItem = previous[index];
+        const auto& newItem = processorAccessibilitySnapshot[index];
+        structureChanged = structureChanged
+                           || oldItem.nodeId != newItem.nodeId
+                           || oldItem.predecessorNodeId != newItem.predecessorNodeId;
+
+        if (oldItem.nodeId == newItem.nodeId && oldItem.name != newItem.name)
+        {
+            if (auto* component = findVisibleProcessorEditor (newItem.nodeId))
+            {
+                if (auto* handler = component->getAccessibilityHandler())
+                    handler->notifyAccessibilityEvent (AccessibilityEvent::titleChanged);
+            }
+            else if (auto* component = findProcessorAccessibilityProxy (newItem.nodeId))
+            {
+                if (auto* handler = component->getAccessibilityHandler())
+                    handler->notifyAccessibilityEvent (AccessibilityEvent::titleChanged);
+            }
+        }
+    }
+
+    if (structureChanged)
+        notifyProcessorInventoryStructureChanged();
+}
+
+std::unique_ptr<ComponentTraverser> EditorViewport::createFocusTraverser()
+{
+    return std::make_unique<ProcessorAccessibilityTraverser> (
+        getAccessibleProcessorComponents());
+}
+
+GenericEditor* EditorViewport::findVisibleProcessorEditor (int nodeId) const
+{
+    for (auto* editor : editorArray)
+    {
+        if (editor != nullptr && editor->getProcessor() != nullptr
+            && ! editor->getProcessor()->isEmpty()
+            && editor->getProcessor()->getNodeId() == nodeId)
+            return editor;
+    }
+
+    return nullptr;
+}
+
+Component* EditorViewport::findProcessorAccessibilityProxy (int nodeId) const
+{
+    const auto id = processorAccessibilityId (nodeId);
+    for (auto* proxy : processorAccessibilityProxies)
+        if (proxy->getComponentID() == id)
+            return proxy;
+    return nullptr;
+}
+
+std::vector<Component*> EditorViewport::getAccessibleProcessorComponents() const
+{
+    std::vector<Component*> components;
+
+    // updateVisibleEditors() predates the complete graph snapshot API. Keep its
+    // visible editors accessible until the graph publishes its first snapshot;
+    // after that, an explicitly empty snapshot correctly means an empty graph.
+    if (! hasProcessorAccessibilitySnapshot)
+    {
+        components.reserve (editorArray.size());
+        for (auto* editor : editorArray)
+            if (editor != nullptr && editor->getProcessor() != nullptr
+                && ! editor->getProcessor()->isEmpty())
+                components.push_back (editor);
+
+        return components;
+    }
+
+    components.reserve (processorAccessibilitySnapshot.size());
+
+    for (const auto& item : processorAccessibilitySnapshot)
+    {
+        if (auto* editor = findVisibleProcessorEditor (item.nodeId))
+            components.push_back (editor);
+        else if (auto* proxy = findProcessorAccessibilityProxy (item.nodeId))
+            components.push_back (proxy);
+    }
+
+    return components;
+}
+
+void EditorViewport::reconcileProcessorAccessibilityComponents()
+{
+    std::set<int> requiredProxyNodeIds;
+
+    for (const auto& item : processorAccessibilitySnapshot)
+    {
+        Component* component = findVisibleProcessorEditor (item.nodeId);
+        if (component == nullptr)
+        {
+            requiredProxyNodeIds.insert (item.nodeId);
+            component = findProcessorAccessibilityProxy (item.nodeId);
+            if (component == nullptr)
+            {
+                component = new ProcessorAccessibilityProxy (item);
+                processorAccessibilityProxies.add (component);
+                addAndMakeVisible (component);
+            }
+        }
+
+        const auto id = processorAccessibilityId (item.nodeId);
+        const auto description = processorAccessibilityDescription (item);
+        if (component->getComponentID() != id)
+            component->setComponentID (id);
+        if (component->getTitle() != item.name)
+            component->setTitle (item.name);
+        // Proxies always use inventory descriptions. Visible GenericEditors keep
+        // their existing descriptions unless they still lack predecessor metadata
+        // needed by the multi-root inventory contract.
+        if (dynamic_cast<GenericEditor*> (component) == nullptr)
+        {
+            if (component->getDescription() != description)
+                component->setDescription (description);
+        }
+        else if (! component->getDescription().contains ("Predecessor node ID:"))
+        {
+            // Preserve richer GenericEditor constructor/display text and append
+            // the inventory predecessor clause required by external UIA clients.
+            const auto merged = component->getDescription().trimEnd()
+                                + (component->getDescription().endsWithIgnoreCase (".") ? " " : ". ")
+                                + "Predecessor node ID: "
+                                + (item.predecessorNodeId.has_value()
+                                       ? String (*item.predecessorNodeId)
+                                       : String ("none"))
+                                + ".";
+            if (component->getDescription() != merged)
+                component->setDescription (merged);
+        }
+        component->setAccessible (true);
+    }
+
+    for (int index = processorAccessibilityProxies.size(); --index >= 0;)
+    {
+        auto* proxy = processorAccessibilityProxies[index];
+        const auto nodeId = proxy->getComponentID().fromLastOccurrenceOf (".", false, false).getIntValue();
+        if (requiredProxyNodeIds.count (nodeId) == 0)
+            processorAccessibilityProxies.remove (index, true);
+    }
+}
+
+void EditorViewport::notifyProcessorInventoryStructureChanged()
+{
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::structureChanged);
 }
 
 EditorViewport::~EditorViewport()
@@ -389,6 +681,9 @@ void EditorViewport::updateVisibleEditors (Array<GenericEditor*> visibleEditors,
 
     refreshEditors();
     signalChainTabComponent->refreshTabs (numberOfTabs, selectedTab);
+    reconcileProcessorAccessibilityComponents();
+    if (! processorAccessibilitySnapshot.empty())
+        notifyProcessorInventoryStructureChanged();
     repaint();
 }
 

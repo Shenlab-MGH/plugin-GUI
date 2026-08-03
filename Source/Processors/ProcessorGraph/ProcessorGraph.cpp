@@ -830,9 +830,12 @@ void ProcessorGraph::updateViews (GenericProcessor* processor, bool updateGraphV
             editorArray.add (p->getEditor());
         }
 
-        AccessClass::getEditorViewport()->updateVisibleEditors (editorArray,
-                                                                rootNodes.size(),
-                                                                rootNodes.indexOf (rootProcessor));
+        auto* editorViewport = AccessClass::getEditorViewport();
+        editorViewport->updateVisibleEditors (editorArray,
+                                              rootNodes.size(),
+                                              rootNodes.indexOf (rootProcessor));
+        editorViewport->updateAccessibleProcessorInventory (
+            buildProcessorAccessibilitySnapshot (getListOfProcessors()));
     }
 }
 

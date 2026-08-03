@@ -38,6 +38,9 @@
 #include "DataViewport.h"
 #include "UIComponent.h"
 
+#include <optional>
+#include <vector>
+
 class GenericEditor;
 class SignalChainTabButton;
 class SignalChainTabComponent;
@@ -45,6 +48,28 @@ class SignalChainScrollButton;
 class ControlPanel;
 class UIComponent;
 class AddProcessor;
+
+struct TESTABLE ProcessorAccessibilitySnapshotItem
+{
+    int nodeId;
+    String name;
+    std::optional<int> predecessorNodeId;
+
+    bool operator== (const ProcessorAccessibilitySnapshotItem& other) const
+    {
+        return nodeId == other.nodeId
+               && name == other.name
+               && predecessorNodeId == other.predecessorNodeId;
+    }
+
+    bool operator!= (const ProcessorAccessibilitySnapshotItem& other) const
+    {
+        return ! (*this == other);
+    }
+};
+
+TESTABLE std::vector<ProcessorAccessibilitySnapshotItem>
+buildProcessorAccessibilitySnapshot (const Array<GenericProcessor*>& processors);
 
 /**
 
@@ -77,6 +102,17 @@ public:
 
     /** Exposes the loaded signal-chain editors as an accessibility list. */
     TESTABLE std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
+    /** Uses API-order value metadata to expose every loaded processor. */
+    TESTABLE void updateAccessibleProcessorInventory (
+        const std::vector<ProcessorAccessibilitySnapshotItem>& snapshot);
+
+    /** Returns the current value-only accessibility inventory. */
+    TESTABLE const std::vector<ProcessorAccessibilitySnapshotItem>&
+    getAccessibleProcessorInventorySnapshot() const { return processorAccessibilitySnapshot; }
+
+    /** Returns processor items in the same order as the API inventory. */
+    std::unique_ptr<ComponentTraverser> createFocusTraverser() override;
 
     /** Highlights the given editor. */
     void highlightEditor (GenericEditor* editor);
@@ -225,6 +261,12 @@ public:
     bool somethingIsBeingDraggedOver;
 
 private:
+    GenericEditor* findVisibleProcessorEditor (int nodeId) const;
+    Component* findProcessorAccessibilityProxy (int nodeId) const;
+    std::vector<Component*> getAccessibleProcessorComponents() const;
+    void reconcileProcessorAccessibilityComponents();
+    void notifyProcessorInventoryStructureChanged();
+
     String message;
 
     GenericEditor* lastEditor;
@@ -254,6 +296,10 @@ private:
     bool signalChainIsLocked = false;
 
     OwnedArray<AddProcessor> orphanedActions;
+
+    std::vector<ProcessorAccessibilitySnapshotItem> processorAccessibilitySnapshot;
+    bool hasProcessorAccessibilitySnapshot = false;
+    OwnedArray<Component> processorAccessibilityProxies;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EditorViewport);
 };
