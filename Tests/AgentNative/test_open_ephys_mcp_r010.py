@@ -227,6 +227,18 @@ class McpR010Tests(unittest.TestCase):
         self.assertIsNone(malformed["id"])
         self.assertEqual(malformed["error"]["code"], -32600)
 
+    def test_invalid_request_ids_are_never_reflected(self):
+        for invalid_id in [True, False, None, [], {}, 1.5]:
+            with self.subTest(invalid_id=invalid_id):
+                response = self.server.handle({
+                    "jsonrpc": "2.0", "id": invalid_id, "method": "initialize", "params": {
+                        "protocolVersion": "2024-11-05", "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1"},
+                    },
+                })
+                self.assertIsNone(response["id"])
+                self.assertEqual(response["error"]["code"], -32600)
+
     def test_capability_verification_is_fail_closed(self):
         self.ready_server()
         result, payload = self.call_tool("oe_get_capabilities")
@@ -324,6 +336,8 @@ class McpR010Tests(unittest.TestCase):
             {"base_text": "mouse/probe"}, {"base_text": "mouse\\probe"},
             {"base_text": "mouse\x00probe"}, {"base_text": "mouse*probe"},
             {"base_text": "CON"}, {"base_text": "mouse."},
+            {"base_text": "COM¹"}, {"base_text": "COM².txt"},
+            {"base_text": "LPT³.log"},
         ]
         for arguments in invalid_arguments:
             with self.subTest(arguments=arguments):

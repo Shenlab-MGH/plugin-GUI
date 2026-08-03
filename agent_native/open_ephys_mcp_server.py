@@ -218,7 +218,12 @@ def validate_filename_component(value: str) -> None:
         raise ToolError("invalid_arguments", "Filename components must not contain paths or Windows-invalid characters.")
     if value.endswith((" ", ".")):
         raise ToolError("invalid_arguments", "Filename components cannot end with a space or dot.")
-    reserved = {"CON", "PRN", "AUX", "NUL", *{f"COM{i}" for i in range(1, 10)}, *{f"LPT{i}" for i in range(1, 10)}}
+    reserved_suffixes = {*(str(i) for i in range(1, 10)), "\u00b9", "\u00b2", "\u00b3"}
+    reserved = {
+        "CON", "PRN", "AUX", "NUL",
+        *{f"COM{suffix}" for suffix in reserved_suffixes},
+        *{f"LPT{suffix}" for suffix in reserved_suffixes},
+    }
     if value.split(".", 1)[0].upper() in reserved:
         raise ToolError("invalid_arguments", "Filename component is a reserved Windows device name.")
 
@@ -232,7 +237,8 @@ class McpServer:
         self.connection_state = "new"
 
     def handle(self, request: Any) -> dict[str, Any] | None:
-        request_id = request.get("id") if isinstance(request, dict) else None
+        candidate_id = request.get("id") if isinstance(request, dict) else None
+        request_id = candidate_id if self._is_valid_request_id(candidate_id) else None
         valid_notification = (
             isinstance(request, dict)
             and request.get("jsonrpc") == "2.0"
@@ -275,6 +281,10 @@ class McpServer:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
     @staticmethod
+    def _is_valid_request_id(request_id: Any) -> bool:
+        return not isinstance(request_id, bool) and isinstance(request_id, (int, str))
+
+    @staticmethod
     def _validate_request(request: Any) -> None:
         if not isinstance(request, dict) or request.get("jsonrpc") != "2.0":
             raise JsonRpcError(INVALID_REQUEST, "Invalid Request")
@@ -289,7 +299,7 @@ class McpServer:
             raise JsonRpcError(INVALID_REQUEST, "notifications/initialized must not have an id")
         if "id" in request:
             request_id = request["id"]
-            if request_id is None or isinstance(request_id, bool) or not isinstance(request_id, (int, str)):
+            if not McpServer._is_valid_request_id(request_id):
                 raise JsonRpcError(INVALID_REQUEST, "Request id must be a string or integer")
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
