@@ -309,14 +309,49 @@ class McpR010Tests(unittest.TestCase):
             }},
             {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+                "name": "oe_get_capabilities", "arguments": {},
+            }},
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
+                "name": "oe_get_status", "arguments": {},
+            }},
+            {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {
+                "name": "oe_get_recording_filename", "arguments": {},
+            }},
+            {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
+                "name": "oe_get_cpu", "arguments": {},
+            }},
+            {"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {
+                "name": "oe_set_status", "arguments": {"mode": "RECORD"},
+            }},
         ]) + "\n"
         completed = subprocess.run(
-            [sys.executable, str(SERVER_PATH), "--contract", str(CONTRACT_PATH)],
+            [
+                sys.executable, str(SERVER_PATH),
+                "--contract", str(CONTRACT_PATH),
+                "--base-url", self.api.base_url,
+            ],
             input=requests, text=True, capture_output=True, timeout=10, check=True,
         )
         lines = completed.stdout.splitlines()
-        self.assertEqual(len(lines), 3)
-        self.assertEqual([json.loads(line)["id"] for line in lines], [1, 2, 3])
+        responses = [json.loads(line) for line in lines]
+        self.assertEqual([response["id"] for response in responses], list(range(1, 9)))
+        self.assertEqual(responses[0]["error"]["code"], -32601)
+        self.assertEqual(responses[1]["result"]["protocolVersion"], "2024-11-05")
+        self.assertEqual(
+            [tool["name"] for tool in responses[2]["result"]["tools"]],
+            [tool["name"] for tool in self.contract["tools"]],
+        )
+        status = json.loads(responses[4]["result"]["content"][0]["text"])
+        filename = json.loads(responses[5]["result"]["content"][0]["text"])
+        cpu = json.loads(responses[6]["result"]["content"][0]["text"])
+        refusal = json.loads(responses[7]["result"]["content"][0]["text"])
+        self.assertEqual(status, {"mode": "IDLE"})
+        self.assertEqual(filename["base_text"], "Record Node")
+        self.assertEqual(cpu, {"usage": 0.25})
+        self.assertTrue(responses[7]["result"]["isError"])
+        self.assertEqual(refusal["error"]["code"], "recording_approval_required")
+        self.assertFalse(any(request[0] == "PUT" for request in self.api.requests))
         self.assertEqual(completed.stderr, "")
 
     def test_skill_is_pinned_to_the_same_minimal_surface(self):
