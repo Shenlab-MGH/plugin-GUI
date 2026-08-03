@@ -6,7 +6,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_PATH = ROOT / "agent_native" / "open_ephys_agent_release_bundle.json"
-CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_v0_0_1.json"
+CORE_CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_v0_0_1.json"
+CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_v0_0_2.json"
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
 README_PATH = ROOT / "agent_native" / "README.md"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
@@ -22,23 +23,24 @@ def artifact_path(root, value):
     return result
 
 
-PRODUCT_VERSION = "0.0.1"
+PRODUCT_VERSION = "0.0.2"
 PROTOCOL_VERSION = "2024-11-05"
-ACTIVE_CONTRACT_NAME = "open_ephys_agent_contract_v1_0_2_v0_0_1.json"
+ACTIVE_CONTRACT_NAME = "open_ephys_agent_contract_v1_0_2_v0_0_2.json"
 ACTIVE_CONTRACT_PATH = ROOT / "agent_native" / ACTIVE_CONTRACT_NAME
 SERVER_PATH = ROOT / "agent_native" / "open_ephys_mcp_server.py"
 CAPABILITY_SOURCE = ROOT / "Source" / "Utils" / "ControlCapabilityJson.cpp"
 
 
 class ReleaseBundleTests(unittest.TestCase):
-    def test_active_core_product_version_surfaces_are_0_0_1(self):
-        """Every active core product version surface must be literal 0.0.1.
+    def test_active_recording_directory_product_version_surfaces_are_0_0_2(self):
+        """Every active recording-directory product version surface must be literal 0.0.2.
 
         MCP protocol 2024-11-05 is a protocol pin, not a product version, and must stay unchanged.
         """
         import importlib.util
 
         self.assertTrue(ACTIVE_CONTRACT_PATH.is_file(), f"missing active contract file {ACTIVE_CONTRACT_NAME}")
+        self.assertTrue(CORE_CONTRACT_PATH.is_file(), "the immutable 0.0.1 core contract must remain available")
         self.assertFalse((ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_r0_1_0.json").exists(),
                          "historical r0.1.0 contract filename must not remain the active artifact")
 
@@ -97,23 +99,23 @@ class ReleaseBundleTests(unittest.TestCase):
     def test_release_bundle_pins_contract_provenance_and_nonclaims(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(bundle["format_version"], "0.0.1")
-        self.assertEqual(bundle["bundle"], {"id": "open-ephys-agent-native", "version": "0.0.1", "platform": "windows", "coverage": "narrow-core-r0"})
+        self.assertEqual(bundle["format_version"], "0.0.2")
+        self.assertEqual(bundle["bundle"], {"id": "open-ephys-agent-native", "version": "0.0.2", "platform": "windows", "coverage": "narrow-core-r0-recording-directory"})
         self.assertEqual(bundle["official_upstream"], {"repository": "open-ephys/plugin-GUI", "tag": "v1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f", "gui_version": "1.0.2"})
-        self.assertEqual(bundle["contract"]["artifact"], "agent_native/open_ephys_agent_contract_v1_0_2_v0_0_1.json")
+        self.assertEqual(bundle["contract"]["artifact"], "agent_native/open_ephys_agent_contract_v1_0_2_v0_0_2.json")
         self.assertEqual(bundle["contract"]["version"], contract["contract"]["version"])
         self.assertEqual(bundle["verification"], {"level": "offline-contract-and-ci", "hardware_verified": False, "scientific_verified": False})
         self.assertFalse(bundle["mcp"]["modern_protocol_supported"])
         self.assertEqual(bundle["limitations"], {"mcp_loopback_scope": "outbound-client-only", "raw_api_bind_address": "0.0.0.0", "raw_api_can_bypass_mcp_recording_approval": True, "deployment_requirement": "trusted-network-or-firewall"})
         for component in bundle["components"].values(): self.assertTrue(artifact_path(ROOT, component["artifact"]).is_file())
 
-    def test_provenance_is_ancestral_and_workflow_runs_r0_tests(self):
+    def test_provenance_is_ancestral_and_workflow_runs_v002_tests(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
         tagged = subprocess.run(["git", "rev-parse", "--verify", "refs/tags/v1.0.2^{commit}"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
         self.assertEqual(tagged, bundle["official_upstream"]["commit"])
         self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", tagged, "HEAD"], cwd=ROOT).returncode, 0)
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-        self.assertIn("Tests.AgentNative.test_open_ephys_mcp_r010", workflow)
+        self.assertIn("Tests.AgentNative.test_open_ephys_mcp_v002", workflow)
         self.assertIn("Tests.AgentNative.test_open_ephys_release_bundle", workflow)
         self.assertRegex(workflow, r"fetch-depth:\s*0")
         self.assertIn("agent-native-v102-record-safety", workflow)
@@ -125,8 +127,11 @@ class ReleaseBundleTests(unittest.TestCase):
 
     def test_readme_pins_the_narrow_surface_and_nonclaims(self):
         readme = README_PATH.read_text(encoding="utf-8")
-        for required in ("v1.0.2", "0.0.1", "2024-11-05", "exactly ten", "hardware_verified:false", "scientific_verified:false"):
+        for required in ("v1.0.2", "0.0.2", "2024-11-05", "exactly twelve", "hardware_verified:false", "scientific_verified:false"):
             self.assertIn(required, readme)
+        normalized = " ".join(readme.split())
+        for required in ("non-empty absolute Windows path", "does not preflight existence", "200 without applying the path"):
+            self.assertIn(required, normalized)
 
     def test_exposure_boundary_is_explicit_in_source_and_operator_docs(self):
         source = HTTP_SERVER_PATH.read_text(encoding="utf-8")

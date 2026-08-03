@@ -61,6 +61,16 @@ TEST (ControlPanelAccessibilityTests, ExposesGlobalActionButtons)
     EXPECT_TRUE (recordingOptions.getClickingTogglesState());
 }
 
+TEST (ControlPanelAccessibilityTests, ExposesRecordingDirectoryParentSemantics)
+{
+    ControlPanel panel (nullptr, nullptr, true);
+    auto* directory = panel.findChildWithID ("oe.control.recording.directory");
+    ASSERT_NE (directory, nullptr);
+    EXPECT_EQ (directory->getTitle(), "Recording directory");
+    EXPECT_EQ (directory->getDescription(), "Read or edit the recording parent directory.");
+    EXPECT_TRUE (directory->isAccessible());
+}
+
 TEST (ControlPanelAccessibilityTests, ExposesHealthMetersAsReadOnlyRanges)
 {
     CPUMeter cpu;

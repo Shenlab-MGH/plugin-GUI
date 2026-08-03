@@ -11,6 +11,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         "oe.control.recording",
         "oe.control.recording.options",
         "oe.control.recording.filename",
+        "oe.control.recording.directory",
         "oe.control.recording.new_directory",
         "oe.control.recording.force_new_directory",
         "oe.status.cpu_usage",
@@ -35,9 +36,9 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
 TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
-    EXPECT_EQ (document["contract_version"], "0.0.1");
+    EXPECT_EQ (document["contract_version"], "0.0.2");
     ASSERT_TRUE (document["capabilities"].is_array());
-    ASSERT_EQ (document["capabilities"].size(), 9);
+    ASSERT_EQ (document["capabilities"].size(), 10);
 
     const auto acquisition = std::find_if (document["capabilities"].begin(),
                                            document["capabilities"].end(),
@@ -47,6 +48,28 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
     EXPECT_EQ ((*acquisition)["uia"]["automation_id"], "oe.control.acquisition");
     EXPECT_EQ ((*acquisition)["api"][0]["path"], "/api/status");
     EXPECT_EQ ((*acquisition)["api"][0]["method"], "GET");
+}
+
+TEST (ControlCapabilityTests, DefinesRecordingDirectoryAsOneExistingRouteAndField)
+{
+    const auto* directory = findControlCapability ("oe.control.recording.directory");
+    ASSERT_NE (directory, nullptr);
+    EXPECT_EQ (directory->kind, ControlCapabilityKind::value);
+    ASSERT_EQ (directory->operations.size(), (size_t) 2);
+
+    const auto& read = directory->operations[0];
+    EXPECT_EQ (read.operation, "read");
+    EXPECT_EQ (read.method, "GET");
+    EXPECT_EQ (read.path, "/api/recording");
+    EXPECT_TRUE (read.requestFields.isEmpty());
+    EXPECT_EQ (read.responseFields, StringArray ({ "parent_directory" }));
+
+    const auto& set = directory->operations[1];
+    EXPECT_EQ (set.operation, "set");
+    EXPECT_EQ (set.method, "PUT");
+    EXPECT_EQ (set.path, "/api/recording");
+    EXPECT_EQ (set.requestFields, StringArray ({ "parent_directory" }));
+    EXPECT_EQ (set.responseFields, StringArray ({ "parent_directory" }));
 }
 
 TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
