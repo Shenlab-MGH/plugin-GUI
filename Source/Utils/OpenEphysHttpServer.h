@@ -40,6 +40,7 @@
 #include "ControlCapabilityJson.h"
 #include "ConfigSnapshotApiHandler.h"
 #include "ControlRead.h"
+#include "ProcessorInventoryApiHandler.h"
 #include "RecordingOptionsControl.h"
 #include "StatusApiHandler.h"
 #include "Utils.h"
@@ -741,20 +742,28 @@ public:
 
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/processors", [this] (const httplib::Request&, httplib::Response& res)
+        svr_->Get ("/api/processors", [this] (const httplib::Request& req, httplib::Response& res)
                    {
-            Array<GenericProcessor*> processors = graph_->getListOfProcessors();
+            handleProcessorInventoryGet (
+                req,
+                res,
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [this]
+                {
+                    const auto processors = graph_->getListOfProcessors();
+                    std::vector<json> processorsJson;
+                    for (const auto& processor : processors)
+                    {
+                        json processorJson;
+                        processor_to_json (processor, &processorJson);
+                        processorsJson.push_back (std::move (processorJson));
+                    }
 
-            std::vector<json> processors_json;
-            for (const auto& processor : processors) {
-                json processor_json;
-                processor_to_json(processor, &processor_json);
-                processors_json.push_back(processor_json);
-            }
-            json ret;
-            ret["processors"] = processors_json;
-
-            res.set_content(ret.dump(), "application/json"); });
+                    json document;
+                    document["processors"] = std::move (processorsJson);
+                    return document;
+                },
+                std::chrono::seconds (2)); });
 
         svr_->Get (R"(/api/processors/([0-9]+))", [this] (const httplib::Request& req, httplib::Response& res)
                    {

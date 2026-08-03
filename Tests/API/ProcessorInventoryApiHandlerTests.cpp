@@ -13,11 +13,20 @@ TEST (ProcessorInventoryApiHandlerTests, DispatchesReadAndPreservesTheExistingOf
     httplib::Request request;
     httplib::Response response;
     bool dispatched = false;
+    bool insideDispatchedOperation = false;
+    int readCount = 0;
 
     const json inventory {
         { "processors", json::array ({ {
               { "id", 22 }, { "name", "Bandpass Filter" },
-              { "parameters", json::array() }, { "streams", json::array() },
+              { "parameters", json::array ({ {
+                    { "name", "High cutoff" }, { "type", "float" }, { "value", "6000" }
+                } }) },
+              { "streams", json::array ({ {
+                    { "name", "Neuropixels AP" }, { "source_id", 11 },
+                    { "sample_rate", 30000.0 }, { "channel_count", 384 },
+                    { "parameters", json::array() }
+                } }) },
               { "predecessor", 11 }
           } }) }
     };
@@ -28,13 +37,21 @@ TEST (ProcessorInventoryApiHandlerTests, DispatchesReadAndPreservesTheExistingOf
         [&] (std::function<void()> operation)
         {
             dispatched = true;
+            insideDispatchedOperation = true;
             operation();
+            insideDispatchedOperation = false;
             return true;
         },
-        [&] { return inventory; },
+        [&]
+        {
+            EXPECT_TRUE (insideDispatchedOperation);
+            ++readCount;
+            return inventory;
+        },
         50ms);
 
     EXPECT_TRUE (dispatched);
+    EXPECT_EQ (readCount, 1);
     EXPECT_EQ (response.status, 200);
     EXPECT_EQ (response.get_header_value ("Content-Type"), "application/json");
     EXPECT_EQ (json::parse (response.body), inventory);
@@ -73,4 +90,38 @@ TEST (ProcessorInventoryApiHandlerTests, MapsDispatchTimeoutAndReadFailureToStab
 
     ASSERT_TRUE (pending);
     pending();
+}
+
+TEST (ProcessorInventoryApiHandlerTests, NeverReadsAfterDispatchFailureOrTimeout)
+{
+    int readCount = 0;
+    const auto readInventory = [&]
+    {
+        ++readCount;
+        return json ({ { "processors", json::array() } });
+    };
+
+    httplib::Request request;
+    httplib::Response unavailable;
+    handleProcessorInventoryGet (request, unavailable,
+                                 [] (std::function<void()>) { return false; },
+                                 readInventory, 50ms);
+    EXPECT_EQ (unavailable.status, 503);
+    EXPECT_EQ (readCount, 0);
+
+    std::function<void()> pending;
+    httplib::Response timeout;
+    handleProcessorInventoryGet (request, timeout,
+                                 [&] (std::function<void()> operation)
+                                 {
+                                     pending = std::move (operation);
+                                     return true;
+                                 },
+                                 readInventory, 1ms);
+    EXPECT_EQ (timeout.status, 504);
+    EXPECT_EQ (readCount, 0);
+
+    ASSERT_TRUE (pending);
+    pending();
+    EXPECT_EQ (readCount, 0);
 }
