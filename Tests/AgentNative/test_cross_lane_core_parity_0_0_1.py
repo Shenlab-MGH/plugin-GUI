@@ -4,29 +4,23 @@ Asserts product version 0.0.1 and that capability IDs/meanings, MCP tool
 names/schemas, API routes/fields, and UIA automation IDs match the mature
 v1.0.2 core contract modulo GUI baseline metadata (upstream version/commit).
 
-This test is the TDD gate for align-v11-core-0.0.1. It must stay RED until
-recording-options / disk / time / full UIA are already implemented and only
-then exposed — never by inventing endpoints or falsifying the contract.
+Default hosted path uses a checked-in portable v1.0.2 reference fixture with
+source-commit provenance and content hash. Optional OE_V102_CORE_ROOT may
+point at a live worktree only when its contract hash matches the fixture;
+it cannot skip or weaken the gate.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import re
 import unittest
 from pathlib import Path
 from typing import Any
 
 
 V11_ROOT = Path(__file__).resolve().parents[2]
-V102_ROOT = Path(
-    os.environ.get(
-        "OE_V102_CORE_ROOT",
-        r"C:\Users\wangc\Documents\Cong\01-open-ephys-v102-core-r0-mcp-r010",
-    )
-)
-
 PRODUCT_VERSION = "0.0.1"
 MCP_PROTOCOL_VERSION = "2024-11-05"
 
@@ -35,7 +29,10 @@ V11_CONTRACT_CANONICAL = V11_ROOT / "agent_native" / "open_ephys_agent_contract_
 V11_CONTRACT_LEGACY_MISNAMED = (
     V11_ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_0_0_1.json"
 )
-V102_CONTRACT = V102_ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_v0_0_1.json"
+V102_REFERENCE_FIXTURE = (
+    V11_ROOT / "agent_native" / "fixtures" / "v102_core_0_0_1_cross_lane_reference.json"
+)
+EXPECTED_V102_SOURCE_COMMIT = "54f982fd06c4d1fc1157ca74babb711f3c3dd239"
 
 BASELINE_KEYS = frozenset(
     {
@@ -52,6 +49,13 @@ STRIP_TOP_LEVEL = frozenset({"baseline", "bundle", "verification", "transport"})
 
 def _load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _canonical_sha256(document: dict[str, Any]) -> str:
+    payload = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _active_v11_contract_path() -> Path:
@@ -129,20 +133,71 @@ def _implementation_markers(root: Path) -> dict[str, bool]:
     }
 
 
+def _load_v102_reference() -> tuple[dict[str, Any], dict[str, bool], str]:
+    """Load portable fixture; optionally cross-check a live OE_V102_CORE_ROOT tree."""
+    if not V102_REFERENCE_FIXTURE.is_file():
+        raise FileNotFoundError(
+            f"missing portable v1.0.2 reference fixture: {V102_REFERENCE_FIXTURE.as_posix()}"
+        )
+    fixture = _load(V102_REFERENCE_FIXTURE)
+    provenance = fixture["provenance"]
+    if provenance.get("source_commit") != EXPECTED_V102_SOURCE_COMMIT:
+        raise AssertionError(
+            f"fixture source_commit must be {EXPECTED_V102_SOURCE_COMMIT}; "
+            f"got {provenance.get('source_commit')!r}"
+        )
+    contract = fixture["contract"]
+    actual_hash = _canonical_sha256(contract)
+    expected_hash = provenance.get("content_sha256")
+    if actual_hash != expected_hash:
+        raise AssertionError(
+            "fixture content_sha256 does not match embedded contract "
+            f"(expected {expected_hash}, got {actual_hash})"
+        )
+    markers = dict(fixture["implementation_markers"])
+    contract_filename = str(fixture.get("contract_filename") or "open_ephys_agent_contract_v1_0_2_v0_0_1.json")
+
+    override = os.environ.get("OE_V102_CORE_ROOT")
+    if override:
+        root = Path(override)
+        if not root.is_dir():
+            raise FileNotFoundError(
+                f"OE_V102_CORE_ROOT is set but is not a directory: {root}"
+            )
+        live_contract_path = root / "agent_native" / contract_filename
+        if not live_contract_path.is_file():
+            raise FileNotFoundError(
+                f"OE_V102_CORE_ROOT contract missing: {live_contract_path}"
+            )
+        live_contract = _load(live_contract_path)
+        live_hash = _canonical_sha256(live_contract)
+        if live_hash != expected_hash:
+            raise AssertionError(
+                "OE_V102_CORE_ROOT contract hash does not match the checked-in "
+                f"fixture (fixture={expected_hash}, live={live_hash}); override "
+                "cannot weaken or replace the portable reference"
+            )
+        live_markers = _implementation_markers(root)
+        if live_markers != markers:
+            raise AssertionError(
+                "OE_V102_CORE_ROOT implementation markers drifted from the "
+                f"checked-in fixture snapshot: live={live_markers} fixture={markers}"
+            )
+        # Prefer live scan only after it has been validated against the fixture.
+        markers = live_markers
+        contract = live_contract
+
+    return contract, markers, contract_filename
+
+
 class CrossLaneCoreParity001Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.assertTrue = unittest.TestCase.assertTrue  # placate type checkers
-        if not V102_ROOT.is_dir():
-            raise unittest.SkipTest(f"v1.0.2 core worktree missing: {V102_ROOT}")
-        if not V102_CONTRACT.is_file():
-            raise unittest.SkipTest(f"v1.0.2 contract missing: {V102_CONTRACT}")
-
         cls.v11_path = _active_v11_contract_path()
         cls.v11 = _load(cls.v11_path)
-        cls.v102 = _load(V102_CONTRACT)
+        cls.v102, cls.v102_impl, cls.v102_contract_filename = _load_v102_reference()
         cls.v11_impl = _implementation_markers(V11_ROOT)
-        cls.v102_impl = _implementation_markers(V102_ROOT)
 
     def test_active_v11_contract_filename_uses_v0_0_1_suffix(self) -> None:
         """Normalize to open_ephys_agent_contract_v1_1_0_v0_0_1.json (not ..._0_0_1)."""
@@ -156,7 +211,7 @@ class CrossLaneCoreParity001Tests(unittest.TestCase):
             f"misnamed contract must not remain: {V11_CONTRACT_LEGACY_MISNAMED.name}",
         )
         self.assertRegex(V11_CONTRACT_CANONICAL.name, r"_v0_0_1\.json$")
-        self.assertRegex(V102_CONTRACT.name, r"_v0_0_1\.json$")
+        self.assertRegex(self.v102_contract_filename, r"_v0_0_1\.json$")
 
     def test_product_version_is_literal_0_0_1_on_both_lanes(self) -> None:
         for label, contract in (("v11", self.v11), ("v102", self.v102)):
@@ -257,7 +312,7 @@ class CrossLaneCoreParity001Tests(unittest.TestCase):
             "uia_disk": True,
             "uia_elapsed": True,
         }
-        # v102 lane must still hold the reference implementations.
+        # v102 reference markers come from the checked-in fixture (or a validated override).
         for key, expected in required_impl.items():
             self.assertEqual(
                 self.v102_impl[key],

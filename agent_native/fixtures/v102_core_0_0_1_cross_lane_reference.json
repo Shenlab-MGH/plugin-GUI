@@ -1,0 +1,499 @@
+{
+  "schema_version": "1",
+  "kind": "open_ephys_v102_core_0_0_1_cross_lane_reference",
+  "provenance": {
+    "source_commit": "54f982fd06c4d1fc1157ca74babb711f3c3dd239",
+    "source_path": "agent_native/open_ephys_agent_contract_v1_0_2_v0_0_1.json",
+    "source_branch": "agent-native-v102-core-r0-mcp-r010",
+    "content_sha256": "f3e070c3ee8f5c028e8b5768bca471a093f3a5ed5095b19461a92052916d0d5d",
+    "hash_algorithm": "sha256",
+    "hash_input": "canonical_json_sort_keys_separators_comma_colon_utf8"
+  },
+  "contract_filename": "open_ephys_agent_contract_v1_0_2_v0_0_1.json",
+  "contract": {
+    "schema_version": "0.0.1",
+    "contract": {
+      "id": "open-ephys-agent",
+      "version": "0.0.1"
+    },
+    "bundle": {
+      "id": "open-ephys-agent-native",
+      "version": "0.0.1"
+    },
+    "baseline": {
+      "upstream": "open-ephys/plugin-GUI",
+      "version": "1.0.2",
+      "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"
+    },
+    "mcp": {
+      "protocol_version": "2024-11-05",
+      "modern_protocol_supported": false,
+      "server_name": "open-ephys-agent-native"
+    },
+    "transport": {
+      "http_base_url": "http://127.0.0.1:37497"
+    },
+    "api": {
+      "capabilities_contract_version": "0.0.1",
+      "expected_capabilities_response": {
+        "contract_version": "0.0.1",
+        "capabilities": [
+          {
+            "id": "oe.control.acquisition",
+            "name": "Acquisition",
+            "description": "Start or stop data acquisition.",
+            "kind": "toggle",
+            "uia": {
+              "automation_id": "oe.control.acquisition"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/status",
+                "request_fields": [],
+                "response_fields": [
+                  "mode"
+                ]
+              },
+              {
+                "operation": "set",
+                "method": "PUT",
+                "path": "/api/status",
+                "request_fields": [
+                  "mode"
+                ],
+                "response_fields": [
+                  "mode"
+                ]
+              }
+            ],
+            "mode_semantics": {
+              "field": "mode",
+              "allowed_values": [
+                "IDLE",
+                "ACQUIRE",
+                "RECORD"
+              ],
+              "on_values": [
+                "ACQUIRE",
+                "RECORD"
+              ],
+              "off_values": [
+                "IDLE"
+              ],
+              "commands": {
+                "on": {
+                  "mode": "ACQUIRE"
+                },
+                "off": {
+                  "mode": "IDLE"
+                }
+              },
+              "response_meaning": "actual_gui_state"
+            }
+          },
+          {
+            "id": "oe.control.recording",
+            "name": "Recording",
+            "description": "Start or stop writing data to disk.",
+            "kind": "toggle",
+            "uia": {
+              "automation_id": "oe.control.recording"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/status",
+                "request_fields": [],
+                "response_fields": [
+                  "mode"
+                ]
+              },
+              {
+                "operation": "set",
+                "method": "PUT",
+                "path": "/api/status",
+                "request_fields": [
+                  "mode"
+                ],
+                "response_fields": [
+                  "mode"
+                ]
+              }
+            ],
+            "mode_semantics": {
+              "field": "mode",
+              "allowed_values": [
+                "IDLE",
+                "ACQUIRE",
+                "RECORD"
+              ],
+              "on_values": [
+                "RECORD"
+              ],
+              "off_values": [
+                "IDLE",
+                "ACQUIRE"
+              ],
+              "commands": {
+                "on": {
+                  "mode": "RECORD"
+                },
+                "off": {
+                  "mode": "ACQUIRE"
+                }
+              },
+              "response_meaning": "actual_gui_state"
+            }
+          },
+          {
+            "id": "oe.control.recording.options",
+            "name": "Recording options",
+            "description": "Show or hide recording options.",
+            "kind": "toggle",
+            "uia": {
+              "automation_id": "oe.control.recording.options"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/recording/options",
+                "request_fields": [],
+                "response_fields": [
+                  "expanded"
+                ]
+              },
+              {
+                "operation": "set",
+                "method": "PUT",
+                "path": "/api/recording/options",
+                "request_fields": [
+                  "expanded"
+                ],
+                "response_fields": [
+                  "expanded"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "oe.control.recording.filename",
+            "name": "Recording filename",
+            "description": "Edit the recording filename.",
+            "kind": "collection",
+            "uia": {
+              "automation_id": "oe.control.recording.filename"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/recording",
+                "request_fields": [],
+                "response_fields": [
+                  "prepend_text",
+                  "base_text",
+                  "append_text"
+                ]
+              },
+              {
+                "operation": "set",
+                "method": "PUT",
+                "path": "/api/recording",
+                "request_fields": [
+                  "prepend_text",
+                  "base_text",
+                  "append_text"
+                ],
+                "response_fields": [
+                  "prepend_text",
+                  "base_text",
+                  "append_text"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "oe.control.recording.new_directory",
+            "name": "New recording directory",
+            "description": "Start a new data directory for the next recording.",
+            "kind": "toggle",
+            "uia": {
+              "automation_id": "oe.control.recording.new_directory"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/recording/options",
+                "request_fields": [],
+                "response_fields": [
+                  "new_directory_requested"
+                ]
+              },
+              {
+                "operation": "set",
+                "method": "PUT",
+                "path": "/api/recording/options",
+                "request_fields": [
+                  "new_directory_requested"
+                ],
+                "response_fields": [
+                  "new_directory_requested"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "oe.control.recording.force_new_directory",
+            "name": "Force new recording directories",
+            "description": "Force a new data directory for each recording.",
+            "kind": "toggle",
+            "uia": {
+              "automation_id": "oe.control.recording.force_new_directory"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/recording/options",
+                "request_fields": [],
+                "response_fields": [
+                  "force_new_directory"
+                ]
+              },
+              {
+                "operation": "set",
+                "method": "PUT",
+                "path": "/api/recording/options",
+                "request_fields": [
+                  "force_new_directory"
+                ],
+                "response_fields": [
+                  "force_new_directory"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "oe.status.cpu_usage",
+            "name": "CPU usage",
+            "description": "Fraction of available processing time used by the signal chain.",
+            "kind": "range",
+            "uia": {
+              "automation_id": "oe.status.cpu_usage"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/cpu",
+                "request_fields": [],
+                "response_fields": [
+                  "usage"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "oe.status.disk_usage",
+            "name": "Disk usage",
+            "description": "Fraction of recording-volume space currently used.",
+            "kind": "range",
+            "uia": {
+              "automation_id": "oe.status.disk_usage"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/disk",
+                "request_fields": [],
+                "response_fields": [
+                  "usage"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "oe.status.elapsed_time",
+            "name": "Elapsed time",
+            "description": "Elapsed acquisition or recording time.",
+            "kind": "status",
+            "uia": {
+              "automation_id": "oe.status.elapsed_time"
+            },
+            "api": [
+              {
+                "operation": "read",
+                "method": "GET",
+                "path": "/api/time",
+                "request_fields": [],
+                "response_fields": [
+                  "display"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "tools": [
+      {
+        "name": "oe_get_capabilities",
+        "description": "Read the pinned Core R0 capabilities.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_get_status",
+        "description": "Read acquisition and recording status.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_set_status",
+        "description": "Set status with an explicit RECORD approval.",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "IDLE",
+                "ACQUIRE",
+                "RECORD"
+              ]
+            },
+            "approve_recording": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_get_recording_options",
+        "description": "Read recording options.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_set_recording_options",
+        "description": "Set exactly one recording option.",
+        "inputSchema": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "expanded": {
+              "type": "boolean"
+            },
+            "force_new_directory": {
+              "type": "boolean"
+            },
+            "new_directory_requested": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_get_recording_filename",
+        "description": "Read recording filename components.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_set_recording_filename",
+        "description": "Set exactly one valid Windows filename component.",
+        "inputSchema": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "prepend_text": {
+              "type": "string"
+            },
+            "base_text": {
+              "type": "string"
+            },
+            "append_text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_get_cpu",
+        "description": "Read CPU usage.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_get_disk",
+        "description": "Read disk usage.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "oe_get_time",
+        "description": "Read elapsed time.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      }
+    ],
+    "verification": {
+      "hardware_verified": false,
+      "scientific_verified": false
+    }
+  },
+  "implementation_markers": {
+    "route_recording_options": true,
+    "route_disk": true,
+    "route_time": true,
+    "file_control_status": true,
+    "file_recording_options_control": true,
+    "core_disk": true,
+    "core_clock": true,
+    "core_options": true,
+    "uia_acquisition": true,
+    "uia_recording": true,
+    "uia_recording_options": true,
+    "uia_filename": true,
+    "uia_new_directory": true,
+    "uia_force_new_directory": true,
+    "uia_cpu": true,
+    "uia_disk": true,
+    "uia_elapsed": true
+  }
+}
