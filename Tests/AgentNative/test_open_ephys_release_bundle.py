@@ -53,7 +53,18 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertIn("agent-native-v102-core-r0-mcp-r010", workflow)
         self.assertIn("- 'agent-native-v102-recording-directory-r011'", workflow)
         self.assertIn("- 'agent-native-v102-config-read-r012'", workflow)
-        self.assertIn('ctest --test-dir Build -C Release --output-on-failure --no-tests=error -R "^(API_tests|UI_tests|WindowsUIAutomation_tests)$"', workflow)
+        self.assertIn('cmake -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=OFF ..', workflow)
+        self.assertIn('msbuild ALL_BUILD.vcxproj -p:Configuration=Release -p:Platform=x64 -m', workflow)
+        self.assertIn(
+            'cmake -S . -B BuildContractTests -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=ON -DOE_DONT_CHECK_BUILD_PATH=TRUE',
+            workflow,
+        )
+        self.assertIn(
+            'cmake --build BuildContractTests --config Release --target API_tests UI_tests WindowsUIAutomation_tests --parallel',
+            workflow,
+        )
+        self.assertIn('ctest --test-dir BuildContractTests -C Release --output-on-failure --no-tests=error -R "^(API_tests|UI_tests|WindowsUIAutomation_tests)$"', workflow)
+        self.assertNotIn('ctest --test-dir Build -C Release', workflow)
         self.assertIn("set_tests_properties(WindowsUIAutomation_tests PROPERTIES TIMEOUT 30)", WINDOWS_UIA_CMAKE_PATH.read_text(encoding="utf-8"))
 
     def test_windows_e2e_failure_logs_are_preserved_and_uploaded(self):

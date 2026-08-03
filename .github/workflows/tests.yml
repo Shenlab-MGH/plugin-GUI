@@ -78,18 +78,22 @@ jobs:
           C:\Scream\Install\helpers\devcon install Scream.inf *Scream
       - name: Show audio device
         run: Get-CimInstance Win32_SoundDevice | fl *
-      - name: configure
+      - name: Configure production build
         run: |
           cd Build 
-          cmake -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=ON ..
+          cmake -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=OFF ..
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v1.0.2
-      - name: build
+      - name: Build production application and plugins
         run: |
           cd Build
           msbuild ALL_BUILD.vcxproj -p:Configuration=Release -p:Platform=x64 -m
+      - name: Configure Windows contract tests
+        run: cmake -S . -B BuildContractTests -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=ON -DOE_DONT_CHECK_BUILD_PATH=TRUE
+      - name: Build Windows contract tests
+        run: cmake --build BuildContractTests --config Release --target API_tests UI_tests WindowsUIAutomation_tests --parallel
       - name: Run Windows API and UI contract tests
-        run: ctest --test-dir Build -C Release --output-on-failure --no-tests=error -R "^(API_tests|UI_tests|WindowsUIAutomation_tests)$"
+        run: ctest --test-dir BuildContractTests -C Release --output-on-failure --no-tests=error -R "^(API_tests|UI_tests|WindowsUIAutomation_tests)$"
       - name: Install open-ephys-data-format
         shell: powershell
         run: |
