@@ -204,7 +204,7 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
 
-    EXPECT_EQ (document["contract_version"], "0.1.0");
+    EXPECT_EQ (document["contract_version"], "0.1.1");
     EXPECT_EQ (document["surface"], "discovery_only");
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), expectedCapabilities.size());
@@ -243,4 +243,55 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
     EXPECT_FALSE ((*acquisition).contains ("uia"));
     EXPECT_EQ ((*acquisition)["api"][0]["path"], OpenEphysHttpApi::kStatusGet.path);
     EXPECT_EQ ((*acquisition)["api"][0]["method"], OpenEphysHttpApi::kStatusGet.methodString());
+}
+
+TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
+{
+    const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+    const auto& capabilities = document["capabilities"];
+    const auto findById = [&capabilities] (const char* id)
+    {
+        return std::find_if (
+            capabilities.begin(),
+            capabilities.end(),
+            [id] (const auto& item) { return item["id"] == id; });
+    };
+
+    const auto acquisitionResult = findById ("oe.control.acquisition");
+    const auto recordingResult = findById ("oe.control.recording");
+    const auto filenameResult = findById ("oe.control.recording.filename");
+    const auto cpuResult = findById ("oe.status.cpu_usage");
+
+    ASSERT_NE (acquisitionResult, capabilities.end());
+    ASSERT_NE (recordingResult, capabilities.end());
+    ASSERT_NE (filenameResult, capabilities.end());
+    ASSERT_NE (cpuResult, capabilities.end());
+
+    const auto& acquisition = *acquisitionResult;
+    const auto& recording = *recordingResult;
+    const auto& filename = *filenameResult;
+    const auto& cpu = *cpuResult;
+
+    const auto expectedModes = nlohmann::json::array ({ "IDLE", "ACQUIRE", "RECORD" });
+
+    ASSERT_TRUE (acquisition.contains ("mode_semantics"));
+    EXPECT_EQ (acquisition["mode_semantics"]["field"], "mode");
+    EXPECT_EQ (acquisition["mode_semantics"]["allowed_values"], expectedModes);
+    EXPECT_EQ (acquisition["mode_semantics"]["on_values"], nlohmann::json::array ({ "ACQUIRE", "RECORD" }));
+    EXPECT_EQ (acquisition["mode_semantics"]["off_values"], nlohmann::json::array ({ "IDLE" }));
+    EXPECT_EQ (acquisition["mode_semantics"]["commands"]["on"]["mode"], "ACQUIRE");
+    EXPECT_EQ (acquisition["mode_semantics"]["commands"]["off"]["mode"], "IDLE");
+    EXPECT_EQ (acquisition["mode_semantics"]["response_meaning"], "actual_gui_state");
+
+    ASSERT_TRUE (recording.contains ("mode_semantics"));
+    EXPECT_EQ (recording["mode_semantics"]["field"], "mode");
+    EXPECT_EQ (recording["mode_semantics"]["allowed_values"], expectedModes);
+    EXPECT_EQ (recording["mode_semantics"]["on_values"], nlohmann::json::array ({ "RECORD" }));
+    EXPECT_EQ (recording["mode_semantics"]["off_values"], nlohmann::json::array ({ "IDLE", "ACQUIRE" }));
+    EXPECT_EQ (recording["mode_semantics"]["commands"]["on"]["mode"], "RECORD");
+    EXPECT_EQ (recording["mode_semantics"]["commands"]["off"]["mode"], "ACQUIRE");
+    EXPECT_EQ (recording["mode_semantics"]["response_meaning"], "actual_gui_state");
+
+    EXPECT_FALSE (filename.contains ("mode_semantics"));
+    EXPECT_FALSE (cpu.contains ("mode_semantics"));
 }

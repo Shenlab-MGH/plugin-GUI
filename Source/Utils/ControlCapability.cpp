@@ -29,15 +29,36 @@ const std::vector<ControlCapability>& getCoreControlCapabilities()
     // Agent Core R0: advertise only capabilities backed by official v1.1.0 routes.
     // Order is stable. Discovery-only: no UIA AutomationId claims (UI does not implement them).
     // Operations use shared route descriptors (same Method+path as server registration).
+    const ControlModeSemantics acquisitionModeSemantics {
+        "mode",
+        { "IDLE", "ACQUIRE", "RECORD" },
+        { "ACQUIRE", "RECORD" },
+        { "IDLE" },
+        "ACQUIRE",
+        "IDLE",
+        "actual_gui_state"
+    };
+    const ControlModeSemantics recordingModeSemantics {
+        "mode",
+        { "IDLE", "ACQUIRE", "RECORD" },
+        { "RECORD" },
+        { "IDLE", "ACQUIRE" },
+        "RECORD",
+        "ACQUIRE",
+        "actual_gui_state"
+    };
+
     static const std::vector<ControlCapability> capabilities {
         { "oe.control.acquisition", "Acquisition", "Start or stop data acquisition.",
           ControlCapabilityKind::toggle,
           { { "read", OpenEphysHttpApi::kStatusGet, {}, { "mode" } },
-            { "set", OpenEphysHttpApi::kStatusPut, { "mode" }, { "mode" } } } },
+            { "set", OpenEphysHttpApi::kStatusPut, { "mode" }, { "mode" } } },
+          acquisitionModeSemantics },
         { "oe.control.recording", "Recording", "Start or stop writing data to disk.",
           ControlCapabilityKind::toggle,
           { { "read", OpenEphysHttpApi::kStatusGet, {}, { "mode" } },
-            { "set", OpenEphysHttpApi::kStatusPut, { "mode" }, { "mode" } } } },
+            { "set", OpenEphysHttpApi::kStatusPut, { "mode" }, { "mode" } } },
+          recordingModeSemantics },
         { "oe.control.recording.filename", "Recording filename", "Edit the recording filename.",
           ControlCapabilityKind::collection,
           { { "read", OpenEphysHttpApi::kRecordingGet, {}, { "prepend_text", "base_text", "append_text" } },

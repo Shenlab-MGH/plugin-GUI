@@ -27,6 +27,7 @@
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "../TestableExport.h"
 #include "OpenEphysHttpApiRoutes.h"
+#include <optional>
 #include <vector>
 
 enum class ControlCapabilityKind
@@ -48,6 +49,17 @@ struct ControlApiOperation
     StringArray responseFields;
 };
 
+struct ControlModeSemantics
+{
+    String field;
+    StringArray allowedValues;
+    StringArray onValues;
+    StringArray offValues;
+    String onCommandValue;
+    String offCommandValue;
+    String responseMeaning;
+};
+
 struct ControlCapability
 {
     String id;
@@ -55,6 +67,7 @@ struct ControlCapability
     String description;
     ControlCapabilityKind kind;
     std::vector<ControlApiOperation> operations;
+    std::optional<ControlModeSemantics> modeSemantics;
 };
 
 TESTABLE const std::vector<ControlCapability>& getCoreControlCapabilities();
