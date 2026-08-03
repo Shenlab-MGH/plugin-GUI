@@ -1,5 +1,4 @@
 import importlib.util
-import importlib.metadata
 import json
 import subprocess
 import sys
@@ -40,6 +39,7 @@ class FakeOpenEphysApi:
         self.cpu = 0.25
         self.status_put_response = None
         self.recording_put_response = None
+        self.capabilities_redirect = None
         self.requests = []
         owner = self
 
@@ -58,6 +58,11 @@ class FakeOpenEphysApi:
             def do_GET(self):
                 owner.requests.append(("GET", self.path, None))
                 if self.path == "/api/capabilities":
+                    if owner.capabilities_redirect:
+                        self.send_response(302)
+                        self.send_header("Location", owner.capabilities_redirect)
+                        self.end_headers()
+                        return
                     self.send_json(200, owner.capabilities)
                 elif self.path == "/api/status":
                     self.send_json(200, {"mode": owner.mode})
@@ -156,6 +161,8 @@ class McpR010Tests(unittest.TestCase):
         )
         self.assertEqual(self.contract["mcp"]["protocol_version"], "2024-11-05")
         self.assertFalse(self.contract["mcp"]["modern_protocol_supported"])
+        filename_tool = next(tool for tool in self.contract["tools"] if tool["name"] == "oe_set_recording_filename")
+        self.assertEqual(filename_tool["inputSchema"]["maxProperties"], 1)
         self.assertEqual(
             [tool["name"] for tool in self.contract["tools"]],
             [
@@ -202,6 +209,24 @@ class McpR010Tests(unittest.TestCase):
         })
         self.assertEqual(before_notification["error"]["code"], -32002)
 
+    def test_request_only_notifications_never_respond_or_mutate(self):
+        self.ready_server()
+        notification = {
+            "jsonrpc": "2.0", "method": "tools/call",
+            "params": {"name": "oe_set_status", "arguments": {"mode": "ACQUIRE"}},
+        }
+        self.assertIsNone(self.server.handle(notification))
+        self.assertEqual(self.api.requests, [])
+
+    def test_initialized_must_be_notification_only_and_malformed_no_id_gets_null_error(self):
+        initialized_request = self.server.handle({
+            "jsonrpc": "2.0", "id": 9, "method": "notifications/initialized", "params": {}
+        })
+        self.assertEqual(initialized_request["error"]["code"], -32600)
+        malformed = self.server.handle({"jsonrpc": "2.0", "params": {}})
+        self.assertIsNone(malformed["id"])
+        self.assertEqual(malformed["error"]["code"], -32600)
+
     def test_capability_verification_is_fail_closed(self):
         self.ready_server()
         result, payload = self.call_tool("oe_get_capabilities")
@@ -213,6 +238,14 @@ class McpR010Tests(unittest.TestCase):
         self.assertTrue(result["isError"])
         self.assertEqual(payload["error"]["code"], "capability_contract_mismatch")
         self.assertFalse(any(request[1] == "/api/status" for request in self.api.requests[-1:]))
+
+    def test_http_redirects_are_rejected_before_following_location(self):
+        self.ready_server()
+        self.api.capabilities_redirect = "https://example.invalid/steal"
+        result, payload = self.call_tool("oe_get_capabilities")
+        self.assertTrue(result["isError"])
+        self.assertEqual(payload["error"]["code"], "api_http_error")
+        self.assertEqual(payload["error"]["status"], 302)
 
     def test_reads_status_recording_filename_and_cpu(self):
         self.ready_server()
@@ -274,17 +307,31 @@ class McpR010Tests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "invalid_arguments")
         self.assertFalse(any(request[0] == "PUT" for request in self.api.requests))
 
-        result, payload = self.call_tool(
-            "oe_set_recording_filename", {"prepend_text": "mouse_", "append_text": "_p1"}
-        )
+        result, payload = self.call_tool("oe_set_recording_filename", {"prepend_text": "mouse_"})
         self.assertNotIn("isError", result)
         self.assertEqual(payload["before"]["prepend_text"], "")
         self.assertEqual(payload["after"]["prepend_text"], "mouse_")
-        self.assertEqual(payload["after"]["append_text"], "_p1")
         recording_requests = [request[:2] for request in self.api.requests if request[1] == "/api/recording"]
         self.assertEqual(recording_requests[-3:], [
             ("GET", "/api/recording"), ("PUT", "/api/recording"), ("GET", "/api/recording")
         ])
+
+    def test_set_filename_rejects_non_atomic_and_windows_invalid_components_before_http(self):
+        self.ready_server()
+        invalid_arguments = [
+            {"prepend_text": "mouse", "append_text": "probe"},
+            {"base_text": "C:\\data"}, {"base_text": "../data"},
+            {"base_text": "mouse/probe"}, {"base_text": "mouse\\probe"},
+            {"base_text": "mouse\x00probe"}, {"base_text": "mouse*probe"},
+            {"base_text": "CON"}, {"base_text": "mouse."},
+        ]
+        for arguments in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                self.api.requests.clear()
+                result, payload = self.call_tool("oe_set_recording_filename", arguments)
+                self.assertTrue(result["isError"])
+                self.assertEqual(payload["error"]["code"], "invalid_arguments")
+                self.assertEqual(self.api.requests, [])
 
     def test_post_readback_mismatch_fails_closed(self):
         self.ready_server()
@@ -354,6 +401,30 @@ class McpR010Tests(unittest.TestCase):
         self.assertFalse(any(request[0] == "PUT" for request in self.api.requests))
         self.assertEqual(completed.stderr, "")
 
+    def test_stdio_no_id_tool_call_has_no_response_and_cannot_put(self):
+        requests = "\n".join(json.dumps(item) for item in [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2024-11-05", "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1"},
+            }},
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            {"jsonrpc": "2.0", "method": "tools/call", "params": {
+                "name": "oe_set_status", "arguments": {"mode": "ACQUIRE"},
+            }},
+            {"jsonrpc": "2.0", "params": {}},
+        ]) + "\n"
+        completed = subprocess.run(
+            [sys.executable, str(SERVER_PATH), "--contract", str(CONTRACT_PATH),
+             "--base-url", self.api.base_url],
+            input=requests, text=True, capture_output=True, timeout=10, check=True,
+        )
+        responses = [json.loads(line) for line in completed.stdout.splitlines()]
+        self.assertEqual(len(responses), 2)
+        self.assertEqual(responses[0]["id"], 1)
+        self.assertIsNone(responses[1]["id"])
+        self.assertEqual(responses[1]["error"]["code"], -32600)
+        self.assertFalse(any(request[0] == "PUT" for request in self.api.requests))
+
     def test_skill_is_pinned_to_the_same_minimal_surface(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
         self.assertIn("contract: r0.1.0", skill)
@@ -370,13 +441,6 @@ class McpR010Tests(unittest.TestCase):
         self.assertIn("'skills/open-ephys-agent-native/**'", workflow)
         self.assertIn("'Tests/AgentNative/**'", workflow)
         self.assertIn("python -m unittest discover -s Tests/AgentNative", workflow)
-
-
-class OfficialMcpV2InteropTests(unittest.TestCase):
-    @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp==2.0.0 is not installed; installation is outside this agent's safety scope")
-    def test_official_client_auto_mode_falls_back_to_legacy(self):
-        self.assertEqual(importlib.metadata.version("mcp"), "2.0.0")
-        self.fail("mcp==2.0.0 is now available; the official Client(mode='auto') black-box gate must be implemented")
 
 
 if __name__ == "__main__":

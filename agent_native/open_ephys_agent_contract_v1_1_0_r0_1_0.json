@@ -119,7 +119,7 @@
     },
     {
       "name": "oe_set_recording_filename",
-      "description": "Set one or more recording filename fields with pre/post readback.",
+      "description": "Set exactly one validated recording filename field with pre/post readback.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -128,7 +128,8 @@
           "append_text": {"type": "string"}
         },
         "additionalProperties": false,
-        "minProperties": 1
+        "minProperties": 1,
+        "maxProperties": 1
       }
     },
     {

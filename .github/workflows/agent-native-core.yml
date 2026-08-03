@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   core-contracts:
-    name: Windows MCP and Skill Contracts
+    name: Windows MCP and Skill Contracts (no official SDK)
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4

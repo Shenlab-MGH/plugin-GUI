@@ -39,6 +39,12 @@ fixture. Mutations perform pre-read, mutation, and post-read. Entering RECORD
 requires the explicit `approve_recording=true` argument. HTTP 400/409,
 unexpected schemas, and failed postconditions become MCP tool errors.
 
+The upstream recording endpoint is not transactional. For r0.1.0 the filename
+tool therefore accepts exactly one component per call and rejects Windows path,
+traversal, control-character, reserved-name, and invalid-character forms before
+HTTP. This keeps the required filename SET capability without claiming atomic
+multi-component mutation.
+
 Run the dependency-independent tests with:
 
 ```powershell
@@ -47,4 +53,6 @@ python -m unittest Tests.AgentNative.test_open_ephys_mcp_r010 -v
 
 Official `mcp==2.0.0` is not installed on this instrument PC, and installation
 is outside the agent safety scope. Therefore the official `Client(mode="auto")`
-interop gate remains explicitly skipped until that dependency is provisioned.
+interop gate is not part of the green core CI job. The prerelease must remain
+Draft until a locked official SDK artifact and hash are provisioned for a
+separate ephemeral Windows interop gate.

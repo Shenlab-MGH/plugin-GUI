@@ -64,6 +64,11 @@ class ApiHttpError(ToolError):
         )
 
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def load_contract(path: Path) -> dict[str, Any]:
     try:
         contract = json.loads(path.read_text(encoding="utf-8"))
@@ -110,7 +115,10 @@ class ApiClient:
             raise ValueError("Open Ephys API base URL must not contain a path, query, or fragment.")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            NoRedirectHandler(),
+        )
 
     def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         data = None
@@ -201,6 +209,20 @@ def validate_cpu(payload: Any) -> dict[str, float]:
     return {"usage": usage}
 
 
+def validate_filename_component(value: str) -> None:
+    if not value:
+        return
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ToolError("invalid_arguments", "Filename components cannot contain control characters.")
+    if any(character in '<>:"/\\|?*' for character in value) or ".." in value:
+        raise ToolError("invalid_arguments", "Filename components must not contain paths or Windows-invalid characters.")
+    if value.endswith((" ", ".")):
+        raise ToolError("invalid_arguments", "Filename components cannot end with a space or dot.")
+    reserved = {"CON", "PRN", "AUX", "NUL", *{f"COM{i}" for i in range(1, 10)}, *{f"LPT{i}" for i in range(1, 10)}}
+    if value.split(".", 1)[0].upper() in reserved:
+        raise ToolError("invalid_arguments", "Filename component is a reserved Windows device name.")
+
+
 class McpServer:
     def __init__(self, contract_path: Path = DEFAULT_CONTRACT, base_url: str | None = None):
         self.contract_path = Path(contract_path)
@@ -211,6 +233,12 @@ class McpServer:
 
     def handle(self, request: Any) -> dict[str, Any] | None:
         request_id = request.get("id") if isinstance(request, dict) else None
+        valid_notification = (
+            isinstance(request, dict)
+            and request.get("jsonrpc") == "2.0"
+            and isinstance(request.get("method"), str)
+            and "id" not in request
+        )
         try:
             self._validate_request(request)
             method = request["method"]
@@ -232,7 +260,7 @@ class McpServer:
             else:
                 raise JsonRpcError(METHOD_NOT_FOUND, "Method not found")
         except JsonRpcError as exc:
-            if request_id is None:
+            if valid_notification:
                 return None
             return {"jsonrpc": "2.0", "id": request_id, "error": {"code": exc.code, "message": exc.message}}
         except Exception as exc:  # Defensive JSON-RPC boundary; diagnostics never go to stdout.
@@ -254,6 +282,15 @@ class McpServer:
             raise JsonRpcError(INVALID_REQUEST, "Invalid Request")
         if "params" in request and not isinstance(request["params"], dict):
             raise JsonRpcError(INVALID_PARAMS, "params must be an object")
+        method = request["method"]
+        if method in {"initialize", "tools/list", "tools/call"} and "id" not in request:
+            raise JsonRpcError(INVALID_REQUEST, f"{method} requires a request id")
+        if method == "notifications/initialized" and "id" in request:
+            raise JsonRpcError(INVALID_REQUEST, "notifications/initialized must not have an id")
+        if "id" in request:
+            request_id = request["id"]
+            if request_id is None or isinstance(request_id, bool) or not isinstance(request_id, (int, str)):
+                raise JsonRpcError(INVALID_REQUEST, "Request id must be a string or integer")
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.connection_state != "new":
@@ -305,10 +342,11 @@ class McpServer:
                 raise ToolError("invalid_arguments", "approve_recording must be boolean.")
             return
         if name == "oe_set_recording_filename":
-            if not arguments or not set(arguments).issubset(FILENAME_FIELDS):
-                raise ToolError("invalid_arguments", "Provide at least one supported filename field.")
+            if len(arguments) != 1 or not set(arguments).issubset(FILENAME_FIELDS):
+                raise ToolError("invalid_arguments", "Provide exactly one supported filename field per call.")
             if any(not isinstance(value, str) for value in arguments.values()):
                 raise ToolError("invalid_arguments", "Recording filename fields must be strings.")
+            validate_filename_component(next(iter(arguments.values())))
 
     def _verify_capabilities(self) -> dict[str, Any]:
         actual = self.api.request("GET", "/api/capabilities")
