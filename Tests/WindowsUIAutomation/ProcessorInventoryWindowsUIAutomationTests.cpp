@@ -6,7 +6,9 @@
 #include <oleauto.h>
 
 #include <atomic>
+#include <optional>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -69,6 +71,15 @@ HRESULT findByAutomationId (IUIAutomation* automation,
     return searchRoot->FindFirst (scope, condition.get(), result);
 }
 
+struct ProcessorItemObservation
+{
+    String automationId;
+    String name;
+    String fullDescription;
+    bool isOffscreen = false;
+    bool invokePatternAvailable = false;
+};
+
 struct UiaObservation
 {
     HRESULT result = E_FAIL;
@@ -79,7 +90,12 @@ struct UiaObservation
     bool itemFound = false;
     bool invokePatternAvailable = false;
     bool directChildrenAreOnlyProcessorItems = false;
+    int directChildCount = 0;
     String discoveredElements;
+    StringArray directProcessorAutomationIds;
+    std::vector<ProcessorItemObservation> directProcessorItems;
+    bool firstRootEditorDescendantFound = false;
+    bool eighthRootEditorDescendantFound = false;
 };
 
 UiaObservation observeProcessorInventory (HWND windowHandle)
@@ -144,9 +160,11 @@ UiaObservation observeProcessorInventory (HWND windowHandle)
         return observation;
     int directChildCount = 0;
     observation.result = directChildren->get_Length (&directChildCount);
-    if (FAILED (observation.result) || directChildCount == 0)
+    observation.directChildCount = directChildCount;
+    if (FAILED (observation.result))
         return observation;
-    observation.directChildrenAreOnlyProcessorItems = true;
+    if (directChildCount > 0)
+        observation.directChildrenAreOnlyProcessorItems = true;
     for (int index = 0; index < directChildCount; ++index)
     {
         ComOwner<IUIAutomationElement> element;
@@ -167,7 +185,44 @@ UiaObservation observeProcessorInventory (HWND windowHandle)
             observation.directChildrenAreOnlyProcessorItems = false;
             break;
         }
+        observation.directProcessorAutomationIds.add (semanticId);
+
+        ProcessorItemObservation itemObservation;
+        itemObservation.automationId = semanticId;
+        BSTR name = nullptr;
+        if (SUCCEEDED (element->get_CurrentName (&name)) && name != nullptr)
+            itemObservation.name = String (name);
+        SysFreeString (name);
+
+        VARIANT fullDescription;
+        VariantInit (&fullDescription);
+        if (SUCCEEDED (element->GetCurrentPropertyValue (
+                UIA_FullDescriptionPropertyId, &fullDescription))
+            && fullDescription.vt == VT_BSTR && fullDescription.bstrVal != nullptr)
+            itemObservation.fullDescription = String (fullDescription.bstrVal);
+        VariantClear (&fullDescription);
+
+        BOOL isOffscreen = FALSE;
+        if (SUCCEEDED (element->get_CurrentIsOffscreen (&isOffscreen)))
+            itemObservation.isOffscreen = isOffscreen != FALSE;
+        ComOwner<IUnknown> invoke;
+        if (SUCCEEDED (element->GetCurrentPattern (UIA_InvokePatternId, invoke.put())))
+            itemObservation.invokePatternAvailable = invoke.get() != nullptr;
+        observation.directProcessorItems.push_back (std::move (itemObservation));
     }
+
+    ComOwner<IUIAutomationElement> firstRootEditorDescendant;
+    if (SUCCEEDED (observation.result))
+        observation.result = findByAutomationId (
+            automation.get(), root.get(), L"oe.test.root1.editor.descendant",
+            TreeScope_Subtree, firstRootEditorDescendant.put());
+    observation.firstRootEditorDescendantFound = firstRootEditorDescendant.get() != nullptr;
+    ComOwner<IUIAutomationElement> eighthRootEditorDescendant;
+    if (SUCCEEDED (observation.result))
+        observation.result = findByAutomationId (
+            automation.get(), root.get(), L"oe.test.root8.editor.descendant",
+            TreeScope_Subtree, eighthRootEditorDescendant.put());
+    observation.eighthRootEditorDescendantFound = eighthRootEditorDescendant.get() != nullptr;
 
     ComOwner<IUIAutomationElement> item;
     observation.result = findByAutomationId (automation.get(), root.get(),
@@ -270,6 +325,122 @@ TEST_F (ProcessorInventoryWindowsUIAutomationTests, ExternalClientFindsReadOnlyR
     EXPECT_EQ (observation.itemName, "Mouse 8 recorder");
     EXPECT_FALSE (observation.invokePatternAvailable);
     EXPECT_TRUE (observation.directChildrenAreOnlyProcessorItems);
+
+    window.setVisible (false);
+    MessageManager::getInstance()->runDispatchLoopUntil (50);
+}
+
+TEST_F (ProcessorInventoryWindowsUIAutomationTests, ExternalClientSeesEveryLoadedProcessorAcrossTabsExactlyOnce)
+{
+    SmokeTestProcessor firstRootProbe;
+    SmokeTestProcessor firstRootRecorder;
+    SmokeTestProcessor eighthRootProbe;
+    SmokeTestProcessor eighthRootRecorder;
+    firstRootProbe.setNodeId (4101);
+    firstRootRecorder.setNodeId (4102);
+    eighthRootProbe.setNodeId (4801);
+    eighthRootRecorder.setNodeId (4802);
+
+    GenericEditor firstRootProbeEditor (&firstRootProbe);
+    GenericEditor firstRootRecorderEditor (&firstRootRecorder);
+    GenericEditor eighthRootProbeEditor (&eighthRootProbe);
+    GenericEditor eighthRootRecorderEditor (&eighthRootRecorder);
+    firstRootProbeEditor.setDisplayName ("Probe 1");
+    firstRootRecorderEditor.setDisplayName ("Probe 1 recorder");
+    eighthRootProbeEditor.setDisplayName ("Probe 8");
+    eighthRootRecorderEditor.setDisplayName ("Probe 8 recorder");
+    firstRootProbeEditor.setDescription ("Predecessor node ID: none.");
+    firstRootRecorderEditor.setDescription ("Predecessor node ID: 4101.");
+    eighthRootProbeEditor.setDescription ("Predecessor node ID: none.");
+    eighthRootRecorderEditor.setDescription ("Predecessor node ID: 4801.");
+
+    TextButton firstRootEditorDescendant ("Root 1 editor action");
+    firstRootEditorDescendant.setComponentID ("oe.test.root1.editor.descendant");
+    firstRootRecorderEditor.addAndMakeVisible (firstRootEditorDescendant);
+    firstRootEditorDescendant.setBounds (0, 0, 120, 24);
+    TextButton eighthRootEditorDescendant ("Root 8 editor action");
+    eighthRootEditorDescendant.setComponentID ("oe.test.root8.editor.descendant");
+    eighthRootRecorderEditor.addAndMakeVisible (eighthRootEditorDescendant);
+    eighthRootEditorDescendant.setBounds (0, 0, 120, 24);
+
+    auto tabs = std::make_unique<SignalChainTabComponent>();
+    auto* viewport = new EditorViewport (tabs.get());
+    DocumentWindow window ("Multi-root processor inventory UIA", Colours::black, 0);
+    window.setContentOwned (tabs.release(), true);
+    window.centreWithSize (700, 300);
+    window.setVisible (true);
+    ASSERT_NE (window.getPeer(), nullptr);
+    MessageManager::getInstance()->runDispatchLoopUntil (100);
+
+    std::vector<ProcessorAccessibilitySnapshotItem> snapshot;
+    StringArray expectedIds;
+    StringArray expectedNames;
+    StringArray expectedPredecessors;
+    for (int root = 1; root <= 8; ++root)
+    {
+        const auto probeId = 4000 + root * 100 + 1;
+        const auto recorderId = probeId + 1;
+        snapshot.push_back ({ probeId, "Probe " + String (root), std::nullopt });
+        snapshot.push_back ({ recorderId, "Probe " + String (root) + " recorder", probeId });
+        expectedIds.add ("oe.processor." + String (probeId));
+        expectedIds.add ("oe.processor." + String (recorderId));
+        expectedNames.add ("Probe " + String (root));
+        expectedNames.add ("Probe " + String (root) + " recorder");
+        expectedPredecessors.add ("Predecessor node ID: none.");
+        expectedPredecessors.add ("Predecessor node ID: " + String (probeId) + ".");
+    }
+    viewport->updateAccessibleProcessorInventory (snapshot);
+
+    viewport->updateVisibleEditors (
+        Array<GenericEditor*> { &eighthRootProbeEditor, &eighthRootRecorderEditor }, 8, 7);
+    MessageManager::getInstance()->runDispatchLoopUntil (100);
+
+    const auto assertInventory = [&] (const UiaObservation& observation,
+                                      int visibleRoot)
+    {
+        ASSERT_TRUE (SUCCEEDED (observation.result)) << std::hex << observation.result;
+        ASSERT_TRUE (observation.rootFound);
+        EXPECT_TRUE (observation.directChildrenAreOnlyProcessorItems);
+        EXPECT_EQ (observation.directChildCount, 16);
+        EXPECT_EQ (observation.directProcessorAutomationIds.joinIntoString (","),
+                   expectedIds.joinIntoString (","));
+        ASSERT_EQ (observation.directProcessorItems.size(), 16u);
+        for (size_t index = 0; index < observation.directProcessorItems.size(); ++index)
+        {
+            const auto& item = observation.directProcessorItems[index];
+            EXPECT_EQ (item.name, expectedNames[static_cast<int> (index)]);
+            EXPECT_TRUE (item.fullDescription.contains (
+                expectedPredecessors[static_cast<int> (index)]));
+            EXPECT_EQ (item.isOffscreen, static_cast<int> (index / 2) + 1 != visibleRoot);
+            EXPECT_FALSE (item.invokePatternAvailable);
+        }
+    };
+
+    const auto eighthRootObservation = observeWhilePumpingMessages (
+        static_cast<HWND> (window.getPeer()->getNativeHandle()));
+    assertInventory (eighthRootObservation, 8);
+    EXPECT_FALSE (eighthRootObservation.firstRootEditorDescendantFound);
+    EXPECT_TRUE (eighthRootObservation.eighthRootEditorDescendantFound);
+
+    snapshot.front().name = "Probe 1 renamed";
+    expectedNames.set (0, "Probe 1 renamed");
+    viewport->updateAccessibleProcessorInventory (snapshot);
+    MessageManager::getInstance()->runDispatchLoopUntil (100);
+    const auto renamedHiddenObservation = observeWhilePumpingMessages (
+        static_cast<HWND> (window.getPeer()->getNativeHandle()));
+    assertInventory (renamedHiddenObservation, 8);
+    EXPECT_EQ (renamedHiddenObservation.directProcessorAutomationIds[0], "oe.processor.4101");
+    EXPECT_EQ (renamedHiddenObservation.directProcessorItems[0].name, "Probe 1 renamed");
+
+    firstRootProbeEditor.setDisplayName ("Probe 1 renamed");
+    viewport->updateVisibleEditors (
+        Array<GenericEditor*> { &firstRootProbeEditor, &firstRootRecorderEditor }, 8, 0);
+    MessageManager::getInstance()->runDispatchLoopUntil (100);
+    const auto firstRootObservation = observeWhilePumpingMessages (
+        static_cast<HWND> (window.getPeer()->getNativeHandle()));
+    assertInventory (firstRootObservation, 1);
+    EXPECT_TRUE (firstRootObservation.firstRootEditorDescendantFound);
+    EXPECT_FALSE (firstRootObservation.eighthRootEditorDescendantFound);
 
     window.setVisible (false);
     MessageManager::getInstance()->runDispatchLoopUntil (50);

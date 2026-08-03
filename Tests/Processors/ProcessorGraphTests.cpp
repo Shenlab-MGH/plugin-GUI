@@ -2,7 +2,29 @@
 #include <Audio/AudioComponent.h>
 #include <Processors/ProcessorGraph/ProcessorGraph.h>
 #include <UI/ControlPanel.h>
+#include <UI/EditorViewport.h>
 #include <modules/juce_gui_basics/juce_gui_basics.h>
+
+#if JUCE_WINDOWS
+namespace AccessClass
+{
+void JUCE_API setEditorViewportForTesting (EditorViewport* viewport);
+}
+#endif
+
+namespace
+{
+class AccessibilityGraphTestProcessor : public GenericProcessor
+{
+public:
+    explicit AccessibilityGraphTestProcessor (const String& name)
+        : GenericProcessor (name, true)
+    {
+    }
+
+    void process (AudioBuffer<float>&) override {}
+};
+} // namespace
 
 class ProcessorGraphTest : public testing::Test
 {
@@ -162,3 +184,80 @@ TEST_F (ProcessorGraphTest, LoadFromXMLTest)
     ASSERT_EQ (bandpassFilter->getSourceNode(), fileReader);
     ASSERT_EQ (bandpassFilter->getDestNode(), nullptr);
 }
+
+#if JUCE_WINDOWS
+class ProcessorGraphAccessibilityWiringTest : public testing::Test
+{
+protected:
+    class ScopedAccessClassEditorViewport
+    {
+    public:
+        explicit ScopedAccessClassEditorViewport (EditorViewport* viewport)
+        {
+            AccessClass::setEditorViewportForTesting (viewport);
+        }
+
+        ~ScopedAccessClassEditorViewport()
+        {
+            AccessClass::setEditorViewportForTesting (nullptr);
+        }
+    };
+
+    void SetUp() override
+    {
+        MessageManager::deleteInstance();
+        MessageManager::getInstance();
+        AccessClass::clearAccessClassStateForTesting();
+        lookAndFeel = std::make_unique<CustomLookAndFeel>();
+        LookAndFeel::setDefaultLookAndFeel (lookAndFeel.get());
+        processorGraph = std::make_unique<ProcessorGraph> (false);
+        tabs = std::make_unique<SignalChainTabComponent>();
+        viewport = new EditorViewport (tabs.get());
+        accessClassViewport = std::make_unique<ScopedAccessClassEditorViewport> (viewport);
+    }
+
+    void TearDown() override
+    {
+        accessClassViewport.reset();
+        tabs.reset();
+        viewport = nullptr;
+        processorGraph.reset();
+        AccessClass::clearAccessClassStateForTesting();
+        DeletedAtShutdown::deleteAll();
+        LookAndFeel::setDefaultLookAndFeel (nullptr);
+        lookAndFeel.reset();
+        MessageManager::deleteInstance();
+    }
+
+    std::unique_ptr<ProcessorGraph> processorGraph;
+    EditorViewport* viewport = nullptr;
+
+private:
+    std::unique_ptr<SignalChainTabComponent> tabs;
+    std::unique_ptr<ScopedAccessClassEditorViewport> accessClassViewport;
+    std::unique_ptr<CustomLookAndFeel> lookAndFeel;
+};
+
+TEST_F (ProcessorGraphAccessibilityWiringTest, UpdateViewsPublishesSelectedAndUnselectedProcessorsToViewport)
+{
+    auto selectedRoot = std::make_unique<AccessibilityGraphTestProcessor> ("Probe 1");
+    auto unselectedRoot = std::make_unique<AccessibilityGraphTestProcessor> ("Probe 8");
+    auto* selectedRootPointer = selectedRoot.get();
+    selectedRootPointer->setNodeId (5101);
+    unselectedRoot->setNodeId (5801);
+    selectedRootPointer->createEditor();
+    unselectedRoot->createEditor();
+    processorGraph->addNode (std::move (selectedRoot), AudioProcessorGraph::NodeID (5101));
+    processorGraph->addNode (std::move (unselectedRoot), AudioProcessorGraph::NodeID (5801));
+
+    processorGraph->updateViews (selectedRootPointer);
+
+    const auto inventory = viewport->getAccessibleProcessorInventorySnapshot();
+    ASSERT_EQ (inventory.size(), 2u);
+    EXPECT_EQ (inventory[0].nodeId, 5101);
+    EXPECT_EQ (inventory[0].name, "Probe 1");
+    EXPECT_EQ (inventory[1].nodeId, 5801);
+    EXPECT_EQ (inventory[1].name, "Probe 8");
+}
+#endif
+
