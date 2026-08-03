@@ -1,0 +1,59 @@
+import json
+import re
+import subprocess
+import unittest
+from pathlib import Path, PurePosixPath, PureWindowsPath
+
+ROOT = Path(__file__).resolve().parents[2]
+BUNDLE_PATH = ROOT / "agent_native" / "open_ephys_agent_release_bundle.json"
+CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_r0_1_0.json"
+WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
+README_PATH = ROOT / "agent_native" / "README.md"
+
+
+def artifact_path(root, value):
+    posix, windows = PurePosixPath(value), PureWindowsPath(value)
+    if not isinstance(value, str) or not value or "\\" in value or posix.is_absolute() or windows.is_absolute() or windows.drive or ".." in posix.parts:
+        raise ValueError("artifact must be a repository-relative POSIX path")
+    result = (root / Path(*posix.parts)).resolve()
+    if not result.is_relative_to(root.resolve()): raise ValueError("artifact escapes repository")
+    return result
+
+
+class ReleaseBundleTests(unittest.TestCase):
+    def test_release_bundle_pins_contract_provenance_and_nonclaims(self):
+        bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(bundle["format_version"], "r0.1.0")
+        self.assertEqual(bundle["bundle"], {"id": "open-ephys-agent-native", "version": "r0.1.0", "platform": "windows", "coverage": "narrow-core-r0"})
+        self.assertEqual(bundle["official_upstream"], {"repository": "open-ephys/plugin-GUI", "tag": "v1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f", "gui_version": "1.0.2"})
+        self.assertEqual(bundle["contract"]["artifact"], "agent_native/open_ephys_agent_contract_v1_0_2_r0_1_0.json")
+        self.assertEqual(bundle["contract"]["version"], contract["contract"]["version"])
+        self.assertEqual(bundle["verification"], {"level": "offline-contract-and-ci", "hardware_verified": False, "scientific_verified": False})
+        self.assertFalse(bundle["mcp"]["modern_protocol_supported"])
+        for component in bundle["components"].values(): self.assertTrue(artifact_path(ROOT, component["artifact"]).is_file())
+
+    def test_provenance_is_ancestral_and_workflow_runs_r0_tests(self):
+        bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
+        tagged = subprocess.run(["git", "rev-parse", "--verify", "refs/tags/v1.0.2^{commit}"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(tagged, bundle["official_upstream"]["commit"])
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", tagged, "HEAD"], cwd=ROOT).returncode, 0)
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn("Tests.AgentNative.test_open_ephys_mcp_r010", workflow)
+        self.assertIn("Tests.AgentNative.test_open_ephys_release_bundle", workflow)
+        self.assertRegex(workflow, r"fetch-depth:\s*0")
+        self.assertIn("agent-native-v102-record-safety", workflow)
+
+    def test_artifact_path_rejects_escape_forms(self):
+        for value in ("../outside", "/absolute", "C:/absolute", "folder\\file", "nested/../../outside"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError): artifact_path(ROOT, value)
+
+    def test_readme_pins_the_narrow_surface_and_nonclaims(self):
+        readme = README_PATH.read_text(encoding="utf-8")
+        for required in ("v1.0.2", "r0.1.0", "2024-11-05", "exactly ten", "hardware_verified:false", "scientific_verified:false"):
+            self.assertIn(required, readme)
+        self.assertNotIn("raw API", readme)
+
+
+if __name__ == "__main__": unittest.main()

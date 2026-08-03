@@ -1,0 +1,34 @@
+{
+  "format_version": "r0.1.0",
+  "bundle": {
+    "id": "open-ephys-agent-native",
+    "version": "r0.1.0",
+    "platform": "windows",
+    "coverage": "narrow-core-r0"
+  },
+  "official_upstream": {
+    "repository": "open-ephys/plugin-GUI",
+    "tag": "v1.0.2",
+    "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f",
+    "gui_version": "1.0.2"
+  },
+  "contract": {
+    "id": "open-ephys-agent",
+    "version": "r0.1.0",
+    "artifact": "agent_native/open_ephys_agent_contract_v1_0_2_r0_1_0.json"
+  },
+  "mcp": {
+    "protocol_version": "2024-11-05",
+    "modern_protocol_supported": false
+  },
+  "components": {
+    "capabilities": { "artifact": "Source/Utils/ControlCapability.cpp", "contract_evidence": "source-pinned" },
+    "mcp": { "artifact": "agent_native/open_ephys_mcp_server.py", "contract_evidence": "machine-synchronized" },
+    "skill": { "artifact": "skills/open-ephys-agent-native/SKILL.md", "contract_evidence": "prose-pinned" }
+  },
+  "verification": {
+    "level": "offline-contract-and-ci",
+    "hardware_verified": false,
+    "scientific_verified": false
+  }
+}
