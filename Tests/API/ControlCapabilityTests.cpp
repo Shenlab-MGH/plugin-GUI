@@ -35,6 +35,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
 TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+    EXPECT_EQ (document["contract_version"], "0.1.1");
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), 9);
 
@@ -46,6 +47,52 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
     EXPECT_EQ ((*acquisition)["uia"]["automation_id"], "oe.control.acquisition");
     EXPECT_EQ ((*acquisition)["api"][0]["path"], "/api/status");
     EXPECT_EQ ((*acquisition)["api"][0]["method"], "GET");
+}
+
+TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
+{
+    const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+    const auto& capabilities = document["capabilities"];
+    const auto findById = [&capabilities] (const char* id)
+    {
+        return std::find_if (capabilities.begin(),
+                             capabilities.end(),
+                             [id] (const auto& item) { return item["id"] == id; });
+    };
+
+    const auto acquisitionResult = findById ("oe.control.acquisition");
+    const auto recordingResult = findById ("oe.control.recording");
+    ASSERT_NE (acquisitionResult, capabilities.end());
+    ASSERT_NE (recordingResult, capabilities.end());
+
+    const auto& acquisition = *acquisitionResult;
+    const auto& recording = *recordingResult;
+    const auto expectedModes = nlohmann::json::array ({ "IDLE", "ACQUIRE", "RECORD" });
+
+    ASSERT_TRUE (acquisition.contains ("mode_semantics"));
+    EXPECT_EQ (acquisition["mode_semantics"]["field"], "mode");
+    EXPECT_EQ (acquisition["mode_semantics"]["allowed_values"], expectedModes);
+    EXPECT_EQ (acquisition["mode_semantics"]["on_values"], nlohmann::json::array ({ "ACQUIRE", "RECORD" }));
+    EXPECT_EQ (acquisition["mode_semantics"]["off_values"], nlohmann::json::array ({ "IDLE" }));
+    EXPECT_EQ (acquisition["mode_semantics"]["commands"]["on"]["mode"], "ACQUIRE");
+    EXPECT_EQ (acquisition["mode_semantics"]["commands"]["off"]["mode"], "IDLE");
+    EXPECT_EQ (acquisition["mode_semantics"]["response_meaning"], "actual_gui_state");
+
+    ASSERT_TRUE (recording.contains ("mode_semantics"));
+    EXPECT_EQ (recording["mode_semantics"]["field"], "mode");
+    EXPECT_EQ (recording["mode_semantics"]["allowed_values"], expectedModes);
+    EXPECT_EQ (recording["mode_semantics"]["on_values"], nlohmann::json::array ({ "RECORD" }));
+    EXPECT_EQ (recording["mode_semantics"]["off_values"], nlohmann::json::array ({ "IDLE", "ACQUIRE" }));
+    EXPECT_EQ (recording["mode_semantics"]["commands"]["on"]["mode"], "RECORD");
+    EXPECT_EQ (recording["mode_semantics"]["commands"]["off"]["mode"], "ACQUIRE");
+    EXPECT_EQ (recording["mode_semantics"]["response_meaning"], "actual_gui_state");
+
+    for (const auto& item : capabilities)
+    {
+        const auto id = item["id"].get<std::string>();
+        if (id != "oe.control.acquisition" && id != "oe.control.recording")
+            EXPECT_FALSE (item.contains ("mode_semantics")) << id;
+    }
 }
 
 TEST (ControlCapabilityTests, CalculatesBoundedDiskUsage)

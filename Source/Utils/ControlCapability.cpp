@@ -26,15 +26,36 @@
 
 const std::vector<ControlCapability>& getCoreControlCapabilities()
 {
+    const ControlModeSemantics acquisitionModeSemantics {
+        "mode",
+        { "IDLE", "ACQUIRE", "RECORD" },
+        { "ACQUIRE", "RECORD" },
+        { "IDLE" },
+        "ACQUIRE",
+        "IDLE",
+        "actual_gui_state"
+    };
+    const ControlModeSemantics recordingModeSemantics {
+        "mode",
+        { "IDLE", "ACQUIRE", "RECORD" },
+        { "RECORD" },
+        { "IDLE", "ACQUIRE" },
+        "RECORD",
+        "ACQUIRE",
+        "actual_gui_state"
+    };
+
     static const std::vector<ControlCapability> capabilities {
         { "oe.control.acquisition", "Acquisition", "Start or stop data acquisition.",
           ControlCapabilityKind::toggle, "oe.control.acquisition",
           { { "read", "GET", "/api/status", {}, { "mode" } },
-            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } } },
+            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } },
+          acquisitionModeSemantics },
         { "oe.control.recording", "Recording", "Start or stop writing data to disk.",
           ControlCapabilityKind::toggle, "oe.control.recording",
           { { "read", "GET", "/api/status", {}, { "mode" } },
-            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } } },
+            { "set", "PUT", "/api/status", { "mode" }, { "mode" } } },
+          recordingModeSemantics },
         { "oe.control.recording.options", "Recording options", "Show or hide recording options.",
           ControlCapabilityKind::toggle, "oe.control.recording.options",
           { { "read", "GET", "/api/recording/options", {}, { "expanded" } },
