@@ -50,6 +50,7 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertIn("Tests.AgentNative.test_open_ephys_mcp_v0_0_4", workflow)
         self.assertIn("Tests.AgentNative.test_open_ephys_release_bundle", workflow)
         self.assertIn("Tests.AgentNative.test_public_product_version_0_0_4", workflow)
+        self.assertIn("Tests.AgentNative.test_windows_uia_harness_stability_policy", workflow)
         self.assertRegex(workflow, r"fetch-depth:\s*0")
         self.assertIn("agent-native-v102-record-safety", workflow)
         self.assertIn("agent-native-v102-core-r0-mcp-r010", workflow)
@@ -101,6 +102,7 @@ class ReleaseBundleTests(unittest.TestCase):
         readme = README_PATH.read_text(encoding="utf-8")
         for required in ("v1.0.2", "0.0.4", "2024-11-05", "exactly fourteen", "oe_get_config", "oe_get_processors", "hardware_verified:false", "scientific_verified:false"):
             self.assertIn(required, readme)
+        self.assertIn("Tests.AgentNative.test_windows_uia_harness_stability_policy", readme)
         self.assertNotIn("r0.1.3", readme)
         self.assertNotIn("0.1.4", readme)
 
