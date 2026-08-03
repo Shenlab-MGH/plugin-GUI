@@ -47,6 +47,7 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertRegex(workflow, r"fetch-depth:\s*0")
         self.assertIn("agent-native-v102-record-safety", workflow)
         self.assertIn("agent-native-v102-core-r0-mcp-r010", workflow)
+        self.assertIn("- 'agent-native-v102-recording-directory-r011'", workflow)
 
     def test_artifact_path_rejects_escape_forms(self):
         for value in ("../outside", "/absolute", "C:/absolute", "folder\\file", "nested/../../outside"):

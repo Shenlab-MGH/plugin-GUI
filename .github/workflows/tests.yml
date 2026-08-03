@@ -18,6 +18,7 @@ on:
       - 'testing'
       - 'agent-native-v102-record-safety'
       - 'agent-native-v102-core-r0-mcp-r010'
+      - 'agent-native-v102-recording-directory-r011'
 
 jobs:
   unit-tests:

@@ -38,6 +38,7 @@
 #include "../UI/ProcessorList.h"
 
 #include "ControlCapabilityJson.h"
+#include "ConfigSnapshotApiHandler.h"
 #include "ControlRead.h"
 #include "RecordingOptionsControl.h"
 #include "StatusApiHandler.h"
@@ -182,9 +183,11 @@ public:
             const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
             res.set_content (document.dump(), "application/json"); });
 
-        svr_->Get ("/api/config", [this] (const httplib::Request&, httplib::Response& res)
+        svr_->Get ("/api/config", [this] (const httplib::Request& req, httplib::Response& res)
                    {
-            const auto readResult = handleControlRead (
+            handleConfigSnapshotGet (
+                req,
+                res,
                 OpenEphysHttpDetail::dispatchToMessageThread,
                 [this]
                 {
@@ -192,22 +195,7 @@ public:
                     graph_->saveToXml (&xmlElement);
                     return xmlElement.toString();
                 },
-                std::chrono::seconds (2));
-
-            if (! readResult.value.has_value())
-            {
-                OpenEphysHttpDetail::setControlErrorResponse (
-                    res,
-                    "oe.control.signal_chain.configuration",
-                    readResult.httpStatus,
-                    readResult.errorCode,
-                    readResult.errorMessage);
-                return;
-            }
-
-            json ret;
-            ret["info"] = readResult.value->toStdString();
-            res.set_content (ret.dump(), "application/json"); });
+                std::chrono::seconds (2)); });
 
         const auto readStatusMode = []
         {

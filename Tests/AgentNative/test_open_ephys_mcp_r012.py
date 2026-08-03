@@ -38,7 +38,7 @@ CAPABILITY_IDS = [
 
 
 def load_server_module():
-    spec = importlib.util.spec_from_file_location("open_ephys_mcp_server_r010", SERVER_PATH)
+    spec = importlib.util.spec_from_file_location("open_ephys_mcp_server_r012", SERVER_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -145,6 +145,9 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(contract["baseline"], {"upstream": "open-ephys/plugin-GUI", "version": "1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"})
         self.assertEqual(contract["mcp"], {"protocol_version": "2024-11-05", "modern_protocol_supported": False, "server_name": "open-ephys-agent-native"})
         self.assertEqual([tool["name"] for tool in contract["tools"]], TOOL_NAMES)
+        capabilities_tool = next(tool for tool in contract["tools"] if tool["name"] == "oe_get_capabilities")
+        self.assertEqual(capabilities_tool["description"], "Read the pinned Core R0.1.2 capabilities.")
+        self.assertNotIn("R0.1.1", json.dumps(contract))
         self.assertEqual([item["id"] for item in contract["api"]["expected_capabilities_response"]["capabilities"]], CAPABILITY_IDS)
         self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.1.3")
         self.assertFalse(contract["verification"]["hardware_verified"])
