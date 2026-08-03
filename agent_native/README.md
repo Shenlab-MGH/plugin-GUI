@@ -58,3 +58,5 @@ installs only into an ephemeral venv, and exercises
 `Client(stdio_client(...), mode="auto")` against this server. The wheel lock and
 download manifest are checked in under `agent_native/interop`; no SDK package,
 wheel, cache, or credential is committed or installed on the instrument host.
+Local verification does not promote the release-bundle claim: it remains
+pending until this exact commit succeeds in the remote Windows gate.

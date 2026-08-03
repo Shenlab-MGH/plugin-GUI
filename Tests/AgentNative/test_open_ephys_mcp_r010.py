@@ -183,8 +183,11 @@ class McpR010Tests(unittest.TestCase):
         self.assertEqual(bundle["contract"]["version"], self.contract["contract"]["version"])
         self.assertEqual(bundle["components"]["mcp"]["protocol_version"], "2024-11-05")
         self.assertFalse(bundle["components"]["mcp"]["modern_protocol_supported"])
-        self.assertTrue(bundle["verification"]["official_mcp_v2_auto_fallback"])
-        self.assertIsNone(bundle["verification"]["official_mcp_v2_blocker"])
+        self.assertFalse(bundle["verification"]["official_mcp_v2_auto_fallback"])
+        blocker = bundle["verification"]["official_mcp_v2_blocker"]
+        self.assertIsInstance(blocker, str)
+        self.assertIn("exact-commit Windows gate", blocker)
+        self.assertIn("pending", blocker.lower())
 
     def test_legacy_discovery_fallback_and_lifecycle(self):
         discover = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}})
