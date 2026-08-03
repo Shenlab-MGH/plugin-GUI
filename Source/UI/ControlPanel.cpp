@@ -663,9 +663,8 @@ ControlPanel::~ControlPanel()
 
 void ControlPanel::setRecordingState (bool t, bool force)
 {
-    forceRecording = force;
-
-    recordButton->setToggleState (t, sendNotification);
+    recordingForce.run (force, [this, t]
+                        { recordButton->setToggleState (t, sendNotification); });
 }
 
 bool ControlPanel::getRecordingState()
@@ -1344,7 +1343,7 @@ void ControlPanel::buttonClicked (Button* button)
                     return;
                 }
 
-                if (! graph->allRecordNodesAreSynchronized() && ! forceRecording)
+                if (! graph->allRecordNodesAreSynchronized() && ! recordingForce.isActive())
                 {
                     recordButton->setToggleState (false, dontSendNotification);
 
@@ -1362,7 +1361,6 @@ void ControlPanel::buttonClicked (Button* button)
                     }
 
                     recordButton->setToggleState (true, dontSendNotification);
-                    forceRecording = false;
                 }
             }
 
