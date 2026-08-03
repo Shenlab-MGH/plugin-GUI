@@ -46,7 +46,7 @@ jobs:
       run: cmake -S . -B Build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=OFF
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v3
-    - name: build production
+    - name: build
       run: cmake --build Build --config Release --target ALL_BUILD --parallel 8
     - name: configure Windows UI contract tests
       run: cmake -S . -B BuildContractTests -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=ON -DOE_DONT_CHECK_BUILD_PATH=TRUE
