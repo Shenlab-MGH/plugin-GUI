@@ -183,7 +183,8 @@ class McpR010Tests(unittest.TestCase):
         self.assertEqual(bundle["contract"]["version"], self.contract["contract"]["version"])
         self.assertEqual(bundle["components"]["mcp"]["protocol_version"], "2024-11-05")
         self.assertFalse(bundle["components"]["mcp"]["modern_protocol_supported"])
-        self.assertFalse(bundle["verification"]["official_mcp_v2_auto_fallback"])
+        self.assertTrue(bundle["verification"]["official_mcp_v2_auto_fallback"])
+        self.assertIsNone(bundle["verification"]["official_mcp_v2_blocker"])
 
     def test_legacy_discovery_fallback_and_lifecycle(self):
         discover = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}})
@@ -208,6 +209,15 @@ class McpR010Tests(unittest.TestCase):
             "jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}
         })
         self.assertEqual(before_notification["error"]["code"], -32002)
+
+    def test_newer_legacy_client_can_negotiate_pinned_server_protocol(self):
+        response = self.server.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "official-sdk", "version": "2.0.0"},
+            },
+        })
+        self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
 
     def test_request_only_notifications_never_respond_or_mutate(self):
         self.ready_server()

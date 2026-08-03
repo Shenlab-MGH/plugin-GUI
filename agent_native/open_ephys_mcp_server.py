@@ -306,7 +306,8 @@ class McpServer:
         if self.connection_state != "new":
             raise JsonRpcError(INVALID_REQUEST, "Server is already initialized.")
         if (
-            params.get("protocolVersion") != PROTOCOL_VERSION
+            not isinstance(params.get("protocolVersion"), str)
+            or not params.get("protocolVersion")
             or not isinstance(params.get("capabilities"), dict)
             or not isinstance(params.get("clientInfo"), dict)
         ):

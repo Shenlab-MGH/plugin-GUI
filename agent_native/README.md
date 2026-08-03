@@ -51,8 +51,10 @@ Run the dependency-independent tests with:
 python -m unittest Tests.AgentNative.test_open_ephys_mcp_r010 -v
 ```
 
-Official `mcp==2.0.0` is not installed on this instrument PC, and installation
-is outside the agent safety scope. Therefore the official `Client(mode="auto")`
-interop gate is not part of the green core CI job. The prerelease must remain
-Draft until a locked official SDK artifact and hash are provisioned for a
-separate ephemeral Windows interop gate.
+Official `mcp==2.0.0` remains absent from the instrument host. The separate
+`official-mcp-v2-interop.yml` Windows gate downloads the complete binary-only
+CPython 3.12 wheelhouse under `RUNNER_TEMP`, verifies every pinned SHA-256 hash,
+installs only into an ephemeral venv, and exercises
+`Client(stdio_client(...), mode="auto")` against this server. The wheel lock and
+download manifest are checked in under `agent_native/interop`; no SDK package,
+wheel, cache, or credential is committed or installed on the instrument host.

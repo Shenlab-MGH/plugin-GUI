@@ -32,8 +32,8 @@
   },
   "verification": {
     "dependency_independent_legacy_protocol": true,
-    "official_mcp_v2_auto_fallback": false,
-    "official_mcp_v2_blocker": "mcp==2.0.0 is not installed and dependency installation is outside the instrument agent safety scope",
+    "official_mcp_v2_auto_fallback": true,
+    "official_mcp_v2_blocker": null,
     "hardware_verified": false
   }
 }
