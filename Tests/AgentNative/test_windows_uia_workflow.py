@@ -20,7 +20,7 @@ class WindowsUiaWorkflowTests(unittest.TestCase):
                 self.assertIsNotNone(path_block)
                 self.assertIn("    - 'Tests/UI/**'", path_block.group("paths"))
 
-    def test_windows_workflow_runs_only_the_ui_tests_after_building_release(self):
+    def test_windows_workflow_builds_release_and_runs_only_the_ui_tests(self):
         workflow = WINDOWS_WORKFLOW_PATH.read_text(encoding="utf-8")
         configure_command = (
             'cmake -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=ON ..'
@@ -31,7 +31,7 @@ class WindowsUiaWorkflowTests(unittest.TestCase):
         )
         ui_test_command = (
             "ctest --test-dir Build -C Release "
-            "-R '^UI_tests$' --output-on-failure"
+            "-R '^UI_tests$' --output-on-failure --no-tests=error"
         )
 
         self.assertIn(configure_command, workflow)

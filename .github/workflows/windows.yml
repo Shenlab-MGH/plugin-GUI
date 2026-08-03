@@ -46,7 +46,7 @@ jobs:
       run: |
         msbuild Build/ALL_BUILD.vcxproj -p:Configuration=Release -p:Platform=x64 -m
     - name: run UI tests
-      run: ctest --test-dir Build -C Release -R '^UI_tests$' --output-on-failure
+      run: ctest --test-dir Build -C Release -R '^UI_tests$' --output-on-failure --no-tests=error
     - name: deploy
       env:
         ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
