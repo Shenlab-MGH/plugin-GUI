@@ -435,6 +435,7 @@ TEST_F (ControlPanelAccessibilityTests, ExposesRecordingDirectoryThroughWindowsU
 
     panel.setBounds (0, 0, 900, 100);
     panel.setRecordingOptionsExpanded (true);
+    panel.setSize (901, 100);
 
     auto* directory = findDescendantByAutomationId (panel, "oe.control.recording.directory");
     ASSERT_NE (directory, nullptr);
