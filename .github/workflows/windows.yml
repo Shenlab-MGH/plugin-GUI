@@ -44,6 +44,7 @@ jobs:
       run: |
         msbuild Build/ALL_BUILD.vcxproj -p:Configuration=Release -p:Platform=x64 -m
     - name: deploy
+      if: github.repository == 'open-ephys/plugin-GUI'
       env:
         ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
       run: |

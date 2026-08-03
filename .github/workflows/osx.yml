@@ -43,6 +43,7 @@ jobs:
         cd Build 
         xcodebuild -configuration Release 
     - name: deploy
+      if: github.repository == 'open-ephys/plugin-GUI'
       env:
         ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
         MACOS_CERTIFICATE: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
