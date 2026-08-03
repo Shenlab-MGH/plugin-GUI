@@ -281,7 +281,8 @@ class McpServer:
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.connection_state != "new": raise JsonRpcError(INVALID_REQUEST, "Server is already initialized.")
-        if set(params) != {"protocolVersion", "capabilities", "clientInfo"} or not isinstance(params["protocolVersion"], str) or not params["protocolVersion"] or not isinstance(params["capabilities"], dict) or not isinstance(params["clientInfo"], dict):
+        required = {"protocolVersion", "capabilities", "clientInfo"}
+        if not required.issubset(params) or not set(params).issubset(required | {"_meta"}) or not isinstance(params["protocolVersion"], str) or not params["protocolVersion"] or not isinstance(params["capabilities"], dict) or not isinstance(params["clientInfo"], dict) or ("_meta" in params and not isinstance(params["_meta"], dict)):
             raise JsonRpcError(INVALID_PARAMS, "Invalid legacy initialize parameters.")
         self.connection_state = "initialize_responded"
         return {"protocolVersion": PROTOCOL_VERSION, "capabilities": {"tools": {}}, "serverInfo": {"name": self.contract["mcp"]["server_name"], "version": CONTRACT_VERSION}}
