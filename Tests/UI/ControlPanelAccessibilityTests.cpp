@@ -27,7 +27,7 @@ JUCEApplicationBase* createControlPanelAccessibilityTestApplication()
 {
     return new ControlPanelAccessibilityTestApplication();
 }
-class ControlPanelAccessibilityTests : public ::testing::Test
+class ControlPanelWindowsUiaTests : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -219,7 +219,7 @@ void expectButtonSemantics (const UiaButtonObservation& observation,
 } // namespace
 
 #if JUCE_WINDOWS
-TEST_F (ControlPanelAccessibilityTests, ExposesAcquisitionAndRecordingButtonsThroughWindowsUia)
+TEST_F (ControlPanelWindowsUiaTests, ExposesAcquisitionAndRecordingButtonsThroughWindowsUia)
 {
     MainDocumentWindow window;
     Component content;
