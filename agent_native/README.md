@@ -48,7 +48,8 @@ UI Automation, not a claim that official v1.0.2 already supplied processor UIA.
 observation from a worker COM client: it finds the root and dynamic item by
 AutomationId, checks List/ListItem roles and title, and verifies no Invoke
 pattern. This local gate passes; hosted CI remains pending until the branch is
-submitted and its exact-head workflow completes.
+submitted and its exact-head workflow completes. CTest enforces a 30-second
+CTest hard process timeout around this external COM smoke test.
 
 This bundle is limited to offline contract and local external Windows UIA verification:
 hardware_verified:false; scientific_verified:false. It makes no hardware or

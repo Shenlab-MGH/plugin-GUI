@@ -78,6 +78,7 @@ struct UiaObservation
     bool rootFound = false;
     bool itemFound = false;
     bool invokePatternAvailable = false;
+    bool directChildrenAreOnlyProcessorItems = false;
     String discoveredElements;
 };
 
@@ -114,9 +115,11 @@ UiaObservation observeProcessorInventory (HWND windowHandle)
 
     ComOwner<IUIAutomationCondition> trueCondition;
     ComOwner<IUIAutomationElementArray> descendants;
-    if (SUCCEEDED (automation->CreateTrueCondition (trueCondition.put()))
-        && SUCCEEDED (root->FindAll (TreeScope_Descendants, trueCondition.get(), descendants.put()))
-        && descendants.get() != nullptr)
+    observation.result = automation->CreateTrueCondition (trueCondition.put());
+    if (FAILED (observation.result))
+        return observation;
+    observation.result = root->FindAll (TreeScope_Descendants, trueCondition.get(), descendants.put());
+    if (SUCCEEDED (observation.result) && descendants.get() != nullptr)
     {
         int count = 0;
         descendants->get_Length (&count);
@@ -132,6 +135,37 @@ UiaObservation observeProcessorInventory (HWND windowHandle)
             observation.discoveredElements += String (id) + "|" + String (name) + ";";
             SysFreeString (id);
             SysFreeString (name);
+        }
+    }
+
+    ComOwner<IUIAutomationElementArray> directChildren;
+    observation.result = root->FindAll (TreeScope_Children, trueCondition.get(), directChildren.put());
+    if (FAILED (observation.result) || directChildren.get() == nullptr)
+        return observation;
+    int directChildCount = 0;
+    observation.result = directChildren->get_Length (&directChildCount);
+    if (FAILED (observation.result) || directChildCount == 0)
+        return observation;
+    observation.directChildrenAreOnlyProcessorItems = true;
+    for (int index = 0; index < directChildCount; ++index)
+    {
+        ComOwner<IUIAutomationElement> element;
+        BSTR id = nullptr;
+        CONTROLTYPEID type = 0;
+        if (FAILED (directChildren->GetElement (index, element.put()))
+            || FAILED (element->get_CurrentAutomationId (&id))
+            || FAILED (element->get_CurrentControlType (&type)))
+        {
+            SysFreeString (id);
+            observation.directChildrenAreOnlyProcessorItems = false;
+            break;
+        }
+        const auto semanticId = String (id);
+        SysFreeString (id);
+        if (! semanticId.startsWith ("oe.processor.") || type != UIA_ListItemControlTypeId)
+        {
+            observation.directChildrenAreOnlyProcessorItems = false;
+            break;
         }
     }
 
@@ -235,6 +269,7 @@ TEST_F (ProcessorInventoryWindowsUIAutomationTests, ExternalClientFindsReadOnlyR
     EXPECT_EQ (observation.itemType, UIA_ListItemControlTypeId);
     EXPECT_EQ (observation.itemName, "Mouse 8 recorder");
     EXPECT_FALSE (observation.invokePatternAvailable);
+    EXPECT_TRUE (observation.directChildrenAreOnlyProcessorItems);
 
     window.setVisible (false);
     MessageManager::getInstance()->runDispatchLoopUntil (50);

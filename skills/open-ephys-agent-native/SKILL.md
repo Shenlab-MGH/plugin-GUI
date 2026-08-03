@@ -51,7 +51,8 @@ not a claim that official v1.0.2 already exposed processor UIA.
 `WindowsUIAutomation_tests` performs real external Windows UI Automation
 observation from a worker COM client, including root/item IDs, roles, current
 title, and absence of Invoke. This local gate passes; hosted CI remains pending
-until the exact branch head completes the configured Windows workflow.
+until the exact branch head completes the configured Windows workflow. CTest
+enforces a 30-second CTest hard process timeout around the external COM smoke.
 
 Use `oe_get_recording_directory` to read the parent directory. Use
 `oe_set_recording_directory` only for a non-empty absolute Windows path. It

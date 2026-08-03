@@ -76,6 +76,7 @@ GenericEditor::GenericEditor (GenericProcessor* owner) : AudioProcessorEditor (o
     backgroundColour = Colour (10, 10, 10);
 
     updateAgentNativeAccessibility();
+    setFocusContainerType (FocusContainerType::focusContainer);
 }
 
 GenericEditor::~GenericEditor()

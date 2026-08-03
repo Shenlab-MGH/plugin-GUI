@@ -11,6 +11,7 @@ WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
 README_PATH = ROOT / "agent_native" / "README.md"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
 HTTP_SERVER_PATH = ROOT / "Source" / "Utils" / "OpenEphysHttpServer.h"
+WINDOWS_UIA_CMAKE_PATH = ROOT / "Tests" / "WindowsUIAutomation" / "CMakeLists.txt"
 
 
 def artifact_path(root, value):
@@ -53,6 +54,7 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertIn("- 'agent-native-v102-recording-directory-r011'", workflow)
         self.assertIn("- 'agent-native-v102-config-read-r012'", workflow)
         self.assertIn('ctest --test-dir Build -C Release --output-on-failure --no-tests=error -R "^(API_tests|UI_tests|WindowsUIAutomation_tests)$"', workflow)
+        self.assertIn("set_tests_properties(WindowsUIAutomation_tests PROPERTIES TIMEOUT 30)", WINDOWS_UIA_CMAKE_PATH.read_text(encoding="utf-8"))
 
     def test_artifact_path_rejects_escape_forms(self):
         for value in ("../outside", "/absolute", "C:/absolute", "folder\\file", "nested/../../outside"):
@@ -72,6 +74,7 @@ class ReleaseBundleTests(unittest.TestCase):
                 self.assertIn(required, normalized)
             self.assertIn("real external Windows UI Automation observation", normalized)
             self.assertIn("hosted CI remains pending", normalized)
+            self.assertIn("30-second CTest hard process timeout", normalized)
 
     def test_exposure_boundary_is_explicit_in_source_and_operator_docs(self):
         source = HTTP_SERVER_PATH.read_text(encoding="utf-8")

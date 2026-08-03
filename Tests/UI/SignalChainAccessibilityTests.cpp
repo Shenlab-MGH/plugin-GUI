@@ -43,6 +43,12 @@ TEST (SignalChainAccessibilityTests, ExposesEditorViewportAsTheLoadedProcessorLi
     auto* nativeHandler = viewport->getAccessibilityHandler();
     ASSERT_NE (nativeHandler, nullptr);
     const auto children = nativeHandler->getChildren();
+    ASSERT_FALSE (children.empty());
+    for (const auto* child : children)
+    {
+        EXPECT_TRUE (child->getComponent().getComponentID().startsWith ("oe.processor."));
+        EXPECT_EQ (child->getRole(), AccessibilityRole::listItem);
+    }
     const auto item = std::find_if (children.begin(), children.end(), [] (const auto* child)
                                     { return child->getComponent().getComponentID() == "oe.processor.303"; });
     ASSERT_NE (item, children.end());
