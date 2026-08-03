@@ -25,13 +25,14 @@
 #define __CUSTOMARROWBUTTON__
 
 #include "../../JuceLibraryCode/JuceHeader.h"
+#include "../TestableExport.h"
 
 /**
  Arrow button used to open/close components
 
  @see ArrowButton
  */
-class CustomArrowButton : public ToggleButton
+class TESTABLE CustomArrowButton : public ToggleButton
 {
 public:
     /** Constructor*/

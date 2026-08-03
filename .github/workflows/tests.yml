@@ -12,6 +12,7 @@ on:
     branches:
       - 'development'
       - 'testing'
+      - 'agent-native-v102-record-safety'
 
 jobs:
   unit-tests:
