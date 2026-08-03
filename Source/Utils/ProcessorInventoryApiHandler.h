@@ -28,7 +28,32 @@
 #include "json.hpp"
 
 #include <chrono>
+#include <set>
 #include <utility>
+#include <vector>
+
+template <typename Processors, typename SerializeProcessor>
+nlohmann::json buildProcessorInventoryDocument (const Processors& processors,
+                                                SerializeProcessor&& serializeProcessor)
+{
+    std::set<int> seenNodeIds;
+    std::vector<nlohmann::json> processorsJson;
+
+    for (auto* processor : processors)
+    {
+        if (processor == nullptr || processor->isEmpty())
+            continue;
+
+        if (! seenNodeIds.insert (processor->getNodeId()).second)
+            continue;
+
+        processorsJson.push_back (serializeProcessor (processor));
+    }
+
+    nlohmann::json document;
+    document["processors"] = std::move (processorsJson);
+    return document;
+}
 
 template <typename Dispatcher, typename ReadInventory>
 void handleProcessorInventoryGet (const httplib::Request&,

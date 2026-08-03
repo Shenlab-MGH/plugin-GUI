@@ -751,17 +751,14 @@ public:
                 [this]
                 {
                     const auto processors = graph_->getListOfProcessors();
-                    std::vector<json> processorsJson;
-                    for (const auto& processor : processors)
-                    {
-                        json processorJson;
-                        processor_to_json (processor, &processorJson);
-                        processorsJson.push_back (std::move (processorJson));
-                    }
-
-                    json document;
-                    document["processors"] = std::move (processorsJson);
-                    return document;
+                    return buildProcessorInventoryDocument (
+                        processors,
+                        [] (GenericProcessor* processor)
+                        {
+                            json processorJson;
+                            processor_to_json (processor, &processorJson);
+                            return processorJson;
+                        });
                 },
                 std::chrono::seconds (2)); });
 
