@@ -8,13 +8,14 @@ import subprocess
 import sys
 import threading
 import unittest
+import xml.etree.ElementTree as ElementTree
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_0_2_r0_1_1.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_0_2_r0_1_2.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
 
@@ -23,13 +24,15 @@ TOOL_NAMES = [
     "oe_get_recording_options", "oe_set_recording_options",
     "oe_get_recording_filename", "oe_set_recording_filename",
     "oe_get_recording_directory", "oe_set_recording_directory",
+    "oe_get_config",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 ]
 CAPABILITY_IDS = [
     "oe.control.acquisition", "oe.control.recording", "oe.control.recording.options",
     "oe.control.recording.filename", "oe.control.recording.directory",
     "oe.control.recording.new_directory",
-    "oe.control.recording.force_new_directory", "oe.status.cpu_usage",
+    "oe.control.recording.force_new_directory",
+    "oe.control.signal_chain.configuration", "oe.status.cpu_usage",
     "oe.status.disk_usage", "oe.status.elapsed_time",
 ]
 
@@ -59,6 +62,7 @@ class FakeOpenEphysApi:
             for path in ("C:/data", "D:/Open Ephys", "D:/data", "E:/data")
         }
         self.cpu = {"usage": 0.25}
+        self.config = {"info": "<SETTINGS><SIGNALCHAIN /></SETTINGS>"}
         self.disk = {"capability": "oe.status.disk_usage", "usage": 0.5, "minimum": 0.0, "maximum": 1.0, "read_only": True}
         self.time = {"capability": "oe.status.elapsed_time", "display": "00:00:00", "elapsed_milliseconds": 0, "mode": "IDLE", "reference": "acquisition", "running": False, "recording": False, "read_only": True}
         self.status_put_response = None
@@ -91,7 +95,8 @@ class FakeOpenEphysApi:
                         self.send_json(200, owner.capabilities)
                     return
                 payloads = {"/api/status": {"mode": owner.mode}, "/api/recording/options": owner.options,
-                            "/api/recording": owner.recording, "/api/cpu": owner.cpu,
+                            "/api/recording": owner.recording, "/api/config": owner.config,
+                            "/api/cpu": owner.cpu,
                             "/api/disk": owner.disk, "/api/time": owner.time}
                 self.send_json(200, payloads[self.path]) if self.path in payloads else self.send_json(404, {"error": "not found"})
 
@@ -134,14 +139,14 @@ class FakeOpenEphysApi:
 class ContractTests(unittest.TestCase):
     def test_contract_is_pinned_to_narrow_v102_core_r0(self):
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(contract["schema_version"], "r0.1.1")
-        self.assertEqual(contract["contract"]["version"], "r0.1.1")
-        self.assertEqual(contract["bundle"]["version"], "r0.1.1")
+        self.assertEqual(contract["schema_version"], "r0.1.2")
+        self.assertEqual(contract["contract"]["version"], "r0.1.2")
+        self.assertEqual(contract["bundle"]["version"], "r0.1.2")
         self.assertEqual(contract["baseline"], {"upstream": "open-ephys/plugin-GUI", "version": "1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"})
         self.assertEqual(contract["mcp"], {"protocol_version": "2024-11-05", "modern_protocol_supported": False, "server_name": "open-ephys-agent-native"})
         self.assertEqual([tool["name"] for tool in contract["tools"]], TOOL_NAMES)
         self.assertEqual([item["id"] for item in contract["api"]["expected_capabilities_response"]["capabilities"]], CAPABILITY_IDS)
-        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.1.2")
+        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.1.3")
         self.assertFalse(contract["verification"]["hardware_verified"])
         self.assertFalse(contract["verification"]["scientific_verified"])
         tool_names = [tool["name"] for tool in contract["tools"]]
@@ -151,9 +156,12 @@ class ContractTests(unittest.TestCase):
             self.assertFalse(tool["inputSchema"].get("additionalProperties", True), tool["name"])
         directory_setter = next(tool for tool in contract["tools"] if tool["name"] == "oe_set_recording_directory")
         self.assertEqual(directory_setter["inputSchema"]["properties"]["parent_directory"]["minLength"], 1)
+        configuration = next(item for item in contract["api"]["expected_capabilities_response"]["capabilities"] if item["id"] == "oe.control.signal_chain.configuration")
+        self.assertEqual(configuration["uia"], {"automation_id": ""})
+        self.assertEqual(configuration["api"], [{"operation": "read", "method": "GET", "path": "/api/config", "request_fields": [], "response_fields": ["info"]}])
 
 
-class McpR011Tests(unittest.TestCase):
+class McpR012Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
@@ -237,12 +245,25 @@ class McpR011Tests(unittest.TestCase):
         self.assertEqual(self.call("oe_get_recording_options")[1]["expanded"], False)
         self.assertEqual(self.call("oe_get_recording_filename")[1]["base_text"], "Record Node")
         self.assertEqual(self.call("oe_get_recording_directory")[1], {"parent_directory": "C:/data"})
+        config = self.call("oe_get_config")[1]
+        self.assertEqual(config, self.api.config)
+        self.assertEqual(ElementTree.fromstring(config["info"]).tag, "SETTINGS")
         self.assertEqual(self.call("oe_get_cpu")[1], {"usage": 0.25})
         self.assertEqual(self.call("oe_get_disk")[1]["usage"], 0.5)
         self.assertEqual(self.call("oe_get_time")[1]["display"], "00:00:00")
-        for name, arguments in (("oe_get_cpu", {"x": 1}), ("oe_set_status", {"mode": "IDLE", "extra": True}), ("oe_set_recording_options", {"expanded": True, "force_new_directory": True}), ("oe_set_recording_filename", {"base_text": "x", "append_text": "y"}), ("oe_set_recording_directory", {}), ("oe_set_recording_directory", {"parent_directory": "C:/data", "extra": True})):
+        for name, arguments in (("oe_get_config", {"x": 1}), ("oe_get_cpu", {"x": 1}), ("oe_set_status", {"mode": "IDLE", "extra": True}), ("oe_set_recording_options", {"expanded": True, "force_new_directory": True}), ("oe_set_recording_filename", {"base_text": "x", "append_text": "y"}), ("oe_set_recording_directory", {}), ("oe_set_recording_directory", {"parent_directory": "C:/data", "extra": True})):
             with self.subTest(name=name): self.assert_error(name, arguments, "invalid_arguments")
         self.api.cpu = {"usage": 1.1}; self.assert_error("oe_get_cpu", {}, "response_schema_mismatch")
+
+    def test_config_requires_exact_official_info_schema_and_settings_xml(self):
+        self.ready_server()
+        for payload in (
+            {}, {"info": 1}, {"info": "not xml"},
+            {"info": "<OTHER />"}, {"info": "<SETTINGS />", "extra": True},
+        ):
+            with self.subTest(payload=payload):
+                self.api.config = payload
+                self.assert_error("oe_get_config", {}, "response_schema_mismatch")
 
     def test_record_requires_same_call_approval_that_is_not_forwarded(self):
         self.ready_server(); self.assert_error("oe_set_status", {"mode": "RECORD"}, "recording_approval_required")
@@ -445,7 +466,7 @@ class McpR011Tests(unittest.TestCase):
 
     def test_skill_pins_contract_and_safety_boundary(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        for required in ("r0.1.1", "1.0.2", "2024-11-05", "approve_recording:true", "hardware_verified:false", "scientific_verified:false", "oe_set_recording_directory"):
+        for required in ("r0.1.2", "1.0.2", "2024-11-05", "approve_recording:true", "hardware_verified:false", "scientific_verified:false", "oe_set_recording_directory", "oe_get_config"):
             self.assertIn(required, skill)
         for forbidden in ("oe_api_request", "uia locator", "processor", "parameter", "stream"):
             self.assertNotIn(forbidden, skill.lower())

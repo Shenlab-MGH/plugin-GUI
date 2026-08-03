@@ -14,6 +14,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         "oe.control.recording.directory",
         "oe.control.recording.new_directory",
         "oe.control.recording.force_new_directory",
+        "oe.control.signal_chain.configuration",
         "oe.status.cpu_usage",
         "oe.status.disk_usage",
         "oe.status.elapsed_time"
@@ -26,7 +27,10 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         const auto* capability = findControlCapability (id);
         ASSERT_NE (capability, nullptr) << id;
         EXPECT_EQ (capability->id, id);
-        EXPECT_EQ (capability->uiaAutomationId, id);
+        if (id == "oe.control.signal_chain.configuration")
+            EXPECT_TRUE (capability->uiaAutomationId.isEmpty());
+        else
+            EXPECT_EQ (capability->uiaAutomationId, id);
         EXPECT_TRUE (capability->name.isNotEmpty());
         EXPECT_TRUE (capability->description.isNotEmpty());
         EXPECT_FALSE (capability->operations.empty());
@@ -36,9 +40,9 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
 TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
-    EXPECT_EQ (document["contract_version"], "0.1.2");
+    EXPECT_EQ (document["contract_version"], "0.1.3");
     ASSERT_TRUE (document["capabilities"].is_array());
-    ASSERT_EQ (document["capabilities"].size(), 10);
+    ASSERT_EQ (document["capabilities"].size(), 11);
 
     const auto acquisition = std::find_if (document["capabilities"].begin(),
                                            document["capabilities"].end(),
@@ -48,6 +52,35 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
     EXPECT_EQ ((*acquisition)["uia"]["automation_id"], "oe.control.acquisition");
     EXPECT_EQ ((*acquisition)["api"][0]["path"], "/api/status");
     EXPECT_EQ ((*acquisition)["api"][0]["method"], "GET");
+}
+
+TEST (ControlCapabilityTests, DefinesReadOnlySignalChainConfigurationWithTransparentUiaGap)
+{
+    const auto* configuration = findControlCapability ("oe.control.signal_chain.configuration");
+    ASSERT_NE (configuration, nullptr);
+    EXPECT_EQ (configuration->kind, ControlCapabilityKind::collection);
+    EXPECT_TRUE (configuration->uiaAutomationId.isEmpty());
+    ASSERT_EQ (configuration->operations.size(), (size_t) 1);
+
+    const auto& read = configuration->operations[0];
+    EXPECT_EQ (read.operation, "read");
+    EXPECT_EQ (read.method, "GET");
+    EXPECT_EQ (read.path, "/api/config");
+    EXPECT_TRUE (read.requestFields.isEmpty());
+    EXPECT_EQ (read.responseFields, StringArray ({ "info" }));
+
+    const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+    const auto item = std::find_if (document["capabilities"].begin(),
+                                    document["capabilities"].end(),
+                                    [] (const auto& candidate)
+                                    { return candidate["id"] == "oe.control.signal_chain.configuration"; });
+    ASSERT_NE (item, document["capabilities"].end());
+    EXPECT_EQ ((*item)["uia"]["automation_id"], "");
+    EXPECT_EQ ((*item)["api"], nlohmann::json::array ({ {
+        { "operation", "read" }, { "method", "GET" }, { "path", "/api/config" },
+        { "request_fields", nlohmann::json::array() },
+        { "response_fields", nlohmann::json::array ({ "info" }) }
+    } }));
 }
 
 TEST (ControlCapabilityTests, DefinesRecordingDirectoryAsOneExistingRouteAndField)
