@@ -1,0 +1,142 @@
+name: Open Ephys Agent Windows Portable Prerelease
+
+on:
+  push:
+    tags:
+      - 'v1.0.2-r0.1.0'
+      - 'v1.1.0-r0.1.0'
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Exact approved Open Ephys Agent composite version
+        required: true
+        type: choice
+        options:
+          - 'v1.0.2-r0.1.0'
+          - 'v1.1.0-r0.1.0'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows portable prerelease
+    runs-on: windows-2022
+    outputs:
+      release_version: ${{ steps.release.outputs.release_version }}
+      artifact_name: ${{ steps.release.outputs.artifact_name }}
+      checksum_name: ${{ steps.release.outputs.checksum_name }}
+      provenance_name: ${{ steps.release.outputs.provenance_name }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Resolve exact release contract
+      id: release
+      shell: pwsh
+      env:
+        DISPATCH_VERSION: ${{ inputs.release_version }}
+        EVENT_NAME: ${{ github.event_name }}
+        REF_NAME: ${{ github.ref_name }}
+      run: |
+        $releaseVersion = if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+          $env:DISPATCH_VERSION
+        } else {
+          $env:REF_NAME
+        }
+        $allowed = @('v1.0.2-r0.1.0', 'v1.1.0-r0.1.0')
+        if ($releaseVersion -notin $allowed) {
+          throw "Unsupported release version: $releaseVersion"
+        }
+        $artifactName = "open-ephys-agent-$releaseVersion-windows-x64.zip"
+        "release_version=$releaseVersion" >> $env:GITHUB_OUTPUT
+        "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
+        "checksum_name=$artifactName.sha256" >> $env:GITHUB_OUTPUT
+        "provenance_name=$($artifactName.Replace('.zip', '.provenance.json'))" >> $env:GITHUB_OUTPUT
+    - name: Configure Release build
+      shell: pwsh
+      run: cmake -S . -B Build -G "Visual Studio 17 2022" -A x64
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v3
+    - name: Build Release
+      shell: pwsh
+      run: msbuild Build/ALL_BUILD.vcxproj -p:Configuration=Release -p:Platform=x64 -m
+    - name: Package portable prerelease
+      shell: pwsh
+      env:
+        RELEASE_VERSION: ${{ steps.release.outputs.release_version }}
+      run: |
+        python Scripts/ci/package_agent_windows_release.py `
+          --repository-root . `
+          --build-directory Build/Release `
+          --output-directory dist `
+          --repository $env:GITHUB_REPOSITORY `
+          --commit $env:GITHUB_SHA `
+          --release-version $env:RELEASE_VERSION `
+          --runtime-dll C:/Windows/System32/msvcp140.dll `
+          --runtime-dll C:/Windows/System32/vcruntime140.dll `
+          --runtime-dll C:/Windows/System32/vcruntime140_1.dll
+    - name: Verify official baseline ancestry
+      shell: pwsh
+      env:
+        PROVENANCE_NAME: ${{ steps.release.outputs.provenance_name }}
+      run: |
+        $manifest = Get-Content -Raw "dist/$env:PROVENANCE_NAME" | ConvertFrom-Json
+        git merge-base --is-ancestor $manifest.official_commit HEAD
+        if ($LASTEXITCODE -ne 0) {
+          throw "Official baseline commit is not an ancestor of this build."
+        }
+        $tagCommit = git rev-parse "$($manifest.official_tag)^{commit}"
+        if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $manifest.official_commit) {
+          throw "Official baseline tag does not resolve to the recorded commit."
+        }
+    - name: Upload portable release bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.release.outputs.artifact_name }}
+        path: |
+          dist/${{ steps.release.outputs.artifact_name }}
+          dist/${{ steps.release.outputs.checksum_name }}
+          dist/${{ steps.release.outputs.provenance_name }}
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 14
+
+  publish-prerelease:
+    name: Attach to existing Shenlab prerelease
+    needs: build
+    if: >-
+      github.repository == 'Shenlab-MGH/plugin-GUI' &&
+      github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
+      needs.build.outputs.release_version == github.ref_name
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download verified release bundle
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ needs.build.outputs.artifact_name }}
+        path: dist
+    - name: Attach files to existing matching prerelease
+      shell: pwsh
+      env:
+        ARTIFACT_NAME: ${{ needs.build.outputs.artifact_name }}
+        CHECKSUM_NAME: ${{ needs.build.outputs.checksum_name }}
+        GH_REPO: ${{ github.repository }}
+        GH_TOKEN: ${{ github.token }}
+        PROVENANCE_NAME: ${{ needs.build.outputs.provenance_name }}
+        RELEASE_TAG: ${{ needs.build.outputs.release_version }}
+      run: |
+        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+        if (-not $release.prerelease -or $release.tag_name -ne $env:RELEASE_TAG) {
+          throw "A matching existing GitHub prerelease is required."
+        }
+        gh release upload $env:RELEASE_TAG `
+          "dist/$env:ARTIFACT_NAME" `
+          "dist/$env:CHECKSUM_NAME" `
+          "dist/$env:PROVENANCE_NAME" `
+          --clobber

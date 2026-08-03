@@ -1,0 +1,32 @@
+name: Open Ephys Agent Release Contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/agent-windows-portable-prerelease.yml'
+      - '.github/workflows/agent-release-contracts.yml'
+      - 'Scripts/ci/package_agent_windows_release.py'
+      - 'Tests/CI/test_agent_windows_portable_prerelease.py'
+  push:
+    branches:
+      - 'main'
+      - 'development'
+      - 'testing'
+    paths:
+      - '.github/workflows/agent-windows-portable-prerelease.yml'
+      - '.github/workflows/agent-release-contracts.yml'
+      - 'Scripts/ci/package_agent_windows_release.py'
+      - 'Tests/CI/test_agent_windows_portable_prerelease.py'
+
+permissions:
+  contents: read
+
+jobs:
+  agent-release-contracts:
+    name: Agent Release Contracts
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Validate Windows portable prerelease contracts
+      run: python -m unittest Tests.CI.test_agent_windows_portable_prerelease -v
