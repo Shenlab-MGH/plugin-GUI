@@ -108,7 +108,7 @@ public:
   @see ControlPanel, ProcessorGraph
 
 */
-class PlayButton : public DrawableButton
+class TESTABLE PlayButton : public DrawableButton
 {
 public:
     /** Constructor*/
@@ -136,7 +136,7 @@ public:
 
 */
 
-class RecordButton : public DrawableButton
+class TESTABLE RecordButton : public DrawableButton
 {
 public:
     /** Constructor*/

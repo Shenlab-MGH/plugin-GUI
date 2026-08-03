@@ -29,6 +29,8 @@ add_sources(open-ephys
 	PopupComponent.h
 	ProcessorList.cpp
 	ProcessorList.h
+	SemanticComponent.cpp
+	SemanticComponent.h
 	UIComponent.cpp
 	UIComponent.h
 )

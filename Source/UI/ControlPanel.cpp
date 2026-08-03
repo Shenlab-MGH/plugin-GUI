@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "../Processors/PluginManager/PluginManager.h"
 #include "../Processors/RecordNode/RecordEngine.h"
 #include "FilenameConfigWindow.h"
+#include "SemanticComponent.h"
 #include "UIComponent.h"
 #include <math.h>
 #include <stdio.h>
@@ -125,6 +126,13 @@ PlayButton::PlayButton()
     setClickingTogglesState (true);
     setTooltip ("Start/stop acquisition");
 
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.acquisition",
+                           "Acquisition",
+                           "Start or stop data acquisition.");
+#endif
+
     updateImages (false);
 }
 
@@ -162,6 +170,13 @@ RecordButton::RecordButton()
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
     setTooltip ("Start/stop writing to disk");
+
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.recording",
+                           "Recording",
+                           "Start or stop writing data to disk.");
+#endif
 
     updateImages (false);
 }
