@@ -3,17 +3,21 @@ name: Open Ephys Agent Windows Portable Prerelease
 on:
   push:
     tags:
-      - 'v1.0.2-r0.1.0'
-      - 'v1.1.0-r0.1.0'
+      - 'oe-agent-v1.0.2-r0.1.0'
+      - 'oe-agent-v1.1.0-r0.1.0'
   workflow_dispatch:
     inputs:
-      release_version:
-        description: Exact approved Open Ephys Agent composite version
+      release_tag:
+        description: Exact approved Open Ephys Agent composite tag contract
         required: true
         type: choice
         options:
-          - 'v1.0.2-r0.1.0'
-          - 'v1.1.0-r0.1.0'
+          - 'oe-agent-v1.0.2-r0.1.0'
+          - 'oe-agent-v1.1.0-r0.1.0'
+
+concurrency:
+  group: agent-windows-portable-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -23,64 +27,102 @@ jobs:
     name: Build Windows portable prerelease
     runs-on: windows-2022
     outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
       release_version: ${{ steps.release.outputs.release_version }}
-      artifact_name: ${{ steps.release.outputs.artifact_name }}
+      release_eligible: ${{ steps.release.outputs.release_eligible }}
+      invocation: ${{ steps.release.outputs.invocation }}
+      bundle_name: ${{ steps.release.outputs.bundle_name }}
+      zip_name: ${{ steps.release.outputs.zip_name }}
       checksum_name: ${{ steps.release.outputs.checksum_name }}
       provenance_name: ${{ steps.release.outputs.provenance_name }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
         fetch-depth: 0
     - name: Resolve exact release contract
       id: release
       shell: pwsh
       env:
-        DISPATCH_VERSION: ${{ inputs.release_version }}
+        DISPATCH_TAG: ${{ inputs.release_tag }}
         EVENT_NAME: ${{ github.event_name }}
         REF_NAME: ${{ github.ref_name }}
       run: |
-        $releaseVersion = if ($env:EVENT_NAME -eq 'workflow_dispatch') {
-          $env:DISPATCH_VERSION
+        $releaseTag = if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+          $env:DISPATCH_TAG
         } else {
           $env:REF_NAME
         }
-        $allowed = @('v1.0.2-r0.1.0', 'v1.1.0-r0.1.0')
-        if ($releaseVersion -notin $allowed) {
-          throw "Unsupported release version: $releaseVersion"
+        $allowed = @('oe-agent-v1.0.2-r0.1.0', 'oe-agent-v1.1.0-r0.1.0')
+        if ($releaseTag -notin $allowed) {
+          throw "Unsupported release tag: $releaseTag"
         }
-        $artifactName = "open-ephys-agent-$releaseVersion-windows-x64.zip"
+        $releaseVersion = $releaseTag.Substring('oe-agent-'.Length)
+        $baseName = "open-ephys-agent-$releaseVersion-windows-x64"
+        if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+          $releaseEligible = 'false'
+          $invocation = 'workflow_dispatch'
+          $bundleName = "$baseName-validation-$($env:GITHUB_SHA.Substring(0, 12))"
+        } else {
+          $releaseEligible = 'true'
+          $invocation = 'tag'
+          $bundleName = $baseName
+        }
+        "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
         "release_version=$releaseVersion" >> $env:GITHUB_OUTPUT
-        "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
-        "checksum_name=$artifactName.sha256" >> $env:GITHUB_OUTPUT
-        "provenance_name=$($artifactName.Replace('.zip', '.provenance.json'))" >> $env:GITHUB_OUTPUT
+        "release_eligible=$releaseEligible" >> $env:GITHUB_OUTPUT
+        "invocation=$invocation" >> $env:GITHUB_OUTPUT
+        "bundle_name=$bundleName" >> $env:GITHUB_OUTPUT
+        "zip_name=$baseName.zip" >> $env:GITHUB_OUTPUT
+        "checksum_name=$baseName.zip.sha256" >> $env:GITHUB_OUTPUT
+        "provenance_name=$baseName.provenance.json" >> $env:GITHUB_OUTPUT
     - name: Configure Release build
       shell: pwsh
       run: cmake -S . -B Build -G "Visual Studio 17 2022" -A x64
     - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v3
+      uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
     - name: Build Release
       shell: pwsh
       run: msbuild Build/ALL_BUILD.vcxproj -p:Configuration=Release -p:Platform=x64 -m
     - name: Package portable prerelease
       shell: pwsh
       env:
-        RELEASE_VERSION: ${{ steps.release.outputs.release_version }}
+        INVOCATION: ${{ steps.release.outputs.invocation }}
+        RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        RUNNER_ARCHITECTURE: ${{ runner.arch }}
       run: |
+        $cmakeVersion = ((cmake --version | Select-Object -First 1) -replace '^cmake version ', '').Trim()
+        $msbuildVersion = (& msbuild -version -nologo | Select-Object -Last 1).Trim()
+        $msvcpVersion = (Get-Item C:/Windows/System32/msvcp140.dll).VersionInfo.FileVersion
+        $vcruntimeVersion = (Get-Item C:/Windows/System32/vcruntime140.dll).VersionInfo.FileVersion
+        $vcruntime1Version = (Get-Item C:/Windows/System32/vcruntime140_1.dll).VersionInfo.FileVersion
         python Scripts/ci/package_agent_windows_release.py `
           --repository-root . `
           --build-directory Build/Release `
           --output-directory dist `
           --repository $env:GITHUB_REPOSITORY `
           --commit $env:GITHUB_SHA `
-          --release-version $env:RELEASE_VERSION `
+          --release-tag $env:RELEASE_TAG `
+          --invocation $env:INVOCATION `
+          --runner-image "$env:ImageOS@$env:ImageVersion" `
+          --runner-architecture $env:RUNNER_ARCHITECTURE `
           --runtime-dll C:/Windows/System32/msvcp140.dll `
           --runtime-dll C:/Windows/System32/vcruntime140.dll `
-          --runtime-dll C:/Windows/System32/vcruntime140_1.dll
-    - name: Verify official baseline ancestry
+          --runtime-dll C:/Windows/System32/vcruntime140_1.dll `
+          --runtime-dll-version "msvcp140.dll=$msvcpVersion" `
+          --runtime-dll-version "vcruntime140.dll=$vcruntimeVersion" `
+          --runtime-dll-version "vcruntime140_1.dll=$vcruntime1Version" `
+          --toolchain "cmake=$cmakeVersion" `
+          --toolchain "msbuild=$msbuildVersion" `
+          --action checkout=11d5960a326750d5838078e36cf38b85af677262 `
+          --action download-artifact=d3f86a106a0bac45b974a628896c90dbdf5c8093 `
+          --action setup-msbuild=30375c66a4eea26614e0d39710365f22f8b0af57 `
+          --action upload-artifact=ea165f8d65b6e75b540449e92b4886f43607fa02
+    - name: Verify official baseline ancestry and invocation label
       shell: pwsh
       env:
         PROVENANCE_NAME: ${{ steps.release.outputs.provenance_name }}
+        RELEASE_ELIGIBLE: ${{ steps.release.outputs.release_eligible }}
       run: |
         $manifest = Get-Content -Raw "dist/$env:PROVENANCE_NAME" | ConvertFrom-Json
         git merge-base --is-ancestor $manifest.official_commit HEAD
@@ -91,12 +133,15 @@ jobs:
         if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $manifest.official_commit) {
           throw "Official baseline tag does not resolve to the recorded commit."
         }
+        if ($manifest.release_eligible.ToString().ToLowerInvariant() -ne $env:RELEASE_ELIGIBLE) {
+          throw "Invocation release label does not match the workflow contract."
+        }
     - name: Upload portable release bundle
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
-        name: ${{ steps.release.outputs.artifact_name }}
+        name: ${{ steps.release.outputs.bundle_name }}
         path: |
-          dist/${{ steps.release.outputs.artifact_name }}
+          dist/${{ steps.release.outputs.zip_name }}
           dist/${{ steps.release.outputs.checksum_name }}
           dist/${{ steps.release.outputs.provenance_name }}
         if-no-files-found: error
@@ -104,39 +149,64 @@ jobs:
         retention-days: 14
 
   publish-prerelease:
-    name: Attach to existing Shenlab prerelease
+    name: Attach immutable assets to existing Shenlab prerelease
     needs: build
     if: >-
       github.repository == 'Shenlab-MGH/plugin-GUI' &&
       github.event_name == 'push' &&
       github.ref_type == 'tag' &&
-      needs.build.outputs.release_version == github.ref_name
+      needs.build.outputs.release_eligible == 'true' &&
+      needs.build.outputs.release_tag == github.ref_name
     runs-on: windows-2022
     permissions:
       contents: write
 
     steps:
     - name: Download verified release bundle
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
       with:
-        name: ${{ needs.build.outputs.artifact_name }}
+        name: ${{ needs.build.outputs.bundle_name }}
         path: dist
-    - name: Attach files to existing matching prerelease
+    - name: Recheck tag and prerelease, then attach immutable assets
       shell: pwsh
       env:
-        ARTIFACT_NAME: ${{ needs.build.outputs.artifact_name }}
         CHECKSUM_NAME: ${{ needs.build.outputs.checksum_name }}
+        EXPECTED_COMMIT: ${{ github.sha }}
         GH_REPO: ${{ github.repository }}
         GH_TOKEN: ${{ github.token }}
         PROVENANCE_NAME: ${{ needs.build.outputs.provenance_name }}
-        RELEASE_TAG: ${{ needs.build.outputs.release_version }}
+        RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        ZIP_NAME: ${{ needs.build.outputs.zip_name }}
       run: |
-        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
-        if (-not $release.prerelease -or $release.tag_name -ne $env:RELEASE_TAG) {
-          throw "A matching existing GitHub prerelease is required."
+        $checksum = (Get-Content -Raw "dist/$env:CHECKSUM_NAME").Split(' ', 2)[0]
+        $actualChecksum = (Get-FileHash -Algorithm SHA256 "dist/$env:ZIP_NAME").Hash.ToLowerInvariant()
+        if ($checksum -ne $actualChecksum) {
+          throw "Downloaded ZIP checksum mismatch."
         }
+
+        $tagRef = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+        $tagObject = $tagRef.object
+        while ($tagObject.type -eq 'tag') {
+          $annotatedTag = gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$($tagObject.sha)" | ConvertFrom-Json
+          $tagObject = $annotatedTag.object
+        }
+        if ($tagObject.type -ne 'commit' -or $tagObject.sha -ne $env:EXPECTED_COMMIT) {
+          throw "Release tag no longer resolves to the verified build commit."
+        }
+
+        $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+        if (-not $release.prerelease -or $release.draft -or $release.tag_name -ne $env:RELEASE_TAG) {
+          throw "A matching existing non-draft GitHub prerelease is required."
+        }
+        $expectedAssets = @($env:ZIP_NAME, $env:CHECKSUM_NAME, $env:PROVENANCE_NAME)
+        $existingAssets = @($release.assets | ForEach-Object { $_.name })
+        foreach ($asset in $expectedAssets) {
+          if ($asset -in $existingAssets) {
+            throw "Asset already exists and cannot be overwritten: $asset"
+          }
+        }
+
         gh release upload $env:RELEASE_TAG `
-          "dist/$env:ARTIFACT_NAME" `
+          "dist/$env:ZIP_NAME" `
           "dist/$env:CHECKSUM_NAME" `
-          "dist/$env:PROVENANCE_NAME" `
-          --clobber
+          "dist/$env:PROVENANCE_NAME"
