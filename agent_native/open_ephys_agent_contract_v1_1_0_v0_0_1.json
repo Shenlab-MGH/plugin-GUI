@@ -462,5 +462,9 @@
         "additionalProperties": false
       }
     }
-  ]
+  ],
+  "verification": {
+    "hardware_verified": false,
+    "scientific_verified": false
+  }
 }

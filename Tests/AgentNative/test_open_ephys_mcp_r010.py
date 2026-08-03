@@ -133,9 +133,10 @@ class ContractTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in contract["api"]["expected_capabilities_response"]["capabilities"]], CAPABILITY_IDS)
         self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.0.1")
         self.assertEqual(contract["api"]["capabilities_contract_version"], "0.0.1")
-        if "verification" in contract:
-            self.assertFalse(contract["verification"]["hardware_verified"])
-            self.assertFalse(contract["verification"]["scientific_verified"])
+        self.assertEqual(
+            contract["verification"],
+            {"hardware_verified": False, "scientific_verified": False},
+        )
         tool_names = [tool["name"] for tool in contract["tools"]]
         for forbidden in ("oe_api_request", "oe_post_command", "processor", "parameter", "stream", "uia_locator", "audio", "recording_directory"):
             self.assertNotIn(forbidden, tool_names)

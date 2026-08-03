@@ -34,6 +34,7 @@
     "dependency_independent_legacy_protocol": true,
     "official_mcp_v2_auto_fallback": false,
     "official_mcp_v2_blocker": "Pending importable mcp package and exact-commit Windows gate for official mcp==2.0.0 auto-mode stdio fallback",
-    "hardware_verified": false
+    "hardware_verified": false,
+    "scientific_verified": false
   }
 }

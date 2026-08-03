@@ -119,12 +119,14 @@ def load_contract(path: Path) -> dict[str, Any]:
     items = capabilities.get("capabilities")
     if not isinstance(items, list) or [item.get("id") for item in items if isinstance(item, dict)] != list(CAPABILITY_IDS):
         raise ValueError("Capability fixture does not match the exact nine Core R0 capabilities.")
-    # v1.1 contracts may omit the optional verification block; when present it must stay unverified.
-    if "verification" in contract and contract.get("verification") != {
+    if contract.get("verification") != {
         "hardware_verified": False,
         "scientific_verified": False,
     }:
-        raise ValueError("Contract must explicitly retain unverified hardware and scientific claims.")
+        raise ValueError(
+            "Contract must explicitly pin verification.hardware_verified=false "
+            "and verification.scientific_verified=false."
+        )
     return contract
 
 
