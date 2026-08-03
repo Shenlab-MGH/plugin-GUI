@@ -81,7 +81,7 @@ jobs:
       - name: configure
         run: |
           cd Build 
-          cmake -G "Visual Studio 17 2022" -A x64 ..
+          cmake -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTS=ON ..
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v1.0.2
       - name: build
