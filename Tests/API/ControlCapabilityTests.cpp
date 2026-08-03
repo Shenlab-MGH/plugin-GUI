@@ -17,42 +17,62 @@ struct ExpectedApiOperation
 struct ExpectedCapability
 {
     const char* id;
+    const char* uiaAutomationId;
     std::vector<ExpectedApiOperation> operations;
 };
 
-// Official v1.1.0 only backs status / recording / cpu for Core R0 controls.
-// Order is stable and intentional. Operations reference shared route descriptors.
+// Full Core 0.0.1 capability set shared with v1.0.2. Order is stable.
+// Operations reference shared route descriptors.
 const std::vector<ExpectedCapability> expectedCapabilities {
-    { "oe.control.acquisition",
+    { "oe.control.acquisition", "oe.control.acquisition",
       { { "read", OpenEphysHttpApi::kStatusGet },
         { "set", OpenEphysHttpApi::kStatusPut } } },
-    { "oe.control.recording",
+    { "oe.control.recording", "oe.control.recording",
       { { "read", OpenEphysHttpApi::kStatusGet },
         { "set", OpenEphysHttpApi::kStatusPut } } },
-    { "oe.control.recording.filename",
+    { "oe.control.recording.options", "oe.control.recording.options",
+      { { "read", OpenEphysHttpApi::kRecordingOptionsGet },
+        { "set", OpenEphysHttpApi::kRecordingOptionsPut } } },
+    { "oe.control.recording.filename", "oe.control.recording.filename",
       { { "read", OpenEphysHttpApi::kRecordingGet },
         { "set", OpenEphysHttpApi::kRecordingPut } } },
-    { "oe.status.cpu_usage",
+    { "oe.control.recording.new_directory", "oe.control.recording.new_directory",
+      { { "read", OpenEphysHttpApi::kRecordingOptionsGet },
+        { "set", OpenEphysHttpApi::kRecordingOptionsPut } } },
+    { "oe.control.recording.force_new_directory", "oe.control.recording.force_new_directory",
+      { { "read", OpenEphysHttpApi::kRecordingOptionsGet },
+        { "set", OpenEphysHttpApi::kRecordingOptionsPut } } },
+    { "oe.status.cpu_usage", "oe.status.cpu_usage",
       { { "read", OpenEphysHttpApi::kCpuGet } } },
+    { "oe.status.disk_usage", "oe.status.disk_usage",
+      { { "read", OpenEphysHttpApi::kDiskGet } } },
+    { "oe.status.elapsed_time", "oe.status.elapsed_time",
+      { { "read", OpenEphysHttpApi::kTimeGet } } },
 };
 
-// Exact shared descriptors for Core R0 routes the manifest may advertise.
 const OpenEphysHttpApi::Route coreR0RouteDescriptors[] = {
     OpenEphysHttpApi::kStatusGet,
     OpenEphysHttpApi::kStatusPut,
     OpenEphysHttpApi::kRecordingGet,
     OpenEphysHttpApi::kRecordingPut,
+    OpenEphysHttpApi::kRecordingOptionsGet,
+    OpenEphysHttpApi::kRecordingOptionsPut,
     OpenEphysHttpApi::kCpuGet,
+    OpenEphysHttpApi::kDiskGet,
+    OpenEphysHttpApi::kTimeGet,
 };
 
-// Shared descriptors also cover GET /api/capabilities (discovery endpoint).
 const OpenEphysHttpApi::Route sharedRegisteredRouteDescriptors[] = {
     OpenEphysHttpApi::kCapabilitiesGet,
     OpenEphysHttpApi::kStatusGet,
     OpenEphysHttpApi::kStatusPut,
     OpenEphysHttpApi::kRecordingGet,
     OpenEphysHttpApi::kRecordingPut,
+    OpenEphysHttpApi::kRecordingOptionsGet,
+    OpenEphysHttpApi::kRecordingOptionsPut,
     OpenEphysHttpApi::kCpuGet,
+    OpenEphysHttpApi::kDiskGet,
+    OpenEphysHttpApi::kTimeGet,
 };
 
 bool routesEqual (const OpenEphysHttpApi::Route& a, const OpenEphysHttpApi::Route& b)
@@ -81,35 +101,24 @@ TEST (ControlCapabilityTests, SharedRouteDescriptorsHaveExactMethodPathPairs)
     EXPECT_STREQ (OpenEphysHttpApi::kCapabilitiesGet.path, "/api/capabilities");
     EXPECT_STREQ (OpenEphysHttpApi::kCapabilitiesGet.methodString(), "GET");
 
-    EXPECT_EQ (OpenEphysHttpApi::kStatusGet.method, OpenEphysHttpApi::Method::Get);
-    EXPECT_STREQ (OpenEphysHttpApi::kStatusGet.path, "/api/status");
-    EXPECT_STREQ (OpenEphysHttpApi::kStatusGet.methodString(), "GET");
+    EXPECT_EQ (OpenEphysHttpApi::kRecordingOptionsGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingOptionsGet.path, "/api/recording/options");
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingOptionsGet.methodString(), "GET");
 
-    EXPECT_EQ (OpenEphysHttpApi::kStatusPut.method, OpenEphysHttpApi::Method::Put);
-    EXPECT_STREQ (OpenEphysHttpApi::kStatusPut.path, "/api/status");
-    EXPECT_STREQ (OpenEphysHttpApi::kStatusPut.methodString(), "PUT");
+    EXPECT_EQ (OpenEphysHttpApi::kRecordingOptionsPut.method, OpenEphysHttpApi::Method::Put);
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingOptionsPut.path, "/api/recording/options");
+    EXPECT_STREQ (OpenEphysHttpApi::kRecordingOptionsPut.methodString(), "PUT");
 
-    EXPECT_EQ (OpenEphysHttpApi::kRecordingGet.method, OpenEphysHttpApi::Method::Get);
-    EXPECT_STREQ (OpenEphysHttpApi::kRecordingGet.path, "/api/recording");
-    EXPECT_STREQ (OpenEphysHttpApi::kRecordingGet.methodString(), "GET");
+    EXPECT_EQ (OpenEphysHttpApi::kDiskGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kDiskGet.path, "/api/disk");
+    EXPECT_STREQ (OpenEphysHttpApi::kDiskGet.methodString(), "GET");
 
-    EXPECT_EQ (OpenEphysHttpApi::kRecordingPut.method, OpenEphysHttpApi::Method::Put);
-    EXPECT_STREQ (OpenEphysHttpApi::kRecordingPut.path, "/api/recording");
-    EXPECT_STREQ (OpenEphysHttpApi::kRecordingPut.methodString(), "PUT");
+    EXPECT_EQ (OpenEphysHttpApi::kTimeGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kTimeGet.path, "/api/time");
+    EXPECT_STREQ (OpenEphysHttpApi::kTimeGet.methodString(), "GET");
 
-    EXPECT_EQ (OpenEphysHttpApi::kCpuGet.method, OpenEphysHttpApi::Method::Get);
-    EXPECT_STREQ (OpenEphysHttpApi::kCpuGet.path, "/api/cpu");
-    EXPECT_STREQ (OpenEphysHttpApi::kCpuGet.methodString(), "GET");
-
-    ASSERT_EQ (sizeof (sharedRegisteredRouteDescriptors) / sizeof (sharedRegisteredRouteDescriptors[0]), (size_t) 6);
-    ASSERT_EQ (sizeof (coreR0RouteDescriptors) / sizeof (coreR0RouteDescriptors[0]), (size_t) 5);
-
-    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[0], OpenEphysHttpApi::kCapabilitiesGet));
-    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[1], OpenEphysHttpApi::kStatusGet));
-    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[2], OpenEphysHttpApi::kStatusPut));
-    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[3], OpenEphysHttpApi::kRecordingGet));
-    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[4], OpenEphysHttpApi::kRecordingPut));
-    EXPECT_TRUE (routesEqual (sharedRegisteredRouteDescriptors[5], OpenEphysHttpApi::kCpuGet));
+    ASSERT_EQ (sizeof (sharedRegisteredRouteDescriptors) / sizeof (sharedRegisteredRouteDescriptors[0]), (size_t) 10);
+    ASSERT_EQ (sizeof (coreR0RouteDescriptors) / sizeof (coreR0RouteDescriptors[0]), (size_t) 9);
 }
 
 TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
@@ -117,7 +126,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
     const auto& capabilities = getCoreControlCapabilities();
 
     ASSERT_EQ (capabilities.size(), expectedCapabilities.size());
-    ASSERT_EQ (expectedCapabilities.size(), (size_t) 4);
+    ASSERT_EQ (expectedCapabilities.size(), (size_t) 9);
 
     for (size_t i = 0; i < capabilities.size(); ++i)
     {
@@ -126,6 +135,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         const String expectedId (expected.id);
 
         EXPECT_EQ (capability.id, expectedId) << "capability order mismatch at index " << i;
+        EXPECT_EQ (capability.uiaAutomationId, String (expected.uiaAutomationId)) << expectedId;
         EXPECT_TRUE (capability.name.isNotEmpty()) << expectedId;
         EXPECT_TRUE (capability.description.isNotEmpty()) << expectedId;
 
@@ -146,20 +156,13 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         ASSERT_NE (found, nullptr) << expectedId;
         EXPECT_EQ (found->id, expectedId);
     }
-
-    // Capabilities that would require unregistered endpoints must not appear.
-    EXPECT_EQ (findControlCapability ("oe.control.recording.options"), nullptr);
-    EXPECT_EQ (findControlCapability ("oe.control.recording.new_directory"), nullptr);
-    EXPECT_EQ (findControlCapability ("oe.control.recording.force_new_directory"), nullptr);
-    EXPECT_EQ (findControlCapability ("oe.status.disk_usage"), nullptr);
-    EXPECT_EQ (findControlCapability ("oe.status.elapsed_time"), nullptr);
 }
 
 TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
 {
     const auto& capabilities = getCoreControlCapabilities();
 
-    ASSERT_EQ (capabilities.size(), (size_t) 4);
+    ASSERT_EQ (capabilities.size(), (size_t) 9);
 
     for (const auto& capability : capabilities)
     {
@@ -173,42 +176,26 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
         }
     }
 
-    // Exact descriptors for each canonical capability (not merely nonempty strings).
-    const auto* acquisition = findControlCapability ("oe.control.acquisition");
-    const auto* recording = findControlCapability ("oe.control.recording");
-    const auto* filename = findControlCapability ("oe.control.recording.filename");
-    const auto* cpu = findControlCapability ("oe.status.cpu_usage");
-
-    ASSERT_NE (acquisition, nullptr);
-    ASSERT_NE (recording, nullptr);
-    ASSERT_NE (filename, nullptr);
-    ASSERT_NE (cpu, nullptr);
-
-    ASSERT_EQ (acquisition->operations.size(), (size_t) 2);
-    EXPECT_TRUE (routesEqual (acquisition->operations[0].route, OpenEphysHttpApi::kStatusGet));
-    EXPECT_TRUE (routesEqual (acquisition->operations[1].route, OpenEphysHttpApi::kStatusPut));
-
-    ASSERT_EQ (recording->operations.size(), (size_t) 2);
-    EXPECT_TRUE (routesEqual (recording->operations[0].route, OpenEphysHttpApi::kStatusGet));
-    EXPECT_TRUE (routesEqual (recording->operations[1].route, OpenEphysHttpApi::kStatusPut));
-
-    ASSERT_EQ (filename->operations.size(), (size_t) 2);
-    EXPECT_TRUE (routesEqual (filename->operations[0].route, OpenEphysHttpApi::kRecordingGet));
-    EXPECT_TRUE (routesEqual (filename->operations[1].route, OpenEphysHttpApi::kRecordingPut));
-
-    ASSERT_EQ (cpu->operations.size(), (size_t) 1);
-    EXPECT_TRUE (routesEqual (cpu->operations[0].route, OpenEphysHttpApi::kCpuGet));
+    const auto* options = findControlCapability ("oe.control.recording.options");
+    const auto* disk = findControlCapability ("oe.status.disk_usage");
+    const auto* time = findControlCapability ("oe.status.elapsed_time");
+    ASSERT_NE (options, nullptr);
+    ASSERT_NE (disk, nullptr);
+    ASSERT_NE (time, nullptr);
+    EXPECT_TRUE (routesEqual (options->operations[0].route, OpenEphysHttpApi::kRecordingOptionsGet));
+    EXPECT_TRUE (routesEqual (disk->operations[0].route, OpenEphysHttpApi::kDiskGet));
+    EXPECT_TRUE (routesEqual (time->operations[0].route, OpenEphysHttpApi::kTimeGet));
 }
 
-TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
+TEST (ControlCapabilityTests, SerialisesFullCapabilityContractWithUia)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
 
     EXPECT_EQ (document["contract_version"], "0.0.1");
-    EXPECT_EQ (document["surface"], "discovery_only");
+    EXPECT_FALSE (document.contains ("surface"));
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), expectedCapabilities.size());
-    ASSERT_EQ (document["capabilities"].size(), (size_t) 4);
+    ASSERT_EQ (document["capabilities"].size(), (size_t) 9);
 
     for (size_t i = 0; i < document["capabilities"].size(); ++i)
     {
@@ -217,8 +204,8 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
         const auto expectedId = std::string (expected.id);
 
         EXPECT_EQ (item["id"], expectedId);
-        // R0 is API-discovery-only: official v1.1.0 UI does not implement AutomationIds.
-        EXPECT_FALSE (item.contains ("uia")) << expectedId;
+        ASSERT_TRUE (item.contains ("uia")) << expectedId;
+        EXPECT_EQ (item["uia"]["automation_id"], expected.uiaAutomationId) << expectedId;
         ASSERT_TRUE (item["api"].is_array());
         ASSERT_EQ (item["api"].size(), expected.operations.size()) << expectedId;
 
@@ -234,15 +221,6 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
             EXPECT_EQ (operation["path"].get<std::string>(), expectedOp.route.path) << expectedId;
         }
     }
-
-    const auto acquisition = std::find_if (document["capabilities"].begin(),
-                                           document["capabilities"].end(),
-                                           [] (const auto& item)
-                                           { return item["id"] == "oe.control.acquisition"; });
-    ASSERT_NE (acquisition, document["capabilities"].end());
-    EXPECT_FALSE ((*acquisition).contains ("uia"));
-    EXPECT_EQ ((*acquisition)["api"][0]["path"], OpenEphysHttpApi::kStatusGet.path);
-    EXPECT_EQ ((*acquisition)["api"][0]["method"], OpenEphysHttpApi::kStatusGet.methodString());
 }
 
 TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
@@ -261,16 +239,19 @@ TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
     const auto recordingResult = findById ("oe.control.recording");
     const auto filenameResult = findById ("oe.control.recording.filename");
     const auto cpuResult = findById ("oe.status.cpu_usage");
+    const auto optionsResult = findById ("oe.control.recording.options");
 
     ASSERT_NE (acquisitionResult, capabilities.end());
     ASSERT_NE (recordingResult, capabilities.end());
     ASSERT_NE (filenameResult, capabilities.end());
     ASSERT_NE (cpuResult, capabilities.end());
+    ASSERT_NE (optionsResult, capabilities.end());
 
     const auto& acquisition = *acquisitionResult;
     const auto& recording = *recordingResult;
     const auto& filename = *filenameResult;
     const auto& cpu = *cpuResult;
+    const auto& options = *optionsResult;
 
     const auto expectedModes = nlohmann::json::array ({ "IDLE", "ACQUIRE", "RECORD" });
 
@@ -294,4 +275,5 @@ TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
 
     EXPECT_FALSE (filename.contains ("mode_semantics"));
     EXPECT_FALSE (cpu.contains ("mode_semantics"));
+    EXPECT_FALSE (options.contains ("mode_semantics"));
 }

@@ -56,7 +56,11 @@ inline constexpr Route kStatusGet { Method::Get, "/api/status" };
 inline constexpr Route kStatusPut { Method::Put, "/api/status" };
 inline constexpr Route kRecordingGet { Method::Get, "/api/recording" };
 inline constexpr Route kRecordingPut { Method::Put, "/api/recording" };
+inline constexpr Route kRecordingOptionsGet { Method::Get, "/api/recording/options" };
+inline constexpr Route kRecordingOptionsPut { Method::Put, "/api/recording/options" };
 inline constexpr Route kCpuGet { Method::Get, "/api/cpu" };
+inline constexpr Route kDiskGet { Method::Get, "/api/disk" };
+inline constexpr Route kTimeGet { Method::Get, "/api/time" };
 
 /** Register a handler using the route descriptor's method (Get or Put).
     The same Route instance must drive capability serialization and registration.

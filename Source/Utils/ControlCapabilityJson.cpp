@@ -64,7 +64,6 @@ nlohmann::json controlCapabilitiesToJson (const std::vector<ControlCapability>& 
 {
     nlohmann::json result;
     result["contract_version"] = "0.0.1";
-    result["surface"] = "discovery_only";
     result["capabilities"] = nlohmann::json::array();
 
     for (const auto& capability : capabilities)
@@ -74,6 +73,7 @@ nlohmann::json controlCapabilitiesToJson (const std::vector<ControlCapability>& 
         item["name"] = capability.name.toStdString();
         item["description"] = capability.description.toStdString();
         item["kind"] = kindToString (capability.kind);
+        item["uia"]["automation_id"] = capability.uiaAutomationId.toStdString();
         item["api"] = nlohmann::json::array();
 
         for (const auto& operation : capability.operations)

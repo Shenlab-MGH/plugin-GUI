@@ -26,9 +26,9 @@
 
 const std::vector<ControlCapability>& getCoreControlCapabilities()
 {
-    // Agent Core R0: advertise only capabilities backed by official v1.1.0 routes.
-    // Order is stable. Discovery-only: no UIA AutomationId claims (UI does not implement them).
-    // Operations use shared route descriptors (same Method+path as server registration).
+    // Agent Core 0.0.1: full cross-lane capability set shared with v1.0.2.
+    // Order is stable. Operations use shared route descriptors (same Method+path
+    // as server registration). UIA AutomationIds match the machine contract.
     const ControlModeSemantics acquisitionModeSemantics {
         "mode",
         { "IDLE", "ACQUIRE", "RECORD" },
@@ -50,23 +50,41 @@ const std::vector<ControlCapability>& getCoreControlCapabilities()
 
     static const std::vector<ControlCapability> capabilities {
         { "oe.control.acquisition", "Acquisition", "Start or stop data acquisition.",
-          ControlCapabilityKind::toggle,
+          ControlCapabilityKind::toggle, "oe.control.acquisition",
           { { "read", OpenEphysHttpApi::kStatusGet, {}, { "mode" } },
             { "set", OpenEphysHttpApi::kStatusPut, { "mode" }, { "mode" } } },
           acquisitionModeSemantics },
         { "oe.control.recording", "Recording", "Start or stop writing data to disk.",
-          ControlCapabilityKind::toggle,
+          ControlCapabilityKind::toggle, "oe.control.recording",
           { { "read", OpenEphysHttpApi::kStatusGet, {}, { "mode" } },
             { "set", OpenEphysHttpApi::kStatusPut, { "mode" }, { "mode" } } },
           recordingModeSemantics },
+        { "oe.control.recording.options", "Recording options", "Show or hide recording options.",
+          ControlCapabilityKind::toggle, "oe.control.recording.options",
+          { { "read", OpenEphysHttpApi::kRecordingOptionsGet, {}, { "expanded" } },
+            { "set", OpenEphysHttpApi::kRecordingOptionsPut, { "expanded" }, { "expanded" } } } },
         { "oe.control.recording.filename", "Recording filename", "Edit the recording filename.",
-          ControlCapabilityKind::collection,
+          ControlCapabilityKind::collection, "oe.control.recording.filename",
           { { "read", OpenEphysHttpApi::kRecordingGet, {}, { "prepend_text", "base_text", "append_text" } },
             { "set", OpenEphysHttpApi::kRecordingPut, { "prepend_text", "base_text", "append_text" },
               { "prepend_text", "base_text", "append_text" } } } },
+        { "oe.control.recording.new_directory", "New recording directory", "Start a new data directory for the next recording.",
+          ControlCapabilityKind::toggle, "oe.control.recording.new_directory",
+          { { "read", OpenEphysHttpApi::kRecordingOptionsGet, {}, { "new_directory_requested" } },
+            { "set", OpenEphysHttpApi::kRecordingOptionsPut, { "new_directory_requested" }, { "new_directory_requested" } } } },
+        { "oe.control.recording.force_new_directory", "Force new recording directories", "Force a new data directory for each recording.",
+          ControlCapabilityKind::toggle, "oe.control.recording.force_new_directory",
+          { { "read", OpenEphysHttpApi::kRecordingOptionsGet, {}, { "force_new_directory" } },
+            { "set", OpenEphysHttpApi::kRecordingOptionsPut, { "force_new_directory" }, { "force_new_directory" } } } },
         { "oe.status.cpu_usage", "CPU usage", "Fraction of available processing time used by the signal chain.",
-          ControlCapabilityKind::range,
-          { { "read", OpenEphysHttpApi::kCpuGet, {}, { "usage" } } } }
+          ControlCapabilityKind::range, "oe.status.cpu_usage",
+          { { "read", OpenEphysHttpApi::kCpuGet, {}, { "usage" } } } },
+        { "oe.status.disk_usage", "Disk usage", "Fraction of recording-volume space currently used.",
+          ControlCapabilityKind::range, "oe.status.disk_usage",
+          { { "read", OpenEphysHttpApi::kDiskGet, {}, { "usage" } } } },
+        { "oe.status.elapsed_time", "Elapsed time", "Elapsed acquisition or recording time.",
+          ControlCapabilityKind::status, "oe.status.elapsed_time",
+          { { "read", OpenEphysHttpApi::kTimeGet, {}, { "display" } } } }
     };
 
     return capabilities;

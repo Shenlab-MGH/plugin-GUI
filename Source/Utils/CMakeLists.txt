@@ -9,6 +9,12 @@ add_sources(
   ControlCapability.cpp
   ControlCapabilityJson.h
   ControlCapabilityJson.cpp
+  ControlStatus.h
+  ControlStatusJson.h
+  ControlStatusJson.cpp
+  ControlRead.h
+  MessageThreadCall.h
+  RecordingOptionsControl.h
   StatusApiHandler.h
   StatusApiHandler.cpp
   ListSliceParser.h

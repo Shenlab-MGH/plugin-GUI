@@ -66,6 +66,7 @@ struct ControlCapability
     String name;
     String description;
     ControlCapabilityKind kind;
+    String uiaAutomationId;
     std::vector<ControlApiOperation> operations;
     std::optional<ControlModeSemantics> modeSemantics;
 };
