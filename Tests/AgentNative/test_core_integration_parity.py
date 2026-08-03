@@ -66,7 +66,7 @@ class CoreIntegrationParityTests(unittest.TestCase):
                 "focused_rounds": 10,
                 "tests_per_round": 4,
             },
-            "official_mcp_v2_local_interop": "passed",
+            "official_mcp_v2_local_interop": "pending",
             "official_mcp_v2_exact_commit": "pending",
             "hardware": "not_verified",
         })

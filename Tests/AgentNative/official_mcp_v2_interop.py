@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "agent_native" / "open_ephys_mcp_server.py"
 EXPECTED = [
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
-    "oe_get_recording_filename", "oe_set_recording_filename", "oe_get_cpu",
+    "oe_get_recording_options", "oe_set_recording_options",
+    "oe_get_recording_filename", "oe_set_recording_filename",
+    "oe_get_cpu", "oe_get_disk", "oe_get_time",
 ]
 
 
