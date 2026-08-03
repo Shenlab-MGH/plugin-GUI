@@ -9,6 +9,8 @@ add_sources(
   ControlCapability.cpp
   ControlCapabilityJson.h
   ControlCapabilityJson.cpp
+  StatusApiHandler.h
+  StatusApiHandler.cpp
   ListSliceParser.h
   ListSliceParser.cpp
   BroadcastParser.h
