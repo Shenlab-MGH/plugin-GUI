@@ -59,5 +59,5 @@ scientific validation claim.
 Run the stdlib tests with:
 
 ```powershell
-py -3 -m unittest Tests.AgentNative.test_open_ephys_mcp_v0_0_4 Tests.AgentNative.test_open_ephys_release_bundle Tests.AgentNative.test_public_product_version_0_0_4
+py -3 -m unittest Tests.AgentNative.test_open_ephys_mcp_v0_0_4 Tests.AgentNative.test_open_ephys_release_bundle Tests.AgentNative.test_public_product_version_0_0_4 Tests.AgentNative.test_windows_uia_harness_stability_policy
 ```

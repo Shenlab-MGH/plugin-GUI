@@ -32,7 +32,7 @@ jobs:
         fetch-depth: 0
     - name: run Agent Native contract tests
       run: |
-        python3 -m unittest Tests.AgentNative.test_open_ephys_mcp_v0_0_4 Tests.AgentNative.test_open_ephys_release_bundle Tests.AgentNative.test_public_product_version_0_0_4
+        python3 -m unittest Tests.AgentNative.test_open_ephys_mcp_v0_0_4 Tests.AgentNative.test_open_ephys_release_bundle Tests.AgentNative.test_public_product_version_0_0_4 Tests.AgentNative.test_windows_uia_harness_stability_policy
     - name: build
       env:
         CC: gcc-10
