@@ -1,0 +1,34 @@
+name: Deploy Guard Contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows.yml'
+      - '.github/workflows/linux.yml'
+      - '.github/workflows/osx.yml'
+      - '.github/workflows/deploy-guard-contracts.yml'
+      - 'Tests/CI/test_official_deploy_guards.py'
+  push:
+    branches:
+      - 'main'
+      - 'development'
+      - 'testing'
+    paths:
+      - '.github/workflows/windows.yml'
+      - '.github/workflows/linux.yml'
+      - '.github/workflows/osx.yml'
+      - '.github/workflows/deploy-guard-contracts.yml'
+      - 'Tests/CI/test_official_deploy_guards.py'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-guard-contracts:
+    name: Deploy Guard Contracts
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Validate official deployment guards
+      run: python -m unittest Tests.CI.test_official_deploy_guards -v

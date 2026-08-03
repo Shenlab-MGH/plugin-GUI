@@ -3,12 +3,10 @@ name: Tests
 on:
   pull_request:
     paths:
-      - '.github/workflows/**'
       - 'JuceLibraryCode/**'
       - 'Plugins/**'
       - 'Resources/**'
       - 'Source/**'
-      - 'Tests/CI/**'
       - 'CMakeLists.txt'
       - 'HelperFunctions.cmake'
     branches:
@@ -19,15 +17,6 @@ on:
       - 'testing'
 
 jobs:
-  workflow-contract-tests:
-    name: Workflow Contract Tests
-    runs-on: ubuntu-22.04
-
-    steps:
-    - uses: actions/checkout@v4
-    - name: Validate official deployment guards
-      run: python -m unittest Tests.CI.test_official_deploy_guards -v
-
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-22.04
