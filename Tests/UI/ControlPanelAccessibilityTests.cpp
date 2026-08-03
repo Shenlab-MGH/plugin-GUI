@@ -6,6 +6,8 @@
 #include <UIAutomation.h>
 #include <wrl/client.h>
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <thread>
 #endif
 
@@ -130,6 +132,14 @@ public:
     std::atomic<bool> stateAtClick { false };
 };
 
+[[noreturn]] void abortTimedOutUiaWorker (const char* operation)
+{
+    ADD_FAILURE() << "Timed out waiting for the Windows UI Automation " << operation
+                  << " worker; aborting the isolated UI test process.";
+    std::fflush (nullptr);
+    std::abort();
+}
+
 String readStringProperty (IUIAutomationElement& element, PROPERTYID property, HRESULT& result)
 {
     VARIANT value;
@@ -155,6 +165,8 @@ UiaButtonObservation observeButton (HWND windowHandle, const wchar_t* automation
         observation.result = comResult;
         return observation;
     }
+
+    const ScopeGuard uninitialiseCom { [] { CoUninitialize(); } };
 
     Microsoft::WRL::ComPtr<IUIAutomation> automation;
     observation.result = CoCreateInstance (CLSID_CUIAutomation,
@@ -230,7 +242,6 @@ UiaButtonObservation observeButton (HWND windowHandle, const wchar_t* automation
         }
     }
 
-    CoUninitialize();
     return observation;
 }
 
@@ -247,17 +258,13 @@ UiaButtonObservation observeWhilePumpingMessages (HWND windowHandle,
                         });
 
     const auto deadline = Time::getMillisecondCounter() + 3000;
-    bool timeoutReported = false;
 
     while (! finished.load())
     {
         MessageManager::getInstance()->runDispatchLoopUntil (10);
 
-        if (! timeoutReported && Time::getMillisecondCounter() >= deadline)
-        {
-            ADD_FAILURE() << "Timed out waiting for the Windows UI Automation worker.";
-            timeoutReported = true;
-        }
+        if (Time::getMillisecondCounter() >= deadline)
+            abortTimedOutUiaWorker ("observation");
     }
 
     worker.join();
@@ -276,6 +283,8 @@ UiaButtonActionObservation performButtonAction (HWND windowHandle,
         observation.result = comResult;
         return observation;
     }
+
+    const ScopeGuard uninitialiseCom { [] { CoUninitialize(); } };
 
     Microsoft::WRL::ComPtr<IUIAutomation> automation;
     observation.result = CoCreateInstance (CLSID_CUIAutomation,
@@ -375,7 +384,6 @@ UiaButtonActionObservation performButtonAction (HWND windowHandle,
             Thread::sleep (10);
     }
 
-    CoUninitialize();
     return observation;
 }
 
@@ -393,17 +401,13 @@ UiaButtonActionObservation performActionWhilePumpingMessages (HWND windowHandle,
                         });
 
     const auto deadline = Time::getMillisecondCounter() + 3000;
-    bool timeoutReported = false;
 
     while (! finished.load())
     {
         MessageManager::getInstance()->runDispatchLoopUntil (10);
 
-        if (! timeoutReported && Time::getMillisecondCounter() >= deadline)
-        {
-            ADD_FAILURE() << "Timed out waiting for the Windows UI Automation action worker.";
-            timeoutReported = true;
-        }
+        if (Time::getMillisecondCounter() >= deadline)
+            abortTimedOutUiaWorker ("action");
     }
 
     worker.join();
