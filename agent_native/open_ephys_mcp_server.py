@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Narrow legacy MCP bridge for the Open Ephys v1.0.2 Core R0 contract."""
+"""Narrow legacy MCP bridge for the Open Ephys v1.0.2 Core R0.1.1 contract."""
 
 from __future__ import annotations
 
@@ -15,17 +15,19 @@ from typing import Any
 
 
 PROTOCOL_VERSION = "2024-11-05"
-CONTRACT_VERSION = "r0.1.0"
-DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_0_2_r0_1_0.json")
+CONTRACT_VERSION = "r0.1.1"
+DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_0_2_r0_1_1.json")
 TOOL_NAMES = (
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
     "oe_get_recording_options", "oe_set_recording_options",
     "oe_get_recording_filename", "oe_set_recording_filename",
+    "oe_get_recording_directory", "oe_set_recording_directory",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 )
 CAPABILITY_IDS = (
     "oe.control.acquisition", "oe.control.recording", "oe.control.recording.options",
-    "oe.control.recording.filename", "oe.control.recording.new_directory",
+    "oe.control.recording.filename", "oe.control.recording.directory",
+    "oe.control.recording.new_directory",
     "oe.control.recording.force_new_directory", "oe.status.cpu_usage",
     "oe.status.disk_usage", "oe.status.elapsed_time",
 )
@@ -101,11 +103,11 @@ def load_contract(path: Path) -> dict[str, Any]:
             raise ValueError("Every Core R0 tool requires a closed input schema.")
     api = contract.get("api")
     capabilities = api.get("expected_capabilities_response") if isinstance(api, dict) else None
-    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.1.1":
-        raise ValueError("Capability fixture must pin API contract 0.1.1.")
+    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.1.2":
+        raise ValueError("Capability fixture must pin API contract 0.1.2.")
     items = capabilities.get("capabilities")
     if not isinstance(items, list) or [item.get("id") for item in items if isinstance(item, dict)] != list(CAPABILITY_IDS):
-        raise ValueError("Capability fixture does not match the exact nine Core R0 capabilities.")
+        raise ValueError("Capability fixture does not match the exact ten Core R0.1.1 capabilities.")
     if contract.get("verification") != {"hardware_verified": False, "scientific_verified": False}:
         raise ValueError("Contract must explicitly retain unverified hardware and scientific claims.")
     return contract
@@ -184,6 +186,11 @@ def validate_recording(payload: Any) -> dict[str, Any]:
 def filename_projection(payload: Any) -> dict[str, str]:
     recording = validate_recording(payload)
     return {field: recording[field] for field in FILENAME_FIELDS}
+
+
+def directory_projection(payload: Any) -> dict[str, str]:
+    recording = validate_recording(payload)
+    return {"parent_directory": recording["parent_directory"]}
 
 
 def validate_cpu(payload: Any) -> dict[str, float | int]:
@@ -309,7 +316,7 @@ class McpServer:
 
     @staticmethod
     def _validate_arguments(name: str, arguments: dict[str, Any]) -> None:
-        if name in {"oe_get_capabilities", "oe_get_status", "oe_get_recording_options", "oe_get_recording_filename", "oe_get_cpu", "oe_get_disk", "oe_get_time"}:
+        if name in {"oe_get_capabilities", "oe_get_status", "oe_get_recording_options", "oe_get_recording_filename", "oe_get_recording_directory", "oe_get_cpu", "oe_get_disk", "oe_get_time"}:
             if arguments: raise ToolError("invalid_arguments", f"{name} does not accept arguments.")
         elif name == "oe_set_status":
             if not set(arguments).issubset({"mode", "approve_recording"}) or not isinstance(arguments.get("mode"), str) or arguments["mode"] not in ALLOWED_MODES or ("approve_recording" in arguments and not isinstance(arguments["approve_recording"], bool)):
@@ -321,6 +328,9 @@ class McpServer:
             if len(arguments) != 1 or not set(arguments).issubset(FILENAME_FIELDS) or not isinstance(next(iter(arguments.values())), str):
                 raise ToolError("invalid_arguments", "Provide exactly one string filename field.")
             validate_filename_component(next(iter(arguments.values())))
+        elif name == "oe_set_recording_directory":
+            if set(arguments) != {"parent_directory"} or not isinstance(arguments["parent_directory"], str):
+                raise ToolError("invalid_arguments", "parent_directory must be the only string argument.")
 
     def _verify_capabilities(self) -> dict[str, Any]:
         actual = self.api.request("GET", "/api/capabilities")
@@ -352,6 +362,7 @@ class McpServer:
         if name == "oe_get_status": return validate_status(self.api.request("GET", "/api/status"))
         if name == "oe_get_recording_options": return validate_options(self.api.request("GET", "/api/recording/options"))
         if name == "oe_get_recording_filename": return filename_projection(self.api.request("GET", "/api/recording"))
+        if name == "oe_get_recording_directory": return directory_projection(self.api.request("GET", "/api/recording"))
         if name == "oe_get_cpu": return validate_cpu(self.api.request("GET", "/api/cpu"))
         if name == "oe_get_disk": return validate_disk(self.api.request("GET", "/api/disk"))
         if name == "oe_get_time": return validate_time(self.api.request("GET", "/api/time"))
@@ -401,6 +412,22 @@ class McpServer:
             expected = {**before, **arguments}
             if response != expected or after != expected:
                 raise ToolError("postcondition_failed", "Open Ephys did not confirm the requested recording filename after mutation.", requested=arguments, actual=after)
+            return {"before": before, "requested": arguments, "after": after}
+        if name == "oe_set_recording_directory":
+            if validate_status(self.api.request("GET", "/api/status"))["mode"] == "RECORD":
+                raise ToolError("recording_active", "Recording directory cannot be changed while Open Ephys is recording.")
+            before = directory_projection(self.api.request("GET", "/api/recording"))
+            try:
+                response = directory_projection(self.api.request("PUT", "/api/recording", arguments))
+            except ApiHttpError as exc:
+                if self._is_authoritative_put_http_error(exc):
+                    raise
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", directory_projection)
+            except ToolError as exc:
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", directory_projection)
+            after = directory_projection(self.api.request("GET", "/api/recording"))
+            if response != arguments or after != arguments:
+                raise ToolError("postcondition_failed", "Open Ephys did not confirm the requested recording directory after mutation.", requested=arguments, actual=after)
             return {"before": before, "requested": arguments, "after": after}
         raise JsonRpcError(INVALID_PARAMS, "Unknown tool.")
 

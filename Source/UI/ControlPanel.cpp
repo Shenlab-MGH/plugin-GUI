@@ -590,6 +590,10 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
                                                              "*",
                                                              "",
                                                              "");
+    applySemanticMetadata (*filenameComponent,
+                           "oe.control.recording.directory",
+                           "Recording directory",
+                           "Read or edit the recording parent directory.");
     filenameComponent->addListener (this);
     addChildComponent (filenameComponent.get());
 
