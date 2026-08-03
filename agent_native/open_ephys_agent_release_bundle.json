@@ -1,10 +1,10 @@
 {
-  "format_version": "r0.1.1",
+  "format_version": "r0.1.2",
   "bundle": {
     "id": "open-ephys-agent-native",
-    "version": "r0.1.1",
+    "version": "r0.1.2",
     "platform": "windows",
-    "coverage": "narrow-core-r0-recording-directory"
+    "coverage": "narrow-core-r0-configuration-snapshot"
   },
   "official_upstream": {
     "repository": "open-ephys/plugin-GUI",
@@ -14,8 +14,8 @@
   },
   "contract": {
     "id": "open-ephys-agent",
-    "version": "r0.1.1",
-    "artifact": "agent_native/open_ephys_agent_contract_v1_0_2_r0_1_1.json"
+    "version": "r0.1.2",
+    "artifact": "agent_native/open_ephys_agent_contract_v1_0_2_r0_1_2.json"
   },
   "mcp": {
     "protocol_version": "2024-11-05",

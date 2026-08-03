@@ -5,22 +5,22 @@ description: Safely operate the narrow Open Ephys v1.0.2 Core R0 MCP surface.
 
 # Open Ephys Agent Native Core R0
 
-This Skill is pinned to Open Ephys GUI `1.0.2`, agent contract `r0.1.1`, API
-capability contract `0.1.2`, and legacy MCP protocol `2024-11-05`.
+This Skill is pinned to Open Ephys GUI `1.0.2`, agent contract `r0.1.2`, API
+capability contract `0.1.3`, and legacy MCP protocol `2024-11-05`.
 
 Use only these tools: `oe_get_capabilities`, `oe_get_status`, `oe_set_status`,
 `oe_get_recording_options`, `oe_set_recording_options`,
 `oe_get_recording_filename`, `oe_set_recording_filename`,
-`oe_get_recording_directory`, `oe_set_recording_directory`, `oe_get_cpu`,
+`oe_get_recording_directory`, `oe_set_recording_directory`, `oe_get_config`, `oe_get_cpu`,
 `oe_get_disk`, and `oe_get_time`.
 
 Read the relevant state before a mutation and inspect its returned readback.
-Every tool independently verifies the exact ten Core R0.1.1 capabilities. Only
+Every tool independently verifies the exact eleven Core R0.1.2 capabilities. Only
 the MCP bridge outbound client is loopback-only and rejects redirects. The raw
 Open Ephys API listener binds `0.0.0.0`, remains network-exposed, and can bypass
-MCP RECORD approval. Use a trusted network or firewall. This slice makes no
-HTTP listener or behavior change; its C++ change only adds semantic metadata to
-the existing recording-directory component.
+MCP RECORD approval. Use a trusted network or firewall. The raw API listener
+remains unchanged. This slice makes only the existing `GET /api/config` read
+bounded and message-thread safe; it adds no route or configuration mutation.
 
 To request `RECORD`, include `approve_recording:true` in that same
 `oe_set_status` call. This approval is local safety metadata and is never sent
@@ -32,6 +32,11 @@ Set exactly one boolean field with `oe_set_recording_options`, and exactly one
 valid Windows filename component with `oe_set_recording_filename`. These
 mutations use pre-read, write, and post-read verification and fail closed on a
 mismatch.
+
+Use `oe_get_config` to read the current signal-chain snapshot. Accept it only as
+the returned official `{info}` SETTINGS XML. It is not a saved configuration,
+does not expose save/load/write, and has no native UIA automation ID in this
+slice.
 
 Use `oe_get_recording_directory` to read the parent directory. Use
 `oe_set_recording_directory` only for a non-empty absolute Windows path. It
