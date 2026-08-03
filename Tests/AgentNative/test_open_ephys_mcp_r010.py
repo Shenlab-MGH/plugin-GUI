@@ -279,6 +279,31 @@ class McpR010Tests(unittest.TestCase):
                 self.assertEqual(payload["error"]["requested"], arguments)
                 self.assertEqual(payload["error"]["observed"][field], expected)
 
+    def test_committed_mutations_with_http_504_report_unknown_outcome(self):
+        self.ready_server()
+        timeout_body = {"error": {"code": "operation_timeout", "message": "Timed out waiting for the operation."}}
+        cases = (
+            ("oe_set_status", {"mode": "ACQUIRE"}, "/api/status", "mode", "ACQUIRE"),
+            ("oe_set_recording_options", {"expanded": True}, "/api/recording/options", "expanded", True),
+            ("oe_set_recording_filename", {"base_text": "mouse"}, "/api/recording", "base_text", "mouse"),
+        )
+        for name, arguments, path, field, expected in cases:
+            with self.subTest(name=name):
+                original = self.server.api.request
+                def timed_out_after_commit(method, request_path, body=None, *, _original=original, _path=path):
+                    result = _original(method, request_path, body)
+                    if method == "PUT" and request_path == _path:
+                        raise self.module.ApiHttpError(504, timeout_body)
+                    return result
+                self.server.api.request = timed_out_after_commit
+                result, payload = self.call(name, arguments)
+                self.server.api.request = original
+                self.assertTrue(result["isError"])
+                self.assertEqual(payload["error"]["code"], "mutation_outcome_unknown")
+                self.assertEqual(payload["error"]["put_error"]["status"], 504)
+                self.assertEqual(payload["error"]["put_error"]["body"], timeout_body)
+                self.assertEqual(payload["error"]["observed"][field], expected)
+
     def test_committed_mutations_with_invalid_put_response_report_unknown_outcome(self):
         self.ready_server()
         cases = (

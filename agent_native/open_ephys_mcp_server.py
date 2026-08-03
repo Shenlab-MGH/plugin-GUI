@@ -341,6 +341,11 @@ class McpServer:
             **details,
         )
 
+    @staticmethod
+    def _is_authoritative_put_http_error(error: ApiHttpError) -> bool:
+        status = error.details["status"]
+        return isinstance(status, int) and 400 <= status < 500
+
     def _execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         capabilities = self._verify_capabilities()
         if name == "oe_get_capabilities": return capabilities
@@ -358,7 +363,7 @@ class McpServer:
             try:
                 response = validate_status(self.api.request("PUT", "/api/status", requested))
             except ApiHttpError as exc:
-                if exc.details["status"] is not None:
+                if self._is_authoritative_put_http_error(exc):
                     raise
                 self._raise_mutation_outcome_unknown(requested, exc, "/api/status", validate_status)
             except ToolError as exc:
@@ -372,7 +377,7 @@ class McpServer:
             try:
                 response = validate_options(self.api.request("PUT", "/api/recording/options", arguments), mutation_response=True)
             except ApiHttpError as exc:
-                if exc.details["status"] is not None:
+                if self._is_authoritative_put_http_error(exc):
                     raise
                 self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording/options", validate_options)
             except ToolError as exc:
@@ -387,7 +392,7 @@ class McpServer:
             try:
                 response = filename_projection(self.api.request("PUT", "/api/recording", arguments))
             except ApiHttpError as exc:
-                if exc.details["status"] is not None:
+                if self._is_authoritative_put_http_error(exc):
                     raise
                 self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", filename_projection)
             except ToolError as exc:
