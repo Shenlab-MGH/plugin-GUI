@@ -1,8 +1,8 @@
 {
-  "format_version": "r0.1.0",
+  "format_version": "0.0.1",
   "bundle": {
     "id": "open-ephys-agent-native",
-    "version": "r0.1.0",
+    "version": "0.0.1",
     "platform": "windows",
     "coverage": "narrow-core-r0"
   },
@@ -14,8 +14,8 @@
   },
   "contract": {
     "id": "open-ephys-agent",
-    "version": "r0.1.0",
-    "artifact": "agent_native/open_ephys_agent_contract_v1_0_2_r0_1_0.json"
+    "version": "0.0.1",
+    "artifact": "agent_native/open_ephys_agent_contract_v1_0_2_v0_0_1.json"
   },
   "mcp": {
     "protocol_version": "2024-11-05",

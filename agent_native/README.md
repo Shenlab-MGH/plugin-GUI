@@ -1,7 +1,7 @@
 # Open Ephys Agent Native Core R0
 
 This is the narrow, stdio-only MCP bridge for the official Open Ephys GUI
-v1.0.2 baseline. It pins agent contract r0.1.0 and MCP protocol 2024-11-05.
+v1.0.2 baseline. It pins agent contract 0.0.1 and MCP protocol 2024-11-05.
 
 It publishes exactly ten explicit Core R0 tools for capabilities, status,
 recording options, recording filename components, CPU, disk, and elapsed time.

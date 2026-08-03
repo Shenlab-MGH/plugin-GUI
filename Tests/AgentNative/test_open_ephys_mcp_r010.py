@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_0_2_r0_1_0.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_0_2_v0_0_1.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
 
@@ -121,14 +121,15 @@ class FakeOpenEphysApi:
 class ContractTests(unittest.TestCase):
     def test_contract_is_pinned_to_narrow_v102_core_r0(self):
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(contract["schema_version"], "r0.1.0")
-        self.assertEqual(contract["contract"]["version"], "r0.1.0")
-        self.assertEqual(contract["bundle"]["version"], "r0.1.0")
+        self.assertEqual(contract["schema_version"], "0.0.1")
+        self.assertEqual(contract["contract"]["version"], "0.0.1")
+        self.assertEqual(contract["bundle"]["version"], "0.0.1")
         self.assertEqual(contract["baseline"], {"upstream": "open-ephys/plugin-GUI", "version": "1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"})
         self.assertEqual(contract["mcp"], {"protocol_version": "2024-11-05", "modern_protocol_supported": False, "server_name": "open-ephys-agent-native"})
         self.assertEqual([tool["name"] for tool in contract["tools"]], TOOL_NAMES)
         self.assertEqual([item["id"] for item in contract["api"]["expected_capabilities_response"]["capabilities"]], CAPABILITY_IDS)
-        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.1.1")
+        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.0.1")
+        self.assertEqual(contract["api"]["capabilities_contract_version"], "0.0.1")
         self.assertFalse(contract["verification"]["hardware_verified"])
         self.assertFalse(contract["verification"]["scientific_verified"])
         tool_names = [tool["name"] for tool in contract["tools"]]
@@ -367,7 +368,7 @@ class McpR010Tests(unittest.TestCase):
 
     def test_skill_pins_contract_and_safety_boundary(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        for required in ("r0.1.0", "1.0.2", "2024-11-05", "approve_recording:true", "hardware_verified:false", "scientific_verified:false"):
+        for required in ("0.0.1", "1.0.2", "2024-11-05", "approve_recording:true", "hardware_verified:false", "scientific_verified:false"):
             self.assertIn(required, skill)
         for forbidden in ("oe_api_request", "uia locator", "processor", "parameter", "stream"):
             self.assertNotIn(forbidden, skill.lower())

@@ -1,14 +1,14 @@
 {
-  "schema_version": "r0.1.0",
-  "contract": { "id": "open-ephys-agent", "version": "r0.1.0" },
-  "bundle": { "id": "open-ephys-agent-native", "version": "r0.1.0" },
+  "schema_version": "0.0.1",
+  "contract": { "id": "open-ephys-agent", "version": "0.0.1" },
+  "bundle": { "id": "open-ephys-agent-native", "version": "0.0.1" },
   "baseline": { "upstream": "open-ephys/plugin-GUI", "version": "1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f" },
   "mcp": { "protocol_version": "2024-11-05", "modern_protocol_supported": false, "server_name": "open-ephys-agent-native" },
   "transport": { "http_base_url": "http://127.0.0.1:37497" },
   "api": {
-    "capabilities_contract_version": "0.1.1",
+    "capabilities_contract_version": "0.0.1",
     "expected_capabilities_response": {
-      "contract_version": "0.1.1",
+      "contract_version": "0.0.1",
       "capabilities": [
         { "id": "oe.control.acquisition", "name": "Acquisition", "description": "Start or stop data acquisition.", "kind": "toggle", "uia": { "automation_id": "oe.control.acquisition" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/status", "request_fields": [], "response_fields": ["mode"] }, { "operation": "set", "method": "PUT", "path": "/api/status", "request_fields": ["mode"], "response_fields": ["mode"] }], "mode_semantics": { "field": "mode", "allowed_values": ["IDLE", "ACQUIRE", "RECORD"], "on_values": ["ACQUIRE", "RECORD"], "off_values": ["IDLE"], "commands": { "on": { "mode": "ACQUIRE" }, "off": { "mode": "IDLE" } }, "response_meaning": "actual_gui_state" } },
         { "id": "oe.control.recording", "name": "Recording", "description": "Start or stop writing data to disk.", "kind": "toggle", "uia": { "automation_id": "oe.control.recording" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/status", "request_fields": [], "response_fields": ["mode"] }, { "operation": "set", "method": "PUT", "path": "/api/status", "request_fields": ["mode"], "response_fields": ["mode"] }], "mode_semantics": { "field": "mode", "allowed_values": ["IDLE", "ACQUIRE", "RECORD"], "on_values": ["RECORD"], "off_values": ["IDLE", "ACQUIRE"], "commands": { "on": { "mode": "RECORD" }, "off": { "mode": "ACQUIRE" } }, "response_meaning": "actual_gui_state" } },

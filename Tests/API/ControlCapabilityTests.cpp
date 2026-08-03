@@ -35,7 +35,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
 TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
-    EXPECT_EQ (document["contract_version"], "0.1.1");
+    EXPECT_EQ (document["contract_version"], "0.0.1");
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), 9);
 

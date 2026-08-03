@@ -15,8 +15,8 @@ from typing import Any
 
 
 PROTOCOL_VERSION = "2024-11-05"
-CONTRACT_VERSION = "r0.1.0"
-DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_0_2_r0_1_0.json")
+CONTRACT_VERSION = "0.0.1"
+DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_0_2_v0_0_1.json")
 TOOL_NAMES = (
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
     "oe_get_recording_options", "oe_set_recording_options",
@@ -101,8 +101,8 @@ def load_contract(path: Path) -> dict[str, Any]:
             raise ValueError("Every Core R0 tool requires a closed input schema.")
     api = contract.get("api")
     capabilities = api.get("expected_capabilities_response") if isinstance(api, dict) else None
-    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.1.1":
-        raise ValueError("Capability fixture must pin API contract 0.1.1.")
+    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.0.1":
+        raise ValueError("Capability fixture must pin API contract 0.0.1.")
     items = capabilities.get("capabilities")
     if not isinstance(items, list) or [item.get("id") for item in items if isinstance(item, dict)] != list(CAPABILITY_IDS):
         raise ValueError("Capability fixture does not match the exact nine Core R0 capabilities.")

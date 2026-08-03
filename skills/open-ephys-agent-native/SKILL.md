@@ -5,8 +5,8 @@ description: Safely operate the narrow Open Ephys v1.0.2 Core R0 MCP surface.
 
 # Open Ephys Agent Native Core R0
 
-This Skill is pinned to Open Ephys GUI `1.0.2`, agent contract `r0.1.0`, API
-capability contract `0.1.1`, and legacy MCP protocol `2024-11-05`.
+This Skill is pinned to Open Ephys GUI `1.0.2`, agent contract `0.0.1`, API
+capability contract `0.0.1`, and legacy MCP protocol `2024-11-05`.
 
 Use only these tools: `oe_get_capabilities`, `oe_get_status`, `oe_set_status`,
 `oe_get_recording_options`, `oe_set_recording_options`,
