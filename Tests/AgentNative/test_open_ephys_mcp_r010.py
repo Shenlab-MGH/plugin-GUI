@@ -173,6 +173,10 @@ class McpR010Tests(unittest.TestCase):
         self.assertIsNone(self.server.handle({"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "oe_set_status", "arguments": {"mode": "ACQUIRE"}}}))
         self.assertEqual(self.api.requests, [])
 
+    def test_newer_legacy_client_can_negotiate_pinned_server_protocol(self):
+        response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "official-sdk", "version": "2.0.0"}}})
+        self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
+
     def test_loopback_only_and_redirects_are_rejected(self):
         with self.assertRaises(ValueError): self.module.ApiClient("https://example.invalid")
         with self.assertRaises(ValueError): self.module.ApiClient("http://127.0.0.1/api/status")
