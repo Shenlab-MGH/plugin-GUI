@@ -184,12 +184,30 @@ public:
 
         svr_->Get ("/api/config", [this] (const httplib::Request&, httplib::Response& res)
                    {
-            std::unique_ptr<XmlElement> xmlElement = std::make_unique<XmlElement> ("SETTINGS");
-            graph_->saveToXml (xmlElement.get());
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [this]
+                {
+                    XmlElement xmlElement ("SETTINGS");
+                    graph_->saveToXml (&xmlElement);
+                    return xmlElement.toString();
+                },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.control.signal_chain.configuration",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
 
             json ret;
-            ret["info"] = xmlElement.get()->toString().toStdString();
-            res.set_content(ret.dump(), "application/json"); });
+            ret["info"] = readResult.value->toStdString();
+            res.set_content (ret.dump(), "application/json"); });
 
         const auto readStatusMode = []
         {
