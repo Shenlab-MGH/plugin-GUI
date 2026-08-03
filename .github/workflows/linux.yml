@@ -42,6 +42,7 @@ jobs:
         cd ../../Build && cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
         make -j4
     - name: deploy
+      if: github.repository == 'open-ephys/plugin-GUI'
       env:
         ARTIFACTORY_ACCESS_TOKEN: ${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}
       run: |

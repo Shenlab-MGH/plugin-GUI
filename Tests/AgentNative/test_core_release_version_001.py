@@ -4,6 +4,10 @@ MCP protocol 2024-11-05 is intentionally unchanged. This is the closeout pin for
 the integrated core release surfaces (agent contract, API capabilities contract,
 release bundle, MCP server info/constants, skill, parity, README, and active
 filename references). Capability IDs/order/tools are not asserted here.
+
+Also pins post-merge fork safety: official Artifactory deploy steps must run only
+in the canonical open-ephys/plugin-GUI repository so forks always build/test but
+never attempt privileged signing/notary/JFrog deployment.
 """
 
 from __future__ import annotations
@@ -33,6 +37,50 @@ CPP_HTTP_SERVER_H = ROOT / "Source" / "Utils" / "OpenEphysHttpServer.h"
 # Legacy prerelease names must not remain as the active surfaces.
 LEGACY_CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_r0_1_0.json"
 LEGACY_PARITY_PATH = AGENT_DIR / "open_ephys_core_integration_parity_r0_1_0.json"
+
+# Official platform workflows: deploy must be canonical-repo only; build stays open.
+OFFICIAL_DEPLOY_WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "osx.yml",
+    ROOT / ".github" / "workflows" / "windows.yml",
+    ROOT / ".github" / "workflows" / "linux.yml",
+)
+CANONICAL_DEPLOY_GUARD = "github.repository == 'open-ephys/plugin-GUI'"
+STEP_START = re.compile(r"^(?P<indent>\s*)-\s+")
+
+
+def _workflow_steps(workflow: Path) -> list[list[str]]:
+    """Return top-level action step blocks (indent of four spaces under jobs.*.steps)."""
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if (match := STEP_START.match(line)) and len(match.group("indent")) == 4
+    ]
+    return [
+        lines[start : starts[position + 1] if position + 1 < len(starts) else len(lines)]
+        for position, start in enumerate(starts)
+    ]
+
+
+def _step_name(step: list[str]) -> str | None:
+    for line in step:
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            stripped = stripped[2:].strip()
+        if stripped.startswith("name:"):
+            return stripped.removeprefix("name:").strip()
+    return None
+
+
+def _step_conditions(step: list[str]) -> list[str]:
+    conditions: list[str] = []
+    for line in step:
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            stripped = stripped[2:].strip()
+        if stripped.startswith("if:"):
+            conditions.append(stripped.removeprefix("if:").strip())
+    return conditions
 
 
 class CoreReleaseVersion001Tests(unittest.TestCase):
@@ -133,6 +181,39 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
         self.assertNotIn('"0.1.1"', cpp)
         self.assertIn(f"contract_version {PRODUCT_VERSION}", header)
         self.assertNotIn("0.1.1", header)
+
+    def test_official_deploy_steps_are_gated_to_canonical_repository(self):
+        """Fork CI must build/test always; official deploy only in open-ephys/plugin-GUI."""
+        for workflow in OFFICIAL_DEPLOY_WORKFLOWS:
+            with self.subTest(workflow=workflow.name):
+                self.assertTrue(workflow.is_file(), f"missing workflow {workflow}")
+                steps = _workflow_steps(workflow)
+
+                deploy_steps = [step for step in steps if _step_name(step) == "deploy"]
+                self.assertEqual(
+                    len(deploy_steps),
+                    1,
+                    f"{workflow.name} must have exactly one step named deploy",
+                )
+                self.assertEqual(
+                    _step_conditions(deploy_steps[0]),
+                    [CANONICAL_DEPLOY_GUARD],
+                    f"{workflow.name} deploy must be gated exactly to "
+                    f"{CANONICAL_DEPLOY_GUARD!r}",
+                )
+
+                build_steps = [step for step in steps if _step_name(step) == "build"]
+                self.assertGreaterEqual(
+                    len(build_steps),
+                    1,
+                    f"{workflow.name} must keep at least one unconditional build step",
+                )
+                for build_step in build_steps:
+                    self.assertEqual(
+                        _step_conditions(build_step),
+                        [],
+                        f"{workflow.name} build step must remain unconditional",
+                    )
 
 
 if __name__ == "__main__":
