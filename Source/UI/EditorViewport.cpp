@@ -44,14 +44,40 @@ String processorAccessibilityId (int nodeId)
     return "oe.processor." + String (nodeId);
 }
 
+String processorAccessibilityPredecessorClause (
+    const std::optional<int>& predecessorNodeId)
+{
+    return "Predecessor node ID: "
+           + (predecessorNodeId.has_value()
+                  ? String (*predecessorNodeId)
+                  : String ("none"))
+           + ".";
+}
+
 String processorAccessibilityDescription (const ProcessorAccessibilitySnapshotItem& item)
 {
     return "Read-only loaded processor. Node ID: " + String (item.nodeId)
-           + ". Predecessor node ID: "
-           + (item.predecessorNodeId.has_value()
-                  ? String (*item.predecessorNodeId)
-                  : String ("none"))
-           + ".";
+           + ". " + processorAccessibilityPredecessorClause (item.predecessorNodeId);
+}
+
+// Refresh only the trailing predecessor clause on richer GenericEditor text.
+String withRefreshedPredecessorClause (const String& existingDescription,
+                                       const std::optional<int>& predecessorNodeId)
+{
+    const auto clause = processorAccessibilityPredecessorClause (predecessorNodeId);
+    constexpr auto marker = "Predecessor node ID:";
+    const auto start = existingDescription.indexOf (marker);
+    if (start < 0)
+    {
+        return existingDescription.trimEnd()
+               + (existingDescription.endsWithIgnoreCase (".") ? " " : ". ")
+               + clause;
+    }
+
+    const auto period = existingDescription.indexOfChar (start, '.');
+    const auto endExclusive = period >= 0 ? period + 1 : existingDescription.length();
+    return existingDescription.substring (0, start) + clause
+           + existingDescription.substring (endExclusive);
 }
 
 class ProcessorAccessibilityProxyHandler final : public AccessibilityHandler
@@ -327,24 +353,16 @@ void EditorViewport::reconcileProcessorAccessibilityComponents()
         if (component->getTitle() != item.name)
             component->setTitle (item.name);
         // Proxies always use inventory descriptions. Visible GenericEditors keep
-        // their existing descriptions unless they still lack predecessor metadata
-        // needed by the multi-root inventory contract.
+        // richer constructor/display text and only refresh the predecessor clause.
         if (dynamic_cast<GenericEditor*> (component) == nullptr)
         {
             if (component->getDescription() != description)
                 component->setDescription (description);
         }
-        else if (! component->getDescription().contains ("Predecessor node ID:"))
+        else
         {
-            // Preserve richer GenericEditor constructor/display text and append
-            // the inventory predecessor clause required by external UIA clients.
-            const auto merged = component->getDescription().trimEnd()
-                                + (component->getDescription().endsWithIgnoreCase (".") ? " " : ". ")
-                                + "Predecessor node ID: "
-                                + (item.predecessorNodeId.has_value()
-                                       ? String (*item.predecessorNodeId)
-                                       : String ("none"))
-                                + ".";
+            const auto merged = withRefreshedPredecessorClause (
+                component->getDescription(), item.predecessorNodeId);
             if (component->getDescription() != merged)
                 component->setDescription (merged);
         }

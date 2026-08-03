@@ -260,4 +260,3 @@ TEST_F (ProcessorGraphAccessibilityWiringTest, UpdateViewsPublishesSelectedAndUn
     EXPECT_EQ (inventory[1].name, "Probe 8");
 }
 #endif
-
