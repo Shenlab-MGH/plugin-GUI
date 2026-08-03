@@ -1,0 +1,34 @@
+name: Agent Native Core
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/agent-native-core.yml'
+      - 'agent_native/**'
+      - 'skills/open-ephys-agent-native/**'
+      - 'Tests/AgentNative/**'
+  push:
+    branches:
+      - main
+      - development
+      - testing
+    paths:
+      - '.github/workflows/agent-native-core.yml'
+      - 'agent_native/**'
+      - 'skills/open-ephys-agent-native/**'
+      - 'Tests/AgentNative/**'
+
+permissions:
+  contents: read
+
+jobs:
+  core-contracts:
+    name: Windows MCP and Skill Contracts
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run dependency-independent contract tests
+        run: python -m unittest discover -s Tests/AgentNative -p "test_*.py" -v

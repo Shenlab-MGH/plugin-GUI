@@ -1,0 +1,140 @@
+{
+  "schema_version": "r0.1.0",
+  "contract": {
+    "id": "open-ephys-agent",
+    "version": "r0.1.0"
+  },
+  "bundle": {
+    "id": "open-ephys-agent-native",
+    "version": "r0.1.0",
+    "platform": "windows"
+  },
+  "baseline": {
+    "upstream": "open-ephys/plugin-GUI",
+    "version": "1.1.0",
+    "upstream_release_commit": "c2ce076f5b2d4182222f9d0fd9bb9b97a60582e7",
+    "fork_source_commit": "5808213806be355b889cc7e52bb01c570fdeee08"
+  },
+  "mcp": {
+    "protocol_version": "2024-11-05",
+    "protocol_era": "legacy",
+    "modern_protocol_supported": false,
+    "server_name": "open-ephys-agent-native"
+  },
+  "transport": {
+    "http_base_url": "http://127.0.0.1:37497"
+  },
+  "api": {
+    "capabilities_contract_version": "0.1.1",
+    "expected_capabilities_response": {
+      "contract_version": "0.1.1",
+      "surface": "discovery_only",
+      "capabilities": [
+        {
+          "id": "oe.control.acquisition",
+          "name": "Acquisition",
+          "description": "Start or stop data acquisition.",
+          "kind": "toggle",
+          "api": [
+            {"operation": "read", "method": "GET", "path": "/api/status", "request_fields": [], "response_fields": ["mode"]},
+            {"operation": "set", "method": "PUT", "path": "/api/status", "request_fields": ["mode"], "response_fields": ["mode"]}
+          ],
+          "mode_semantics": {
+            "field": "mode",
+            "allowed_values": ["IDLE", "ACQUIRE", "RECORD"],
+            "on_values": ["ACQUIRE", "RECORD"],
+            "off_values": ["IDLE"],
+            "commands": {"on": {"mode": "ACQUIRE"}, "off": {"mode": "IDLE"}},
+            "response_meaning": "actual_gui_state"
+          }
+        },
+        {
+          "id": "oe.control.recording",
+          "name": "Recording",
+          "description": "Start or stop writing data to disk.",
+          "kind": "toggle",
+          "api": [
+            {"operation": "read", "method": "GET", "path": "/api/status", "request_fields": [], "response_fields": ["mode"]},
+            {"operation": "set", "method": "PUT", "path": "/api/status", "request_fields": ["mode"], "response_fields": ["mode"]}
+          ],
+          "mode_semantics": {
+            "field": "mode",
+            "allowed_values": ["IDLE", "ACQUIRE", "RECORD"],
+            "on_values": ["RECORD"],
+            "off_values": ["IDLE", "ACQUIRE"],
+            "commands": {"on": {"mode": "RECORD"}, "off": {"mode": "ACQUIRE"}},
+            "response_meaning": "actual_gui_state"
+          }
+        },
+        {
+          "id": "oe.control.recording.filename",
+          "name": "Recording filename",
+          "description": "Edit the recording filename.",
+          "kind": "collection",
+          "api": [
+            {"operation": "read", "method": "GET", "path": "/api/recording", "request_fields": [], "response_fields": ["prepend_text", "base_text", "append_text"]},
+            {"operation": "set", "method": "PUT", "path": "/api/recording", "request_fields": ["prepend_text", "base_text", "append_text"], "response_fields": ["prepend_text", "base_text", "append_text"]}
+          ]
+        },
+        {
+          "id": "oe.status.cpu_usage",
+          "name": "CPU usage",
+          "description": "Fraction of available processing time used by the signal chain.",
+          "kind": "range",
+          "api": [
+            {"operation": "read", "method": "GET", "path": "/api/cpu", "request_fields": [], "response_fields": ["usage"]}
+          ]
+        }
+      ]
+    }
+  },
+  "tools": [
+    {
+      "name": "oe_get_capabilities",
+      "description": "Read and verify the exact Open Ephys r0.1.0 core capability contract.",
+      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    {
+      "name": "oe_get_status",
+      "description": "Read the current Open Ephys mode: IDLE, ACQUIRE, or RECORD.",
+      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    {
+      "name": "oe_set_status",
+      "description": "Set the Open Ephys mode with pre/post readback. Entering RECORD requires approve_recording=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {"type": "string", "enum": ["IDLE", "ACQUIRE", "RECORD"]},
+          "approve_recording": {"type": "boolean"}
+        },
+        "required": ["mode"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "oe_get_recording_filename",
+      "description": "Read the prepend, base, and append text used for recording directory names.",
+      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    {
+      "name": "oe_set_recording_filename",
+      "description": "Set one or more recording filename fields with pre/post readback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prepend_text": {"type": "string"},
+          "base_text": {"type": "string"},
+          "append_text": {"type": "string"}
+        },
+        "additionalProperties": false,
+        "minProperties": 1
+      }
+    },
+    {
+      "name": "oe_get_cpu",
+      "description": "Read CPU usage as a fraction from 0.0 to 1.0.",
+      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+    }
+  ]
+}
