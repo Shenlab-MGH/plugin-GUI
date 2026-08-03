@@ -221,7 +221,7 @@ def _validate_stream(stream: Any) -> None:
     value = expect_object(stream, "Processor stream")
     if set(value) != {"name", "source_id", "sample_rate", "channel_count", "parameters"}:
         raise ToolError("response_schema_mismatch", "Processor streams have an unexpected shape.")
-    if (not isinstance(value["name"], str) or not value["name"]
+    if (not isinstance(value["name"], str)
             or not isinstance(value["source_id"], int) or isinstance(value["source_id"], bool)
             or not _is_number(value["sample_rate"])
             or not isinstance(value["channel_count"], int) or isinstance(value["channel_count"], bool)
@@ -245,7 +245,7 @@ def processors_projection(payload: Any) -> dict[str, list[dict[str, Any]]]:
         processor_id, predecessor = item["id"], item["predecessor"]
         if (not isinstance(processor_id, int) or isinstance(processor_id, bool)
                 or processor_id < 0 or processor_id in seen_ids
-                or not isinstance(item["name"], str) or not item["name"]
+                or not isinstance(item["name"], str)
                 or not isinstance(item["parameters"], list) or not isinstance(item["streams"], list)
                 or (predecessor is not None and (not isinstance(predecessor, int) or isinstance(predecessor, bool)
                                                  or predecessor < 0))):
