@@ -21,7 +21,7 @@ PRODUCT_VERSION = "0.0.1"
 MCP_PROTOCOL_VERSION = "2024-11-05"
 
 # Active product surfaces after closeout (no r0.1.0 / 0.1.1 prerelease tags).
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_0_0_1.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_1.json"
 PARITY_PATH = AGENT_DIR / "open_ephys_core_integration_parity_0_0_1.json"
 BUNDLE_PATH = AGENT_DIR / "open_ephys_agent_release_bundle.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
@@ -73,7 +73,7 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
         self.assertEqual(bundle["contract"]["version"], PRODUCT_VERSION)
         self.assertEqual(
             bundle["contract"]["fixture"],
-            "agent_native/open_ephys_agent_contract_v1_1_0_0_0_1.json",
+            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_1.json",
         )
         self.assertEqual(
             bundle["components"]["mcp"]["protocol_version"],
@@ -98,7 +98,7 @@ class CoreReleaseVersion001Tests(unittest.TestCase):
                         constants[target.id] = node.value.value
         self.assertEqual(constants.get("PROTOCOL_VERSION"), MCP_PROTOCOL_VERSION)
         self.assertEqual(constants.get("CONTRACT_VERSION"), PRODUCT_VERSION)
-        self.assertIn('open_ephys_agent_contract_v1_1_0_0_0_1.json', source)
+        self.assertIn('open_ephys_agent_contract_v1_1_0_v0_0_1.json', source)
         self.assertNotIn("r0.1.0", source)
         self.assertNotIn("0.1.1", source)
         self.assertNotIn("r0_1_0", source)

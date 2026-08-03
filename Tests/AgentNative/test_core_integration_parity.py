@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = ROOT / "agent_native" / "open_ephys_core_integration_parity_0_0_1.json"
-CONTRACT = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_0_0_1.json"
+CONTRACT = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_1.json"
 
 
 class CoreIntegrationParityTests(unittest.TestCase):
@@ -37,10 +37,25 @@ class CoreIntegrationParityTests(unittest.TestCase):
             "platform": "windows",
             "automation_id": "oe.control.recording",
         })
-        self.assertEqual(capabilities["oe.control.recording.filename"]["parity"], "API_MCP_ONLY")
-        self.assertIsNone(capabilities["oe.control.recording.filename"]["uia"])
-        self.assertEqual(capabilities["oe.status.cpu_usage"]["parity"], "API_MCP_ONLY")
-        self.assertIsNone(capabilities["oe.status.cpu_usage"]["uia"])
+        self.assertEqual(capabilities["oe.control.recording.options"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.control.recording.options"]["uia"], {
+            "platform": "windows",
+            "automation_id": "oe.control.recording.options",
+        })
+        self.assertEqual(capabilities["oe.control.recording.filename"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.control.recording.filename"]["uia"], {
+            "platform": "windows",
+            "automation_id": "oe.control.recording.filename",
+        })
+        self.assertEqual(capabilities["oe.control.recording.new_directory"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.control.recording.force_new_directory"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.status.cpu_usage"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.status.cpu_usage"]["uia"], {
+            "platform": "windows",
+            "automation_id": "oe.status.cpu_usage",
+        })
+        self.assertEqual(capabilities["oe.status.disk_usage"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.status.elapsed_time"]["parity"], "BOTH")
 
     def test_report_keeps_remote_and_hardware_gates_pending(self):
         self.assertTrue(REPORT.exists(), "integration parity report must be generated")
