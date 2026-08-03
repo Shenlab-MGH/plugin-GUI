@@ -43,7 +43,9 @@ MainDocumentWindow::MainDocumentWindow()
     Image titleBarIcon = ImageCache::getFromFile (iconDir.getChildFile ("icon-small.png"));
     setIcon (titleBarIcon);
 
+#if ! JUCE_WINDOWS
     setAccessible (false);
+#endif
 }
 
 MainWindow::MainWindow (const File& fileToLoad, bool isConsoleApp_) : isConsoleApp (isConsoleApp_)

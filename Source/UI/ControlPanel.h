@@ -33,6 +33,7 @@
 #include "../Processors/RecordNode/RecordEngine.h"
 #include "../Processors/RecordNode/RecordNode.h"
 #include "../TestableExport.h"
+#include "../Utils/ControlStatus.h"
 #include "CustomArrowButton.h"
 #include "FilenameConfigWindow.h"
 #include "LookAndFeel/CustomLookAndFeel.h"
@@ -43,7 +44,7 @@
     Triggers a new directory to be created at the start of each recording
 
 */
-class NewDirectoryButton : public Button
+class TESTABLE NewDirectoryButton : public Button
 {
 public:
     /** Constructor */
@@ -63,7 +64,7 @@ private:
     Locks the new directory button to force new directories for each recording.
 
 */
-class ForceNewDirectoryButton : public Button
+class TESTABLE ForceNewDirectoryButton : public Button
 {
 public:
     /** Constructor */
@@ -78,13 +79,20 @@ private:
     std::unique_ptr<Drawable> forceNewDirectoryIcon;
 };
 
+/** Shows or hides the recording options row. */
+class TESTABLE RecordingOptionsButton : public CustomArrowButton
+{
+public:
+    RecordingOptionsButton();
+};
+
 /** 
 
     Allows the user to specify custom file names,
     instead of always using the auto-generated date string
 
 */
-class FilenameEditorButton : public TextButton
+class TESTABLE FilenameEditorButton : public TextButton
 {
 public:
     /** Constructor */
@@ -108,7 +116,7 @@ public:
   @see ControlPanel, ProcessorGraph
 
 */
-class PlayButton : public DrawableButton
+class TESTABLE PlayButton : public DrawableButton
 {
 public:
     /** Constructor*/
@@ -136,7 +144,7 @@ public:
 
 */
 
-class RecordButton : public DrawableButton
+class TESTABLE RecordButton : public DrawableButton
 {
 public:
     /** Constructor*/
@@ -165,8 +173,8 @@ public:
 
 */
 
-class CPUMeter : public Component,
-                 public SettableTooltipClient
+class TESTABLE CPUMeter : public Component,
+                          public SettableTooltipClient
 {
 public:
     /** Constructor*/
@@ -181,6 +189,8 @@ public:
 
     /** Draws the CPUMeter. */
     void paint (Graphics& g);
+
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
 private:
     FontOptions font;
@@ -202,8 +212,8 @@ private:
 
 */
 
-class DiskSpaceMeter : public Component,
-                       public SettableTooltipClient
+class TESTABLE DiskSpaceMeter : public Component,
+                                public SettableTooltipClient
 {
 public:
     /** Constructor*/
@@ -218,6 +228,8 @@ public:
 
     /** Draws the DiskSpaceMeter. */
     void paint (Graphics& g);
+
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
 private:
     FontOptions font;
@@ -242,7 +254,7 @@ private:
 
 */
 
-class Clock : public Component
+class TESTABLE Clock : public Component
 {
 public:
     enum Mode
@@ -287,6 +299,8 @@ public:
     /** Renders the clock.*/
     void paint (Graphics& g);
 
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
     /** Sets the clock mode*/
     void setMode (Mode m);
 
@@ -299,12 +313,17 @@ public:
     /** Gets the clock reference time */
     ReferenceTime getReferenceTime() { return referenceTime; }
 
+    /** Returns transport-neutral clock state for UIA and API clients. */
+    ClockStatus getStatus() const;
+
     /** Responds to right clicks*/
     void mouseDown (const MouseEvent& e);
 
 private:
     /** Draws the current time.*/
     void drawTime (Graphics& g);
+
+    String getDisplayText() const;
 
     int64 lastTime;
 
@@ -393,6 +412,21 @@ public:
 
     /** Returns the current time in the recording (in milliseconds) */
     int64 getRecordingTime() const;
+
+    /** Returns transport-neutral clock state. */
+    ClockStatus getClockStatus() const;
+
+    /** Returns transport-neutral recording-option state. */
+    RecordingOptionsStatus getRecordingOptionsStatus();
+
+    /** Show or hide the recording-options drawer. */
+    void setRecordingOptionsExpanded (bool shouldBeExpanded);
+
+    /** Request a new data directory for the next recording. */
+    void setNewDirectoryRequested (bool shouldRequestNewDirectory);
+
+    /** Force a new data directory for each recording. */
+    void setForceNewDirectory (bool shouldForceNewDirectory);
 
     /** Sets the parent recording directory.
 
@@ -533,7 +567,7 @@ private:
     std::unique_ptr<FilenameComponent> filenameComponent;
     std::unique_ptr<NewDirectoryButton> newDirectoryButton;
     std::unique_ptr<ForceNewDirectoryButton> forceNewDirectoryButton;
-    std::unique_ptr<CustomArrowButton> showHideRecordingOptionsButton;
+    std::unique_ptr<RecordingOptionsButton> showHideRecordingOptionsButton;
     std::unique_ptr<RecordButton> recordButton;
     std::unique_ptr<ComboBox> recordSelector;
     Array<std::shared_ptr<FilenameFieldComponent>> filenameFields;

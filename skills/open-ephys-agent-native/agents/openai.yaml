@@ -1,0 +1,4 @@
+interface:
+  display_name: "Open Ephys Agent Native"
+  short_description: "Control Open Ephys core state safely via MCP"
+  default_prompt: "Use $open-ephys-agent-native to inspect Open Ephys state and perform a verified core control action."

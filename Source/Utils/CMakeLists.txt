@@ -4,6 +4,20 @@
 add_sources(
   open-ephys
   OpenEphysHttpServer.h
+  OpenEphysHttpApiRoutes.h
+  ControlCapability.h
+  ControlCapability.cpp
+  ControlCapabilityJson.h
+  ControlCapabilityJson.cpp
+  ControlStatus.h
+  ControlStatusJson.h
+  ControlStatusJson.cpp
+  ControlRead.h
+  MessageThreadCall.h
+  RecordingOptionsControl.h
+  StatusControl.h
+  StatusApiHandler.h
+  StatusApiHandler.cpp
   ListSliceParser.h
   ListSliceParser.cpp
   BroadcastParser.h

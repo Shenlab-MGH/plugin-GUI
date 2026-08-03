@@ -26,13 +26,52 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "../Processors/PluginManager/PluginManager.h"
 #include "../Processors/RecordNode/RecordEngine.h"
 #include "FilenameConfigWindow.h"
+#include "SemanticComponent.h"
 #include "UIComponent.h"
 #include <math.h>
 #include <stdio.h>
 
 #include "LookAndFeel/CustomLookAndFeel.h"
 
+#include <functional>
+
 const int SIZE_AUDIO_EDITOR_MAX_WIDTH = 500;
+
+namespace
+{
+class ReadOnlyRangedValue final : public AccessibilityRangedNumericValueInterface
+{
+public:
+    explicit ReadOnlyRangedValue (std::function<double()> getValueIn)
+        : getValue (std::move (getValueIn))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValue (double) override { jassertfalse; }
+    double getCurrentValue() const override { return jlimit (0.0, 1.0, getValue()); }
+    AccessibleValueRange getRange() const override { return { { 0.0, 1.0 }, 0.001 }; }
+
+private:
+    std::function<double()> getValue;
+};
+
+class ReadOnlyTextValue final : public AccessibilityTextValueInterface
+{
+public:
+    explicit ReadOnlyTextValue (std::function<String()> getValueIn)
+        : getValue (std::move (getValueIn))
+    {
+    }
+
+    bool isReadOnly() const override { return true; }
+    void setValueAsString (const String&) override { jassertfalse; }
+    String getCurrentValueAsString() const override { return getValue(); }
+
+private:
+    std::function<String()> getValue;
+};
+} // namespace
 
 NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
 {
@@ -44,6 +83,12 @@ NewDirectoryButton::NewDirectoryButton() : Button ("NewDirectory")
     newDirectoryIcon->replaceColour (Colours::black, Colours::black);
 
     setClickingTogglesState (true);
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.recording.new_directory",
+                           "New recording directory",
+                           "Start a new data directory for the next recording.");
+#endif
 }
 
 void NewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -90,6 +135,12 @@ ForceNewDirectoryButton::ForceNewDirectoryButton() : Button ("ForceNewDirectory"
     forceNewDirectoryIcon = Drawable::createFromSVG (*xmlDoc.getDocumentElement().get());
 
     setClickingTogglesState (true);
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.recording.force_new_directory",
+                           "Force new recording directories",
+                           "Force a new data directory for each recording.");
+#endif
 }
 
 void ForceNewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool isButtonDown)
@@ -111,10 +162,26 @@ void ForceNewDirectoryButton::paintButton (Graphics& g, bool isMouseOver, bool i
     forceNewDirectoryIcon->replaceColour (buttonColour, Colours::black);
 }
 
+RecordingOptionsButton::RecordingOptionsButton()
+{
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.recording.options",
+                           "Recording options",
+                           "Show or hide recording options.");
+#endif
+}
+
 FilenameEditorButton::FilenameEditorButton()
     : TextButton ("Filename Editor")
 {
     setTooltip ("Edit the recording filename");
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.recording.filename",
+                           "Recording filename",
+                           "Edit the recording filename.");
+#endif
 }
 
 PlayButton::PlayButton()
@@ -124,6 +191,13 @@ PlayButton::PlayButton()
     setColour (DrawableButton::backgroundOnColourId, Colours::darkgrey.withAlpha (0.0f));
     setClickingTogglesState (true);
     setTooltip ("Start/stop acquisition");
+
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.acquisition",
+                           "Acquisition",
+                           "Start or stop data acquisition.");
+#endif
 
     updateImages (false);
 }
@@ -163,6 +237,13 @@ RecordButton::RecordButton()
     setClickingTogglesState (true);
     setTooltip ("Start/stop writing to disk");
 
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.control.recording",
+                           "Recording",
+                           "Start or stop writing data to disk.");
+#endif
+
     updateImages (false);
 }
 
@@ -199,6 +280,12 @@ CPUMeter::CPUMeter() : Component ("CPU Meter"),
     font = FontOptions ("Silkscreen", "Regular", 14);
 
     setTooltip ("CPU usage");
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.status.cpu_usage",
+                           "CPU usage",
+                           "Fraction of available processing time used by the signal chain.");
+#endif
 }
 
 void CPUMeter::updateCPU (float usage)
@@ -206,6 +293,21 @@ void CPUMeter::updateCPU (float usage)
     cpu = usage;
 
     repaint();
+
+#if JUCE_WINDOWS
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
+#endif
+}
+
+std::unique_ptr<AccessibilityHandler> CPUMeter::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::progressBar,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces { std::make_unique<ReadOnlyRangedValue> ([this]
+                                                                                  { return cpu; }) });
 }
 
 void CPUMeter::paint (Graphics& g)
@@ -239,7 +341,13 @@ DiskSpaceMeter::DiskSpaceMeter() : Component ("Disk Space Meter"),
 {
     font = FontOptions ("Silkscreen", "Regular", 14);
 
-    setTooltip ("Disk space available");
+    setTooltip ("Disk usage");
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.status.disk_usage",
+                           "Disk usage",
+                           "Fraction of recording-volume space currently used.");
+#endif
 }
 
 void DiskSpaceMeter::updateDiskSpace (float percent)
@@ -247,6 +355,21 @@ void DiskSpaceMeter::updateDiskSpace (float percent)
     diskFree = percent;
 
     repaint();
+
+#if JUCE_WINDOWS
+    if (auto* handler = getAccessibilityHandler())
+        handler->notifyAccessibilityEvent (AccessibilityEvent::valueChanged);
+#endif
+}
+
+std::unique_ptr<AccessibilityHandler> DiskSpaceMeter::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::progressBar,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces { std::make_unique<ReadOnlyRangedValue> ([this]
+                                                                                  { return diskFree; }) });
 }
 
 void DiskSpaceMeter::paint (Graphics& g)
@@ -282,6 +405,36 @@ void DiskSpaceMeter::mouseUp (const MouseEvent& e)
 Clock::Clock()
 {
     clockFont = FontOptions ("CP Mono", "Light", 30.0f);
+#if JUCE_WINDOWS
+    applySemanticMetadata (*this,
+                           "oe.status.elapsed_time",
+                           "Elapsed time",
+                           "Elapsed acquisition or recording time.");
+#endif
+}
+
+std::unique_ptr<AccessibilityHandler> Clock::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (
+        *this,
+        AccessibilityRole::staticText,
+        AccessibilityActions {},
+        AccessibilityHandler::Interfaces { std::make_unique<ReadOnlyTextValue> ([this]
+                                                                                { return getStatus().display; }) });
+}
+
+ClockStatus Clock::getStatus() const
+{
+    ClockStatus status;
+    status.display = getDisplayText();
+    status.elapsedMilliseconds = referenceTime == ACQUISITION_START
+                                     ? latestAcquisitionTime
+                                     : (isRecording ? totalRecordingTime : totalTime);
+    status.mode = mode == HHMMSS ? "HHMMSS" : "DEFAULT";
+    status.reference = referenceTime == ACQUISITION_START ? "ACQUISITION_START" : "CUMULATIVE";
+    status.running = isRunning;
+    status.recording = isRecording;
+    return status;
 }
 
 void Clock::paint (Graphics& g)
@@ -306,28 +459,6 @@ void Clock::drawTime (Graphics& g)
         lastTime = Time::currentTimeMillis();
     }
 
-    int m;
-    int s;
-    int h;
-
-    int64 timeToDraw;
-
-    if (referenceTime == ACQUISITION_START)
-    {
-        timeToDraw = latestAcquisitionTime;
-    }
-    else
-    {
-        if (isRecording)
-            timeToDraw = totalRecordingTime;
-        else
-            timeToDraw = totalTime;
-    }
-
-    h = floor (timeToDraw / 3600000.0f);
-    m = floor (timeToDraw / 60000.0);
-    s = floor ((timeToDraw - m * 60000.0) / 1000.0);
-
     if (isRecording)
     {
         g.setColour (Colours::black);
@@ -340,36 +471,38 @@ void Clock::drawTime (Graphics& g)
             g.setColour (findColour (ThemeColours::controlPanelText).withAlpha (0.8f));
     }
 
-    String timeString = "";
+    g.setFont (clockFont);
+    g.drawText (getDisplayText(), 0, 0, getWidth(), getHeight(), Justification::centred, false);
+}
+
+String Clock::getDisplayText() const
+{
+    const auto timeToDisplay = referenceTime == ACQUISITION_START
+                                   ? latestAcquisitionTime
+                                   : (isRecording ? totalRecordingTime : totalTime);
+    const int hours = floor (timeToDisplay / 3600000.0f);
+    const int totalMinutes = floor (timeToDisplay / 60000.0);
+    const int seconds = floor ((timeToDisplay - totalMinutes * 60000.0) / 1000.0);
 
     if (mode == DEFAULT)
-    {
-        timeString += m;
-        timeString += " min ";
-        timeString += s;
-        timeString += " s";
-    }
-    else
-    {
-        if (h < 10)
-            timeString += "0";
-        timeString += h;
-        timeString += ":";
+        return String (totalMinutes) + " min " + String (seconds) + " s";
 
-        int minutes = m - h * 60;
+    String timeString;
+    if (hours < 10)
+        timeString += "0";
+    timeString += hours;
+    timeString += ":";
 
-        if (minutes < 10)
-            timeString += "0";
-        timeString += minutes;
-        timeString += ":";
+    const int minutes = totalMinutes - hours * 60;
+    if (minutes < 10)
+        timeString += "0";
+    timeString += minutes;
+    timeString += ":";
 
-        if (s < 10)
-            timeString += "0";
-        timeString += s;
-    }
-
-    g.setFont (clockFont);
-    g.drawText (timeString, 0, 0, getWidth(), getHeight(), Justification::centred, false);
+    if (seconds < 10)
+        timeString += "0";
+    timeString += seconds;
+    return timeString;
 }
 
 void Clock::start()
@@ -536,7 +669,7 @@ ControlPanel::ControlPanel (ProcessorGraph* graph_, AudioComponent* audio_, bool
     clock = std::make_unique<Clock>();
     cpuMeter = std::make_unique<CPUMeter>();
     diskMeter = std::make_unique<DiskSpaceMeter>();
-    showHideRecordingOptionsButton = std::make_unique<CustomArrowButton>();
+    showHideRecordingOptionsButton = std::make_unique<RecordingOptionsButton>();
     showHideRecordingOptionsButton->addListener (this);
     showHideRecordingOptionsButton->setTooltip ("Show/hide recording options");
     filenameConfigWindow = std::make_unique<FilenameConfigWindow> (filenameFields);
@@ -1112,12 +1245,65 @@ void ControlPanel::colourChanged()
     recordButton->updateImages (getRecordingState());
 }
 
+ClockStatus ControlPanel::getClockStatus() const
+{
+    return clock != nullptr ? clock->getStatus() : ClockStatus {};
+}
+
+RecordingOptionsStatus ControlPanel::getRecordingOptionsStatus()
+{
+    RecordingOptionsStatus status;
+    status.expanded = open;
+    status.forceNewDirectory = forceNewDirectoryButton != nullptr && forceNewDirectoryButton->getToggleState();
+    status.newDirectoryRequested = newDirectoryNeeded;
+    status.recording = getRecordingState();
+    return status;
+}
+
+void ControlPanel::setRecordingOptionsExpanded (bool shouldBeExpanded)
+{
+    if (showHideRecordingOptionsButton != nullptr)
+        showHideRecordingOptionsButton->setToggleState (shouldBeExpanded, dontSendNotification);
+
+    openState (shouldBeExpanded);
+
+    if (! isConsoleApp && AccessClass::getUIComponent() != nullptr)
+        AccessClass::getUIComponent()->resized();
+}
+
+void ControlPanel::setNewDirectoryRequested (bool shouldRequestNewDirectory)
+{
+    const bool forceNewDirectory = forceNewDirectoryButton != nullptr
+                                   && forceNewDirectoryButton->getToggleState();
+    newDirectoryNeeded = shouldRequestNewDirectory || forceNewDirectory;
+
+    if (newDirectoryButton != nullptr)
+        newDirectoryButton->setToggleState (newDirectoryNeeded, dontSendNotification);
+}
+
+void ControlPanel::setForceNewDirectory (bool shouldForceNewDirectory)
+{
+    if (forceNewDirectoryButton != nullptr)
+        forceNewDirectoryButton->setToggleState (shouldForceNewDirectory, dontSendNotification);
+
+    if (shouldForceNewDirectory)
+    {
+        setNewDirectoryRequested (true);
+
+        if (newDirectoryButton != nullptr)
+            newDirectoryButton->setEnabled (false);
+    }
+    else if (hasRecorded && newDirectoryButton != nullptr)
+    {
+        newDirectoryButton->setEnabled (true);
+    }
+}
+
 void ControlPanel::buttonClicked (Button* button)
 {
     if (button == showHideRecordingOptionsButton.get())
     {
-        openState (button->getToggleState());
-        AccessClass::getUIComponent()->resized();
+        setRecordingOptionsExpanded (button->getToggleState());
         return;
     }
 
@@ -1138,24 +1324,13 @@ void ControlPanel::buttonClicked (Button* button)
 
     if (button == newDirectoryButton.get())
     {
-        //Setting the button state only takes effect on the next recording
-
+        setNewDirectoryRequested (button->getToggleState());
         return;
     }
 
     if (button == forceNewDirectoryButton.get())
     {
-        if (button->getToggleState())
-        {
-            newDirectoryNeeded = true;
-            newDirectoryButton->setToggleState (newDirectoryNeeded, dontSendNotification);
-            newDirectoryButton->setEnabled (false);
-        }
-        else
-        {
-            if (hasRecorded)
-                newDirectoryButton->setEnabled (true);
-        }
+        setForceNewDirectory (button->getToggleState());
         return;
     }
 
@@ -1352,7 +1527,7 @@ void ControlPanel::refreshMeters()
 
     File currentDirectory = filenameComponent->getCurrentFile();
 
-    diskMeter->updateDiskSpace (1.0f - float (currentDirectory.getBytesFreeOnVolume()) / float (currentDirectory.getVolumeTotalSize()));
+    diskMeter->updateDiskSpace (CoreServices::getRecordingDiskUsage());
 
     if (initialize)
     {
