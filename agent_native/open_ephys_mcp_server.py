@@ -277,7 +277,8 @@ class McpServer:
 
     @staticmethod
     def _require_empty_params(params: dict[str, Any]) -> None:
-        if params: raise JsonRpcError(INVALID_PARAMS, "Invalid params")
+        if params and (set(params) != {"_meta"} or not isinstance(params["_meta"], dict)):
+            raise JsonRpcError(INVALID_PARAMS, "Invalid params")
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.connection_state != "new": raise JsonRpcError(INVALID_REQUEST, "Server is already initialized.")
@@ -291,10 +292,12 @@ class McpServer:
         if self.connection_state != "ready": raise JsonRpcError(SERVER_NOT_INITIALIZED, "Server not initialized")
 
     def _call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
-        if set(params) != {"name", "arguments"} or params.get("name") not in TOOL_NAMES or not isinstance(params.get("arguments"), dict):
+        if (not {"name"}.issubset(params) or not set(params).issubset({"name", "arguments", "_meta"})
+                or params.get("name") not in TOOL_NAMES or not isinstance(params.get("arguments", {}), dict)
+                or ("_meta" in params and not isinstance(params["_meta"], dict))):
             raise JsonRpcError(INVALID_PARAMS, "Unknown tool or invalid arguments object.")
         try:
-            name, arguments = params["name"], params["arguments"]
+            name, arguments = params["name"], params.get("arguments", {})
             self._validate_arguments(name, arguments)
             return text_result(self._execute_tool(name, arguments))
         except ToolError as exc:

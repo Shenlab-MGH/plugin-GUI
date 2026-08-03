@@ -173,6 +173,22 @@ class McpR010Tests(unittest.TestCase):
         self.assertIsNone(self.server.handle({"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "oe_set_status", "arguments": {"mode": "ACQUIRE"}}}))
         self.assertEqual(self.api.requests, [])
 
+    def test_tools_methods_accept_only_dictionary_outer_metadata(self):
+        self.ready_server()
+        listed = self.server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {"_meta": {}}})
+        self.assertEqual([tool["name"] for tool in listed["result"]["tools"]], TOOL_NAMES)
+        called = self.server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "oe_get_status", "arguments": {}, "_meta": {}}})
+        self.assertEqual(json.loads(called["result"]["content"][0]["text"]), {"mode": "IDLE"})
+        invalid_requests = (
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {"_meta": []}},
+            {"jsonrpc": "2.0", "id": 6, "method": "tools/list", "params": {"unexpected": {}}},
+            {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "oe_get_status", "arguments": {}, "_meta": []}},
+            {"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "oe_get_status", "arguments": {}, "unexpected": {}}},
+        )
+        for request in invalid_requests:
+            with self.subTest(request=request):
+                self.assertEqual(self.server.handle(request)["error"]["code"], -32602)
+
     def test_newer_legacy_client_can_negotiate_pinned_server_protocol(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "mcp", "version": "0.1.0"}, "_meta": {}}})
         self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
