@@ -5,8 +5,8 @@ description: Safely operate the narrow Open Ephys v1.0.2 Core R0 MCP surface.
 
 # Open Ephys Agent Native Core R0
 
-This Skill is pinned to Open Ephys GUI `1.0.2`, agent contract `r0.1.3`, API
-capability contract `0.1.4`, and legacy MCP protocol `2024-11-05`.
+This Skill is pinned to Open Ephys GUI `1.0.2`, contract: `0.0.4`, API
+capability contract `0.0.4`, and legacy MCP protocol `2024-11-05`.
 
 Use only these tools: `oe_get_capabilities`, `oe_get_status`, `oe_set_status`,
 `oe_get_recording_options`, `oe_set_recording_options`,
@@ -15,7 +15,7 @@ Use only these tools: `oe_get_capabilities`, `oe_get_status`, `oe_set_status`,
 `oe_get_disk`, and `oe_get_time`.
 
 Read the relevant state before a mutation and inspect its returned readback.
-Every tool independently verifies the exact twelve Core R0.1.3 capabilities. Only
+Every tool independently verifies the exact twelve Core 0.0.4 capabilities. Only
 the MCP bridge outbound client is loopback-only and rejects redirects. The raw
 Open Ephys API listener binds `0.0.0.0`, remains network-exposed, and can bypass
 MCP RECORD approval. Use a trusted network or firewall. The raw API listener

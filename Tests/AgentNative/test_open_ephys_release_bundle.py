@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_PATH = ROOT / "agent_native" / "open_ephys_agent_release_bundle.json"
-CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_r0_1_3.json"
+CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_v0_0_4.json"
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
 README_PATH = ROOT / "agent_native" / "README.md"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
@@ -27,12 +27,13 @@ class ReleaseBundleTests(unittest.TestCase):
     def test_release_bundle_pins_contract_provenance_and_nonclaims(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(bundle["format_version"], "r0.1.3")
-        self.assertEqual(bundle["bundle"], {"id": "open-ephys-agent-native", "version": "r0.1.3", "platform": "windows", "coverage": "narrow-core-r0-processor-inventory"})
+        self.assertEqual(bundle["format_version"], "0.0.4")
+        self.assertEqual(bundle["bundle"], {"id": "open-ephys-agent-native", "version": "0.0.4", "platform": "windows", "coverage": "narrow-core-r0-processor-inventory"})
         self.assertEqual(bundle["official_upstream"], {"repository": "open-ephys/plugin-GUI", "tag": "v1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f", "gui_version": "1.0.2"})
         self.assertEqual(bundle["development_base"], {"branch": "agent-native-v102-config-read-r012", "commit": "2b6c8bfe79ccab62f9b9a200533273241e330a01"})
-        self.assertEqual(bundle["contract"]["artifact"], "agent_native/open_ephys_agent_contract_v1_0_2_r0_1_3.json")
+        self.assertEqual(bundle["contract"]["artifact"], "agent_native/open_ephys_agent_contract_v1_0_2_v0_0_4.json")
         self.assertEqual(bundle["contract"]["version"], contract["contract"]["version"])
+        self.assertEqual(bundle["contract"]["version"], "0.0.4")
         self.assertEqual(bundle["verification"], {"level": "offline-contract-and-local-windows-uia", "windows_uia_external_smoke_verified": True, "hosted_ci_verified": False, "hardware_verified": False, "scientific_verified": False})
         self.assertFalse(bundle["mcp"]["modern_protocol_supported"])
         self.assertEqual(bundle["limitations"], {"mcp_loopback_scope": "outbound-client-only", "raw_api_bind_address": "0.0.0.0", "raw_api_can_bypass_mcp_recording_approval": True, "deployment_requirement": "trusted-network-or-firewall"})
@@ -46,8 +47,9 @@ class ReleaseBundleTests(unittest.TestCase):
         immediate_base = bundle["development_base"]["commit"]
         self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", immediate_base, "HEAD"], cwd=ROOT).returncode, 0)
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-        self.assertIn("Tests.AgentNative.test_open_ephys_mcp_r013", workflow)
+        self.assertIn("Tests.AgentNative.test_open_ephys_mcp_v0_0_4", workflow)
         self.assertIn("Tests.AgentNative.test_open_ephys_release_bundle", workflow)
+        self.assertIn("Tests.AgentNative.test_public_product_version_0_0_4", workflow)
         self.assertRegex(workflow, r"fetch-depth:\s*0")
         self.assertIn("agent-native-v102-record-safety", workflow)
         self.assertIn("agent-native-v102-core-r0-mcp-r010", workflow)
@@ -97,8 +99,10 @@ class ReleaseBundleTests(unittest.TestCase):
 
     def test_readme_pins_the_narrow_surface_and_nonclaims(self):
         readme = README_PATH.read_text(encoding="utf-8")
-        for required in ("v1.0.2", "r0.1.3", "2024-11-05", "exactly fourteen", "oe_get_config", "oe_get_processors", "hardware_verified:false", "scientific_verified:false"):
+        for required in ("v1.0.2", "0.0.4", "2024-11-05", "exactly fourteen", "oe_get_config", "oe_get_processors", "hardware_verified:false", "scientific_verified:false"):
             self.assertIn(required, readme)
+        self.assertNotIn("r0.1.3", readme)
+        self.assertNotIn("0.1.4", readme)
 
         for document in (readme, SKILL_PATH.read_text(encoding="utf-8")):
             normalized = " ".join(document.split())

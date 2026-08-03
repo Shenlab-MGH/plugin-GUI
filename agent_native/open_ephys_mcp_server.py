@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Narrow legacy MCP bridge for the Open Ephys v1.0.2 Core R0.1.3 contract."""
+"""Narrow legacy MCP bridge for the Open Ephys v1.0.2 Core 0.0.4 contract."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from typing import Any
 
 
 PROTOCOL_VERSION = "2024-11-05"
-CONTRACT_VERSION = "r0.1.3"
-DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_0_2_r0_1_3.json")
+CONTRACT_VERSION = "0.0.4"
+DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_0_2_v0_0_4.json")
 TOOL_NAMES = (
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
     "oe_get_recording_options", "oe_set_recording_options",
@@ -90,6 +90,8 @@ def load_contract(path: Path) -> dict[str, Any]:
         contract = loads_json(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cannot load contract {path}: {exc}") from exc
+    # Active product is 0.0.4 only. Archived contract files stay on disk for
+    # schema checks but are rejected by this active loader.
     expected = {
         "schema_version": CONTRACT_VERSION,
         "contract": {"id": "open-ephys-agent", "version": CONTRACT_VERSION},
@@ -108,11 +110,13 @@ def load_contract(path: Path) -> dict[str, Any]:
             raise ValueError("Every Core R0 tool requires a closed input schema.")
     api = contract.get("api")
     capabilities = api.get("expected_capabilities_response") if isinstance(api, dict) else None
-    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.1.4":
-        raise ValueError("Capability fixture must pin API contract 0.1.4.")
+    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.0.4":
+        raise ValueError("Capability fixture must pin API contract 0.0.4.")
+    if not isinstance(api, dict) or api.get("capabilities_contract_version") != "0.0.4":
+        raise ValueError("Capability fixture must pin API contract 0.0.4.")
     items = capabilities.get("capabilities")
     if not isinstance(items, list) or [item.get("id") for item in items if isinstance(item, dict)] != list(CAPABILITY_IDS):
-        raise ValueError("Capability fixture does not match the exact twelve Core R0.1.3 capabilities.")
+        raise ValueError("Capability fixture does not match the exact twelve Core 0.0.4 capabilities.")
     if contract.get("verification") != {"hardware_verified": False, "scientific_verified": False}:
         raise ValueError("Contract must explicitly retain unverified hardware and scientific claims.")
     return contract

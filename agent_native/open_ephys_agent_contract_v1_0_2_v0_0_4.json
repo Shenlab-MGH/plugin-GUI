@@ -1,12 +1,12 @@
 {
-  "schema_version": "r0.1.3",
+  "schema_version": "0.0.4",
   "contract": {
     "id": "open-ephys-agent",
-    "version": "r0.1.3"
+    "version": "0.0.4"
   },
   "bundle": {
     "id": "open-ephys-agent-native",
-    "version": "r0.1.3"
+    "version": "0.0.4"
   },
   "baseline": {
     "upstream": "open-ephys/plugin-GUI",
@@ -22,9 +22,9 @@
     "http_base_url": "http://127.0.0.1:37497"
   },
   "api": {
-    "capabilities_contract_version": "0.1.4",
+    "capabilities_contract_version": "0.0.4",
     "expected_capabilities_response": {
-      "contract_version": "0.1.4",
+      "contract_version": "0.0.4",
       "capabilities": [
         {
           "id": "oe.control.acquisition",
@@ -403,7 +403,7 @@
   "tools": [
     {
       "name": "oe_get_capabilities",
-      "description": "Read the pinned Core R0.1.3 capabilities.",
+      "description": "Read the pinned Core 0.0.4 capabilities.",
       "inputSchema": {
         "type": "object",
         "properties": {},

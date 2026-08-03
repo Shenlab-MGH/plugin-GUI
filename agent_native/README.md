@@ -1,9 +1,10 @@
 # Open Ephys Agent Native Core R0
 
 This is the narrow, stdio-only MCP bridge for the official Open Ephys GUI
-v1.0.2 baseline. It pins agent contract r0.1.3 and MCP protocol 2024-11-05.
+v1.0.2 baseline. It pins agent contract and bundle: `0.0.4`,
+API capability contract: `0.0.4`, and MCP protocol 2024-11-05.
 
-It publishes exactly fourteen explicit Core R0.1.3 tools for capabilities, status,
+It publishes exactly fourteen explicit 0.0.4 tools for capabilities, status,
 recording options, recording filename components, recording parent directory,
 the current signal-chain configuration snapshot, loaded processor inventory, CPU,
 disk, and elapsed time.
@@ -58,5 +59,5 @@ scientific validation claim.
 Run the stdlib tests with:
 
 ```powershell
-py -3 -m unittest Tests.AgentNative.test_open_ephys_mcp_r013 Tests.AgentNative.test_open_ephys_release_bundle
+py -3 -m unittest Tests.AgentNative.test_open_ephys_mcp_v0_0_4 Tests.AgentNative.test_open_ephys_release_bundle Tests.AgentNative.test_public_product_version_0_0_4
 ```

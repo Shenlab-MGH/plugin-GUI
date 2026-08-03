@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_0_2_r0_1_3.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_0_2_v0_0_4.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
 
@@ -39,7 +39,7 @@ CAPABILITY_IDS = [
 
 
 def load_server_module():
-    spec = importlib.util.spec_from_file_location("open_ephys_mcp_server_r013", SERVER_PATH)
+    spec = importlib.util.spec_from_file_location("open_ephys_mcp_server_v0_0_4", SERVER_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -142,17 +142,19 @@ class FakeOpenEphysApi:
 class ContractTests(unittest.TestCase):
     def test_contract_is_pinned_to_narrow_v102_core_r0(self):
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(contract["schema_version"], "r0.1.3")
-        self.assertEqual(contract["contract"]["version"], "r0.1.3")
-        self.assertEqual(contract["bundle"]["version"], "r0.1.3")
+        self.assertEqual(contract["schema_version"], "0.0.4")
+        self.assertEqual(contract["contract"]["version"], "0.0.4")
+        self.assertEqual(contract["bundle"]["version"], "0.0.4")
         self.assertEqual(contract["baseline"], {"upstream": "open-ephys/plugin-GUI", "version": "1.0.2", "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f"})
         self.assertEqual(contract["mcp"], {"protocol_version": "2024-11-05", "modern_protocol_supported": False, "server_name": "open-ephys-agent-native"})
         self.assertEqual([tool["name"] for tool in contract["tools"]], TOOL_NAMES)
         capabilities_tool = next(tool for tool in contract["tools"] if tool["name"] == "oe_get_capabilities")
-        self.assertEqual(capabilities_tool["description"], "Read the pinned Core R0.1.3 capabilities.")
+        self.assertEqual(capabilities_tool["description"], "Read the pinned Core 0.0.4 capabilities.")
         self.assertNotIn("R0.1.1", json.dumps(contract))
+        self.assertNotIn("r0.1.3", json.dumps(contract))
         self.assertEqual([item["id"] for item in contract["api"]["expected_capabilities_response"]["capabilities"]], CAPABILITY_IDS)
-        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.1.4")
+        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.0.4")
+        self.assertEqual(contract["api"]["capabilities_contract_version"], "0.0.4")
         self.assertFalse(contract["verification"]["hardware_verified"])
         self.assertFalse(contract["verification"]["scientific_verified"])
         tool_names = [tool["name"] for tool in contract["tools"]]
@@ -168,8 +170,21 @@ class ContractTests(unittest.TestCase):
         processors = next(item for item in contract["api"]["expected_capabilities_response"]["capabilities"] if item["id"] == "oe.control.signal_chain.processors")
         self.assertEqual(processors, {"id": "oe.control.signal_chain.processors", "name": "Loaded processors", "description": "Read the processors currently loaded in the signal chain.", "kind": "collection", "uia": {"automation_id": "oe.control.signal_chain.processors"}, "api": [{"operation": "read", "method": "GET", "path": "/api/processors", "request_fields": [], "response_fields": ["processors"]}]})
 
+    def test_active_load_contract_rejects_historical_version_fixtures(self):
+        module = load_server_module()
+        module.load_contract(CONTRACT_PATH)  # positive control
+        for name in (
+            "open_ephys_agent_contract_v1_0_2_r0_1_0.json",
+            "open_ephys_agent_contract_v1_0_2_r0_1_1.json",
+            "open_ephys_agent_contract_v1_0_2_r0_1_2.json",
+        ):
+            path = AGENT_DIR / name
+            self.assertTrue(path.is_file(), path)
+            with self.assertRaises(ValueError, msg=f"active server must reject {name}"):
+                module.load_contract(path)
 
-class McpR013Tests(unittest.TestCase):
+
+class McpV004Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
@@ -527,8 +542,10 @@ class McpR013Tests(unittest.TestCase):
 
     def test_skill_pins_contract_and_safety_boundary(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        for required in ("r0.1.3", "1.0.2", "2024-11-05", "approve_recording:true", "hardware_verified:false", "scientific_verified:false", "oe_set_recording_directory", "oe_get_config", "oe_get_processors"):
+        for required in ("0.0.4", "1.0.2", "2024-11-05", "approve_recording:true", "hardware_verified:false", "scientific_verified:false", "oe_set_recording_directory", "oe_get_config", "oe_get_processors"):
             self.assertIn(required, skill)
+        self.assertNotIn("r0.1.3", skill)
+        self.assertNotIn("0.1.4", skill)
         for forbidden in ("oe_api_request", "oe_set_processor", "oe_get_parameter", "oe_get_stream"):
             self.assertNotIn(forbidden, skill.lower())
 
