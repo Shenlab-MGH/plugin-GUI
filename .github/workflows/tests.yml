@@ -124,25 +124,77 @@ jobs:
         run: |
           New-Item -Path 'C:\open-ephys\data' -ItemType Directory
           git clone --branch main https://github.com/open-ephys/open-ephys-test-suite.git C:\test-suite
-          cd C:\test-suite
-          $process = Start-Process -FilePath "Build\Release\open-ephys.exe" -ArgumentList "Build\Release\configs\file_reader_config.xml" -NoNewWindow -PassThru
-          Write-Host "Started open-ephys process with ID: $($process.Id)"
-          Start-Sleep -Seconds 10
-          Write-Host "Starting Python script..."
-          python run_all.py 2>&1 | Tee-Object -FilePath "python_output.log"
-          Write-Host "Python script completed. Output saved to python_output.log"
-          Stop-Process -Id $process.Id -Force
+          $testResults = Join-Path $env:GITHUB_WORKSPACE "test-results"
+          New-Item -Path $testResults -ItemType Directory -Force | Out-Null
+          $pythonStdout = Join-Path $testResults "python_stdout.log"
+          $pythonStderr = Join-Path $testResults "python_stderr.log"
+          $pythonOutput = Join-Path $testResults "python_output.log"
+          $oeStdout = Join-Path $testResults "open_ephys_stdout.log"
+          $oeStderr = Join-Path $testResults "open_ephys_stderr.log"
+          $oeExe = Join-Path $env:GITHUB_WORKSPACE "Build\Release\open-ephys.exe"
+          $oeConfig = Join-Path $env:GITHUB_WORKSPACE "Build\Release\configs\file_reader_config.xml"
+          $pythonExe = (Get-Command python).Source
+          $process = $null
+          $pythonExitCode = 1
+
+          try {
+            $process = Start-Process -FilePath $oeExe -ArgumentList @($oeConfig) -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $oeStdout -RedirectStandardError $oeStderr -NoNewWindow -PassThru
+            Write-Host "Started open-ephys process with ID: $($process.Id)"
+            Start-Sleep -Seconds 10
+            Write-Host "Starting Python script..."
+            $pythonProcess = Start-Process -FilePath $pythonExe -ArgumentList @("run_all.py") -WorkingDirectory "C:\test-suite" -RedirectStandardOutput $pythonStdout -RedirectStandardError $pythonStderr -NoNewWindow -PassThru -Wait
+            $pythonExitCode = $pythonProcess.ExitCode
+          }
+          finally {
+            if ($process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+
+            $combinedOutput = @()
+            if (Test-Path $pythonStdout) {
+              Write-Host "--- python stdout ---"
+              Get-Content -Path $pythonStdout -Raw
+              $combinedOutput += Get-Content -Path $pythonStdout
+            }
+            if (Test-Path $pythonStderr) {
+              Write-Host "--- python stderr ---"
+              Get-Content -Path $pythonStderr -Raw
+              $combinedOutput += Get-Content -Path $pythonStderr
+            }
+            $combinedOutput | Set-Content -Path $pythonOutput
+            if (Test-Path $oeStdout) {
+              Write-Host "--- Open Ephys stdout ---"
+              Get-Content -Path $oeStdout -Raw
+            }
+            if (Test-Path $oeStderr) {
+              Write-Host "--- Open Ephys stderr ---"
+              Get-Content -Path $oeStderr -Raw
+            }
+          }
+
+          if ($pythonExitCode -ne 0) {
+            Write-Host "::error::Open Ephys test suite exited with code $pythonExitCode"
+            exit $pythonExitCode
+          }
         env:
           OE_WINDOWS_GITHUB_RECORD_PATH: C:\open-ephys\data
       - name: Set timestamp
+        if: always()
         shell: powershell
         id: timestamp
         run: |
           $timestamp = Get-Date -Format 'yyyy_MM_dd_HH_mm_ss'
           "timestamp=$timestamp" >> $env:GITHUB_OUTPUT
       - name: Upload test results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows_${{ steps.timestamp.outputs.timestamp }}.log
-          path: python_output.log
+          path: |
+            test-results/python_stdout.log
+            test-results/python_stderr.log
+            test-results/python_output.log
+            test-results/open_ephys_stdout.log
+            test-results/open_ephys_stderr.log
+          if-no-files-found: warn
           retention-days: 7

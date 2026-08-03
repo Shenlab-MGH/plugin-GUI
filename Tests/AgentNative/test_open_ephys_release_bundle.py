@@ -56,6 +56,29 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertIn('ctest --test-dir Build -C Release --output-on-failure --no-tests=error -R "^(API_tests|UI_tests|WindowsUIAutomation_tests)$"', workflow)
         self.assertIn("set_tests_properties(WindowsUIAutomation_tests PROPERTIES TIMEOUT 30)", WINDOWS_UIA_CMAKE_PATH.read_text(encoding="utf-8"))
 
+    def test_windows_e2e_failure_logs_are_preserved_and_uploaded(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        for required in (
+            "-RedirectStandardOutput $pythonStdout",
+            "-RedirectStandardError $pythonStderr",
+            "-RedirectStandardOutput $oeStdout",
+            "-RedirectStandardError $oeStderr",
+            "if ($pythonExitCode -ne 0)",
+            "exit $pythonExitCode",
+            "python_stdout.log",
+            "python_stderr.log",
+            "python_output.log",
+            "open_ephys_stdout.log",
+            "open_ephys_stderr.log",
+            "if-no-files-found: warn",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, workflow)
+
+        self.assertRegex(workflow, r"(?s)- name: Set timestamp\n\s+if: always\(\)")
+        self.assertRegex(workflow, r"(?s)- name: Upload test results\n\s+if: always\(\)")
+        self.assertNotIn('Write-Error "Open Ephys test suite exited', workflow)
+
     def test_artifact_path_rejects_escape_forms(self):
         for value in ("../outside", "/absolute", "C:/absolute", "folder\\file", "nested/../../outside"):
             with self.subTest(value=value):
