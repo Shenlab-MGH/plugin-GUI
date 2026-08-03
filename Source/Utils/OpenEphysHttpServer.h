@@ -197,61 +197,47 @@ public:
             ret["info"] = xmlElement.get()->toString().toStdString();
             res.set_content(ret.dump(), "application/json"); });
 
-        const StatusApiHandlers statusHandlers {
-            []
-            {
-                if (CoreServices::getRecordingStatus())
-                    return StatusMode::Record;
-                if (CoreServices::getAcquisitionStatus())
-                    return StatusMode::Acquire;
-                return StatusMode::Idle;
-            },
+        const auto readStatusMode = []
+        {
+            if (CoreServices::getRecordingStatus())
+                return StatusMode::Record;
+            if (CoreServices::getAcquisitionStatus())
+                return StatusMode::Acquire;
+            return StatusMode::Idle;
+        };
+        // Bounded message-thread transitions (2s): same applyMode semantics as v1.1,
+        // with v1.0.2 requestStatusTransition error mapping (unavailable/timeout/failed/
+        // record_nodes_not_synchronized).
+        const StatusControlOperations statusOperations {
+            readStatusMode,
             [] (StatusMode desiredMode)
             {
-                if (desiredMode == StatusMode::Record && ! CoreServices::getRecordingStatus())
+                if (desiredMode == StatusMode::Record)
                 {
-                    std::promise<void> signalRecordingStarted;
-                    std::future<void> signalRecordingStartedFuture = signalRecordingStarted.get_future();
-
-                    MessageManager::callAsync ([&signalRecordingStarted]
-                                               {
-                        CoreServices::setRecordingStatus (true);
-                        signalRecordingStarted.set_value(); // Signal that recording has started
-                    });
-
-                    // Wait for recording to start
-                    signalRecordingStartedFuture.wait();
+                    CoreServices::setRecordingStatus (true);
                 }
                 else if (desiredMode == StatusMode::Acquire)
                 {
-                    std::promise<void> signalAcquisitionStarted;
-                    std::future<void> signalAcquisitionStartedFuture = signalAcquisitionStarted.get_future();
-
-                    MessageManager::callAsync ([&signalAcquisitionStarted]
-                                               {
-                        CoreServices::setRecordingStatus (false);
-                        CoreServices::setAcquisitionStatus (true);
-                        signalAcquisitionStarted.set_value(); // Signal that acquisition has started
-                    });
-
-                    // Wait for acquisition to start
-                    signalAcquisitionStartedFuture.wait();
+                    CoreServices::setRecordingStatus (false);
+                    CoreServices::setAcquisitionStatus (true);
                 }
-                else if (desiredMode == StatusMode::Idle)
+                else
                 {
-                    std::promise<void> signalAcquisitionStopped;
-                    std::future<void> signalAcquisitionStoppedFuture = signalAcquisitionStopped.get_future();
-
-                    MessageManager::callAsync ([&signalAcquisitionStopped]
-                                               {
-                        CoreServices::setRecordingStatus (false);
-                        CoreServices::setAcquisitionStatus (false);
-                        signalAcquisitionStopped.set_value(); // Signal that acquisition has stopped
-                    });
-
-                    // Wait for acquisition to stop
-                    signalAcquisitionStoppedFuture.wait();
+                    CoreServices::setRecordingStatus (false);
+                    CoreServices::setAcquisitionStatus (false);
                 }
+            },
+            [] { return CoreServices::allRecordNodesAreSynchronized(); }
+        };
+        const StatusApiHandlers statusHandlers {
+            readStatusMode,
+            [statusOperations] (StatusMode desiredMode)
+            {
+                return requestStatusTransition (
+                    desiredMode,
+                    statusOperations,
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    std::chrono::seconds (2));
             }
         };
 

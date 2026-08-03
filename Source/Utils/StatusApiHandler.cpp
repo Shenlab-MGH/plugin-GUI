@@ -44,7 +44,6 @@ const char* modeToString (StatusMode mode)
 
     return "IDLE";
 }
-
 std::optional<StatusMode> modeFromString (const std::string& mode)
 {
     if (mode == "IDLE")
@@ -130,17 +129,45 @@ void handleStatusPut (
         return;
     }
 
-    handlers.requestMode (*requestedMode);
-    const auto actualMode = handlers.readMode();
+    const auto transition = handlers.requestMode (*requestedMode);
+    const auto actualMode = transition.mode;
 
-    if (actualMode != *requestedMode)
+    if (transition.failure == StatusTransitionFailure::operationUnavailable)
     {
+        setErrorResponse (
+            response, 503, "operation_unavailable",
+            "The status transition could not be dispatched to the message thread.");
+        return;
+    }
+    if (transition.failure == StatusTransitionFailure::operationTimedOut)
+    {
+        setErrorResponse (
+            response, 504, "operation_timeout",
+            "Timed out waiting for the status transition.");
+        return;
+    }
+    if (transition.failure == StatusTransitionFailure::operationFailed)
+    {
+        setErrorResponse (
+            response, 500, "operation_failed",
+            "The status transition failed on the message thread.");
+        return;
+    }
+
+    if (transition.failure != StatusTransitionFailure::none
+        || actualMode != *requestedMode)
+    {
+        const bool unsynchronized = transition.failure
+                                    == StatusTransitionFailure::recordNodesNotSynchronized;
         setJsonResponse (
             response,
             409,
             { { "error",
-                { { "code", "transition_rejected" },
-                  { "message", "Open Ephys did not reach the requested mode." } } },
+                { { "code", unsynchronized ? "record_nodes_not_synchronized"
+                                            : "transition_rejected" },
+                  { "message", unsynchronized
+                                     ? "All Record Nodes must be synchronized before recording."
+                                     : "Open Ephys did not reach the requested mode." } } },
               { "requested_mode", requestedText },
               { "mode", modeToString (actualMode) } });
         return;

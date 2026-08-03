@@ -15,6 +15,7 @@ add_sources(
   ControlRead.h
   MessageThreadCall.h
   RecordingOptionsControl.h
+  StatusControl.h
   StatusApiHandler.h
   StatusApiHandler.cpp
   ListSliceParser.h

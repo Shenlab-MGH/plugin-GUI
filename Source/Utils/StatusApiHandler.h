@@ -25,22 +25,16 @@
 #define STATUS_API_HANDLER_H
 
 #include "../TestableExport.h"
+#include "StatusControl.h"
 #include "httplib.h"
 #include "json.hpp"
 
 #include <functional>
 
-enum class StatusMode
-{
-    Idle,
-    Acquire,
-    Record
-};
-
 struct StatusApiHandlers
 {
     std::function<StatusMode()> readMode;
-    std::function<void (StatusMode)> requestMode;
+    std::function<StatusTransitionResult (StatusMode)> requestMode;
 };
 
 TESTABLE void handleStatusGet (
