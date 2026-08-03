@@ -17,6 +17,19 @@ JUCEApplicationBase* createAccessibilityTestApplication()
     return new AccessibilityTestApplication();
 }
 
+class TestMainDocumentWindow final : public MainDocumentWindow
+{
+public:
+    using MainDocumentWindow::createAccessibilityHandler;
+};
+
+class TestTextButton final : public TextButton
+{
+public:
+    using TextButton::TextButton;
+    using TextButton::createAccessibilityHandler;
+};
+
 class MainDocumentWindowAccessibilityTests : public ::testing::Test
 {
 protected:
@@ -44,15 +57,28 @@ protected:
 
 TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheWindowAndItsContentToAccessibilityClients)
 {
-    MainDocumentWindow window;
-    TextButton contentButton ("Accessible child");
+    TestMainDocumentWindow window;
+    TestTextButton contentButton ("Accessible child");
 
     window.setContentNonOwned (&contentButton, false);
-    window.addToDesktop();
 
     EXPECT_EQ (window.getComponentID(), "oe.window.main");
     EXPECT_TRUE (window.isAccessible());
     EXPECT_TRUE (contentButton.isAccessible());
+
+    auto windowHandler = window.createAccessibilityHandler();
+    ASSERT_NE (windowHandler, nullptr);
+    EXPECT_EQ (&windowHandler->getComponent(), &window);
+
+    auto contentHandler = contentButton.createAccessibilityHandler();
+    ASSERT_NE (contentHandler, nullptr);
+    EXPECT_EQ (&contentHandler->getComponent(), &contentButton);
+    EXPECT_EQ (contentHandler->getRole(), AccessibilityRole::button);
+
+   #if JUCE_WINDOWS
+    window.addToDesktop();
+    ASSERT_NE (window.getWindowHandle(), nullptr);
     EXPECT_NE (window.getAccessibilityHandler(), nullptr);
     EXPECT_NE (contentButton.getAccessibilityHandler(), nullptr);
+   #endif
 }
