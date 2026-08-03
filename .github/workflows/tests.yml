@@ -19,6 +19,7 @@ on:
       - 'agent-native-v102-record-safety'
       - 'agent-native-v102-core-r0-mcp-r010'
       - 'agent-native-v102-recording-directory-r011'
+      - 'agent-native-v102-config-read-r012'
 
 jobs:
   unit-tests:
@@ -31,7 +32,7 @@ jobs:
         fetch-depth: 0
     - name: run Agent Native contract tests
       run: |
-        python3 -m unittest Tests.AgentNative.test_open_ephys_mcp_r012 Tests.AgentNative.test_open_ephys_release_bundle
+        python3 -m unittest Tests.AgentNative.test_open_ephys_mcp_r013 Tests.AgentNative.test_open_ephys_release_bundle
     - name: build
       env:
         CC: gcc-10
@@ -87,6 +88,8 @@ jobs:
         run: |
           cd Build
           msbuild ALL_BUILD.vcxproj -p:Configuration=Release -p:Platform=x64 -m
+      - name: Run Windows API and UI contract tests
+        run: ctest --test-dir Build -C Release --output-on-failure --no-tests=error -R "^(API_tests|UI_tests|WindowsUIAutomation_tests)$"
       - name: Install open-ephys-data-format
         shell: powershell
         run: |
