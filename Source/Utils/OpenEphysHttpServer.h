@@ -31,6 +31,8 @@
 
 #include "httplib.h"
 #include "json.hpp"
+#include <chrono>
+#include <functional>
 #include <sstream>
 
 #include "../AccessClass.h"
@@ -38,13 +40,38 @@
 #include "../UI/ProcessorList.h"
 
 #include "ControlCapabilityJson.h"
+#include "ControlRead.h"
 #include "OpenEphysHttpApiRoutes.h"
+#include "RecordingOptionsControl.h"
 #include "StatusApiHandler.h"
 #include "Utils.h"
 
 using json = nlohmann::json;
 
 #define PORT 37497
+
+namespace OpenEphysHttpDetail
+{
+inline bool dispatchToMessageThread (std::function<void()> operation)
+{
+    return MessageManager::callAsync (std::move (operation));
+}
+
+inline void setControlErrorResponse (httplib::Response& response,
+                                     const char* capability,
+                                     int httpStatus,
+                                     const String& errorCode,
+                                     const String& errorMessage)
+{
+    json document;
+    document["ok"] = false;
+    document["capability"] = capability;
+    document["error"]["code"] = errorCode.toStdString();
+    document["error"]["message"] = errorMessage.toStdString();
+    response.status = httpStatus;
+    response.set_content (document.dump(), "application/json");
+}
+} // namespace OpenEphysHttpDetail
 
 /**
  * HTTP server thread for controlling Processor Parameters via an HTTP API. This starts an HTTP server on port 37497
@@ -53,8 +80,7 @@ using json = nlohmann::json;
  * The API is "RESTful", such that the resource URLs are:
  * 
  * - GET /api/capabilities :
- *          returns a discovery-only JSON capability manifest (contract_version 0.0.1).
- *          This surface does not authorize or prove mutation behavior.
+ *          returns a JSON capability manifest (contract_version 0.0.1).
  *
  * - GET /api/config :
  *          returns an XML string with the current configuration of the GUI
@@ -240,6 +266,127 @@ public:
             json ret;
             ret["usage"] = AccessClass::getAudioComponent()->deviceManager.getCpuUsage();
             res.set_content(ret.dump(), "application/json"); });
+
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kDiskGet, [] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getRecordingDiskUsage(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.status.disk_usage",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
+            json ret;
+            ret["capability"] = "oe.status.disk_usage";
+            ret["usage"] = *readResult.value;
+            ret["minimum"] = 0.0;
+            ret["maximum"] = 1.0;
+            ret["read_only"] = true;
+            res.set_content (ret.dump(), "application/json"); });
+
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kTimeGet, [] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getClockStatus(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.status.elapsed_time",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
+            const auto& status = *readResult.value;
+            json ret;
+            ret["capability"] = "oe.status.elapsed_time";
+            ret["display"] = status.display.toStdString();
+            ret["elapsed_milliseconds"] = status.elapsedMilliseconds;
+            ret["mode"] = status.mode.toStdString();
+            ret["reference"] = status.reference.toStdString();
+            ret["running"] = status.running;
+            ret["recording"] = status.recording;
+            ret["read_only"] = true;
+            res.set_content (ret.dump(), "application/json"); });
+
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kRecordingOptionsGet, [] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto readResult = handleControlRead (
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] { return CoreServices::getRecordingOptionsStatus(); },
+                std::chrono::seconds (2));
+
+            if (! readResult.value.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.control.recording.options",
+                    readResult.httpStatus,
+                    readResult.errorCode,
+                    readResult.errorMessage);
+                return;
+            }
+
+            const auto& status = *readResult.value;
+            json ret;
+            ret["capability"] = "oe.control.recording.options";
+            ret["expanded"] = status.expanded;
+            ret["force_new_directory"] = status.forceNewDirectory;
+            ret["new_directory_requested"] = status.newDirectoryRequested;
+            ret["recording"] = status.recording;
+            res.set_content (ret.dump(), "application/json"); });
+
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kRecordingOptionsPut, [] (const httplib::Request& req, httplib::Response& res)
+                   {
+            const auto controlResult = handleRecordingOptionsPut (
+                String::fromUTF8 (req.body.data(), static_cast<int> (req.body.size())),
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [] (const RecordingOptionsUpdate& update)
+                {
+                    if (update.expanded.has_value())
+                        CoreServices::setRecordingOptionsExpanded (*update.expanded);
+                    if (update.forceNewDirectory.has_value())
+                        CoreServices::setForceNewDirectory (*update.forceNewDirectory);
+                    if (update.newDirectoryRequested.has_value())
+                        CoreServices::setNewDirectoryRequested (*update.newDirectoryRequested);
+                    return CoreServices::getRecordingOptionsStatus();
+                },
+                std::chrono::seconds (2));
+
+            if (! controlResult.status.has_value())
+            {
+                OpenEphysHttpDetail::setControlErrorResponse (
+                    res,
+                    "oe.control.recording.options",
+                    controlResult.httpStatus,
+                    controlResult.errorCode,
+                    controlResult.errorMessage);
+                return;
+            }
+
+            const auto& status = *controlResult.status;
+            json ret;
+            ret["ok"] = true;
+            ret["capability"] = "oe.control.recording.options";
+            ret["expanded"] = status.expanded;
+            ret["force_new_directory"] = status.forceNewDirectory;
+            ret["new_directory_requested"] = status.newDirectoryRequested;
+            ret["recording"] = status.recording;
+            res.set_content (ret.dump(), "application/json"); });
 
         svr_->Get ("/api/latency", [this] (const httplib::Request&, httplib::Response& res)
                    {

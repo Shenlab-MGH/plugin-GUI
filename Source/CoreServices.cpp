@@ -126,6 +126,48 @@ juce::int64 getRecordingTime()
     return getControlPanel()->getRecordingTime();
 }
 
+ClockStatus getClockStatus()
+{
+    return getControlPanel()->getClockStatus();
+}
+
+RecordingOptionsStatus getRecordingOptionsStatus()
+{
+    return getControlPanel()->getRecordingOptionsStatus();
+}
+
+void setRecordingOptionsExpanded (bool shouldBeExpanded)
+{
+    const MessageManagerLock mml;
+    getControlPanel()->setRecordingOptionsExpanded (shouldBeExpanded);
+}
+
+void setNewDirectoryRequested (bool shouldRequestNewDirectory)
+{
+    const MessageManagerLock mml;
+    getControlPanel()->setNewDirectoryRequested (shouldRequestNewDirectory);
+}
+
+void setForceNewDirectory (bool shouldForceNewDirectory)
+{
+    const MessageManagerLock mml;
+    getControlPanel()->setForceNewDirectory (shouldForceNewDirectory);
+}
+
+float calculateDiskUsage (int64 bytesFree, int64 totalBytes)
+{
+    if (totalBytes <= 0)
+        return 0.0f;
+
+    return jlimit (0.0f, 1.0f, 1.0f - static_cast<float> (bytesFree) / static_cast<float> (totalBytes));
+}
+
+float getRecordingDiskUsage()
+{
+    const auto directory = getRecordingParentDirectory();
+    return calculateDiskUsage (directory.getBytesFreeOnVolume(), directory.getVolumeTotalSize());
+}
+
 void setRecordingParentDirectory (String dir)
 {
     if (File (dir).exists())
