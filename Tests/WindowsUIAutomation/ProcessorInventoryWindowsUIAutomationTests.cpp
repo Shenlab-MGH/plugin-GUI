@@ -91,12 +91,20 @@ struct UiaObservation
     bool invokePatternAvailable = false;
     bool directChildrenAreOnlyProcessorItems = false;
     int directChildCount = 0;
-    String discoveredElements;
     StringArray directProcessorAutomationIds;
     std::vector<ProcessorItemObservation> directProcessorItems;
     bool firstRootEditorDescendantFound = false;
     bool eighthRootEditorDescendantFound = false;
 };
+
+String describeObservation (const UiaObservation& observation)
+{
+    return "hr=0x" + String::toHexString ((int) observation.result)
+         + " rootFound=" + String (observation.rootFound ? "true" : "false")
+         + " itemFound=" + String (observation.itemFound ? "true" : "false")
+         + " directChildCount=" + String (observation.directChildCount)
+         + " directIds=" + observation.directProcessorAutomationIds.joinIntoString (",");
+}
 
 UiaObservation observeProcessorInventory (HWND windowHandle)
 {
@@ -130,30 +138,11 @@ UiaObservation observeProcessorInventory (HWND windowHandle)
         return observation;
 
     ComOwner<IUIAutomationCondition> trueCondition;
-    ComOwner<IUIAutomationElementArray> descendants;
     observation.result = automation->CreateTrueCondition (trueCondition.put());
     if (FAILED (observation.result))
         return observation;
-    observation.result = root->FindAll (TreeScope_Descendants, trueCondition.get(), descendants.put());
-    if (SUCCEEDED (observation.result) && descendants.get() != nullptr)
-    {
-        int count = 0;
-        descendants->get_Length (&count);
-        for (int index = 0; index < count; ++index)
-        {
-            ComOwner<IUIAutomationElement> element;
-            if (FAILED (descendants->GetElement (index, element.put())))
-                continue;
-            BSTR id = nullptr;
-            BSTR name = nullptr;
-            element->get_CurrentAutomationId (&id);
-            element->get_CurrentName (&name);
-            observation.discoveredElements += String (id) + "|" + String (name) + ";";
-            SysFreeString (id);
-            SysFreeString (name);
-        }
-    }
 
+    // Healthy path: query only direct semantic children (no full-tree diagnostic crawl).
     ComOwner<IUIAutomationElementArray> directChildren;
     observation.result = root->FindAll (TreeScope_Children, trueCondition.get(), directChildren.put());
     if (FAILED (observation.result) || directChildren.get() == nullptr)
@@ -277,16 +266,12 @@ UiaObservation observeWhilePumpingMessages (HWND windowHandle)
 class ProcessorInventoryWindowsUIAutomationTests : public testing::Test
 {
 protected:
+    // Keep MessageManager / UIA provider process-stable across TEST_F cases.
+    // Per-test deleteInstance/DeletedAtShutdown teardown is the instability root
+    // (v1.1 449f96f removed it for the same reason).
     void SetUp() override
     {
-        MessageManager::deleteInstance();
         MessageManager::getInstance();
-    }
-
-    void TearDown() override
-    {
-        DeletedAtShutdown::deleteAll();
-        MessageManager::deleteInstance();
     }
 };
 } // namespace
@@ -317,9 +302,9 @@ TEST_F (ProcessorInventoryWindowsUIAutomationTests, ExternalClientFindsReadOnlyR
 
     const auto observation = observeWhilePumpingMessages (
         static_cast<HWND> (window.getPeer()->getNativeHandle()));
-    ASSERT_TRUE (SUCCEEDED (observation.result)) << std::hex << observation.result;
-    EXPECT_TRUE (observation.rootFound);
-    EXPECT_TRUE (observation.itemFound) << observation.discoveredElements;
+    ASSERT_TRUE (SUCCEEDED (observation.result)) << describeObservation (observation);
+    EXPECT_TRUE (observation.rootFound) << describeObservation (observation);
+    EXPECT_TRUE (observation.itemFound) << describeObservation (observation);
     EXPECT_EQ (observation.rootType, UIA_ListControlTypeId);
     EXPECT_EQ (observation.itemType, UIA_ListItemControlTypeId);
     EXPECT_EQ (observation.itemName, "Mouse 8 recorder");
@@ -398,13 +383,14 @@ TEST_F (ProcessorInventoryWindowsUIAutomationTests, ExternalClientSeesEveryLoade
     const auto assertInventory = [&] (const UiaObservation& observation,
                                       int visibleRoot)
     {
-        ASSERT_TRUE (SUCCEEDED (observation.result)) << std::hex << observation.result;
-        ASSERT_TRUE (observation.rootFound);
+        ASSERT_TRUE (SUCCEEDED (observation.result)) << describeObservation (observation);
+        ASSERT_TRUE (observation.rootFound) << describeObservation (observation);
         EXPECT_TRUE (observation.directChildrenAreOnlyProcessorItems);
-        EXPECT_EQ (observation.directChildCount, 16);
+        EXPECT_EQ (observation.directChildCount, 16) << describeObservation (observation);
         EXPECT_EQ (observation.directProcessorAutomationIds.joinIntoString (","),
                    expectedIds.joinIntoString (","));
-        ASSERT_EQ (observation.directProcessorItems.size(), 16u);
+        ASSERT_EQ (observation.directProcessorItems.size(), 16u)
+            << describeObservation (observation);
         for (size_t index = 0; index < observation.directProcessorItems.size(); ++index)
         {
             const auto& item = observation.directProcessorItems[index];
@@ -473,9 +459,9 @@ TEST_F (ProcessorInventoryWindowsUIAutomationTests,
 
     const auto first = observeWhilePumpingMessages (
         static_cast<HWND> (window.getPeer()->getNativeHandle()));
-    ASSERT_TRUE (SUCCEEDED (first.result)) << std::hex << first.result;
-    ASSERT_TRUE (first.itemFound);
-    ASSERT_EQ (first.directProcessorItems.size(), 1u);
+    ASSERT_TRUE (SUCCEEDED (first.result)) << describeObservation (first);
+    ASSERT_TRUE (first.itemFound) << describeObservation (first);
+    ASSERT_EQ (first.directProcessorItems.size(), 1u) << describeObservation (first);
     EXPECT_EQ (first.directProcessorItems[0].name, "Mouse 8 recorder");
     EXPECT_TRUE (first.directProcessorItems[0].fullDescription.contains (
         "Constructor-time processor name:"));
@@ -488,9 +474,9 @@ TEST_F (ProcessorInventoryWindowsUIAutomationTests,
 
     const auto second = observeWhilePumpingMessages (
         static_cast<HWND> (window.getPeer()->getNativeHandle()));
-    ASSERT_TRUE (SUCCEEDED (second.result)) << std::hex << second.result;
-    ASSERT_TRUE (second.itemFound);
-    ASSERT_EQ (second.directProcessorItems.size(), 1u);
+    ASSERT_TRUE (SUCCEEDED (second.result)) << describeObservation (second);
+    ASSERT_TRUE (second.itemFound) << describeObservation (second);
+    ASSERT_EQ (second.directProcessorItems.size(), 1u) << describeObservation (second);
     EXPECT_EQ (second.directProcessorItems[0].name, "Mouse 8 recorder");
     EXPECT_TRUE (second.directProcessorItems[0].fullDescription.contains (
         "Constructor-time processor name:"));
