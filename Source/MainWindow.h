@@ -27,6 +27,7 @@
 #include "../JuceLibraryCode/JuceHeader.h"
 #include "Audio/AudioComponent.h"
 #include "Processors/ProcessorGraph/ProcessorGraph.h"
+#include "TestableExport.h"
 #include "UI/ControlPanel.h"
 #include "UI/DefaultConfig.h"
 #include "UI/LookAndFeel/CustomLookAndFeel.h"
@@ -38,7 +39,7 @@ class OpenEphysHttpServer;
 /**
     Custom DocumentWindow class
  */
-class MainDocumentWindow : public DocumentWindow
+class TESTABLE MainDocumentWindow : public DocumentWindow
 {
 public:
     /** Constructor */
