@@ -1,0 +1,40 @@
+{
+  "format_version": "0.0.1",
+  "bundle": {
+    "id": "open-ephys-agent-native",
+    "version": "0.0.1",
+    "platform": "windows",
+    "coverage": "narrow-core-r0"
+  },
+  "official_upstream": {
+    "repository": "open-ephys/plugin-GUI",
+    "tag": "v1.0.2",
+    "commit": "c91afebcfb0678a667fb93f6312ed33c56ec640f",
+    "gui_version": "1.0.2"
+  },
+  "contract": {
+    "id": "open-ephys-agent",
+    "version": "0.0.1",
+    "artifact": "agent_native/open_ephys_agent_contract_v1_0_2_v0_0_1.json"
+  },
+  "mcp": {
+    "protocol_version": "2024-11-05",
+    "modern_protocol_supported": false
+  },
+  "limitations": {
+    "mcp_loopback_scope": "outbound-client-only",
+    "raw_api_bind_address": "0.0.0.0",
+    "raw_api_can_bypass_mcp_recording_approval": true,
+    "deployment_requirement": "trusted-network-or-firewall"
+  },
+  "components": {
+    "capabilities": { "artifact": "Source/Utils/ControlCapability.cpp", "contract_evidence": "source-pinned" },
+    "mcp": { "artifact": "agent_native/open_ephys_mcp_server.py", "contract_evidence": "machine-synchronized" },
+    "skill": { "artifact": "skills/open-ephys-agent-native/SKILL.md", "contract_evidence": "prose-pinned" }
+  },
+  "verification": {
+    "level": "offline-contract-and-ci",
+    "hardware_verified": false,
+    "scientific_verified": false
+  }
+}

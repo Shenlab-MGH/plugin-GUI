@@ -38,6 +38,7 @@
 #include "FilenameConfigWindow.h"
 #include "LookAndFeel/CustomLookAndFeel.h"
 #include <queue>
+#include <utility>
 
 /**
 
@@ -342,6 +343,23 @@ private:
 
 class UtilityButton;
 
+/** Limits an internal recording-force override to one synchronous transition. */
+class TESTABLE ScopedRecordingForce
+{
+public:
+    template <typename Transition>
+    void run (bool shouldForce, Transition&& transition)
+    {
+        const ScopedValueSetter<bool> scope (active, shouldForce);
+        std::forward<Transition> (transition)();
+    }
+
+    bool isActive() const noexcept { return active; }
+
+private:
+    bool active = false;
+};
+
 /**
 
   Provides general application controls along the top of the MainWindow.
@@ -584,7 +602,7 @@ private:
     bool isConsoleApp;
     bool open = false;
     bool hasRecorded = false;
-    bool forceRecording = false;
+    ScopedRecordingForce recordingForce;
     int lastEngineIndex = -1;
 
     Path p1, p2;

@@ -9,9 +9,15 @@ on:
       - 'Source/**'
       - 'CMakeLists.txt'
       - 'HelperFunctions.cmake'
+      - 'agent_native/**'
+      - 'skills/open-ephys-agent-native/**'
+      - 'Tests/AgentNative/**'
+      - '.github/workflows/tests.yml'
     branches:
       - 'development'
       - 'testing'
+      - 'agent-native-v102-record-safety'
+      - 'agent-native-v102-core-r0-release'
 
 jobs:
   unit-tests:
@@ -20,6 +26,11 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: run Agent Native contract tests
+      run: |
+        python3 -m unittest Tests.AgentNative.test_open_ephys_mcp_r010 Tests.AgentNative.test_open_ephys_release_bundle
     - name: build
       env:
         CC: gcc-10

@@ -26,6 +26,7 @@
 
 #include "../../JuceLibraryCode/JuceHeader.h"
 #include "../TestableExport.h"
+#include <optional>
 #include <vector>
 
 enum class ControlCapabilityKind
@@ -48,6 +49,17 @@ struct ControlApiOperation
     StringArray responseFields;
 };
 
+struct ControlModeSemantics
+{
+    String field;
+    StringArray allowedValues;
+    StringArray onValues;
+    StringArray offValues;
+    String onCommandValue;
+    String offCommandValue;
+    String responseMeaning;
+};
+
 struct ControlCapability
 {
     String id;
@@ -56,6 +68,7 @@ struct ControlCapability
     ControlCapabilityKind kind;
     String uiaAutomationId;
     std::vector<ControlApiOperation> operations;
+    std::optional<ControlModeSemantics> modeSemantics;
 };
 
 TESTABLE const std::vector<ControlCapability>& getCoreControlCapabilities();

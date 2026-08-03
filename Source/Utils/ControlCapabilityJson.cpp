@@ -63,6 +63,7 @@ nlohmann::json stringArrayToJson (const StringArray& values)
 nlohmann::json controlCapabilitiesToJson (const std::vector<ControlCapability>& capabilities)
 {
     nlohmann::json result;
+    result["contract_version"] = "0.0.1";
     result["capabilities"] = nlohmann::json::array();
 
     for (const auto& capability : capabilities)
@@ -82,6 +83,21 @@ nlohmann::json controlCapabilitiesToJson (const std::vector<ControlCapability>& 
                                      { "path", operation.path.toStdString() },
                                      { "request_fields", stringArrayToJson (operation.requestFields) },
                                      { "response_fields", stringArrayToJson (operation.responseFields) } });
+        }
+
+        if (capability.modeSemantics.has_value())
+        {
+            const auto& semantics = *capability.modeSemantics;
+            item["mode_semantics"] = {
+                { "field", semantics.field.toStdString() },
+                { "allowed_values", stringArrayToJson (semantics.allowedValues) },
+                { "on_values", stringArrayToJson (semantics.onValues) },
+                { "off_values", stringArrayToJson (semantics.offValues) },
+                { "commands",
+                  { { "on", { { semantics.field.toStdString(), semantics.onCommandValue.toStdString() } } },
+                    { "off", { { semantics.field.toStdString(), semantics.offCommandValue.toStdString() } } } } },
+                { "response_meaning", semantics.responseMeaning.toStdString() }
+            };
         }
 
         result["capabilities"].push_back (std::move (item));
