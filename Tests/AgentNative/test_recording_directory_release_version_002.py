@@ -45,17 +45,18 @@ OFFICIAL_DEPLOY_WORKFLOWS = (
     ROOT / ".github" / "workflows" / "windows.yml",
     ROOT / ".github" / "workflows" / "linux.yml",
 )
+CORE_CONTRACT_WORKFLOW = ROOT / ".github" / "workflows" / "agent-native-core.yml"
 CANONICAL_DEPLOY_GUARD = "github.repository == 'open-ephys/plugin-GUI'"
 STEP_START = re.compile(r"^(?P<indent>\s*)-\s+")
 
 
-def _workflow_steps(workflow: Path) -> list[list[str]]:
-    """Return top-level action step blocks (indent of four spaces under jobs.*.steps)."""
+def _workflow_steps(workflow: Path, *, step_indent: int = 4) -> list[list[str]]:
+    """Return action step blocks at the requested workflow indentation."""
     lines = workflow.read_text(encoding="utf-8").splitlines()
     starts = [
         index
         for index, line in enumerate(lines)
-        if (match := STEP_START.match(line)) and len(match.group("indent")) == 4
+        if (match := STEP_START.match(line)) and len(match.group("indent")) == step_indent
     ]
     return [
         lines[start : starts[position + 1] if position + 1 < len(starts) else len(lines)]
@@ -85,6 +86,29 @@ def _step_conditions(step: list[str]) -> list[str]:
 
 
 class RecordingDirectoryReleaseVersion002Tests(unittest.TestCase):
+    def test_dependency_independent_contract_checkout_fetches_full_history(self):
+        """Pinned-base ancestry checks require more than checkout's depth-one default."""
+        steps = _workflow_steps(CORE_CONTRACT_WORKFLOW, step_indent=6)
+        contract_test_indexes = [
+            index
+            for index, step in enumerate(steps)
+            if _step_name(step) == "Run dependency-independent contract tests"
+        ]
+        self.assertEqual(len(contract_test_indexes), 1)
+        contract_test_index = contract_test_indexes[0]
+
+        checkout_steps = [
+            step
+            for step in steps[:contract_test_index]
+            if any(line.strip().startswith("- uses: actions/checkout@") for line in step)
+        ]
+        self.assertEqual(len(checkout_steps), 1)
+        self.assertRegex(
+            "\n".join(checkout_steps[0]),
+            re.compile(r"(?m)^\s+fetch-depth:\s*0\s*$"),
+            "the checkout used by contract tests must fetch full Git history",
+        )
+
     def test_active_contract_and_parity_filenames_are_0_0_2(self):
         self.assertTrue(CORE_CONTRACT_PATH.is_file(), "immutable 0.0.1 core contract must remain available")
         self.assertTrue(CONTRACT_PATH.is_file(), f"missing active contract {CONTRACT_PATH.name}")
