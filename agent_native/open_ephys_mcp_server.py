@@ -285,6 +285,10 @@ class McpServer:
         required = {"protocolVersion", "capabilities", "clientInfo"}
         if not required.issubset(params) or not set(params).issubset(required | {"_meta"}) or not isinstance(params["protocolVersion"], str) or not params["protocolVersion"] or not isinstance(params["capabilities"], dict) or not isinstance(params["clientInfo"], dict) or ("_meta" in params and not isinstance(params["_meta"], dict)):
             raise JsonRpcError(INVALID_PARAMS, "Invalid legacy initialize parameters.")
+        client_info = params["clientInfo"]
+        if (not isinstance(client_info.get("name"), str) or not client_info["name"]
+                or not isinstance(client_info.get("version"), str) or not client_info["version"]):
+            raise JsonRpcError(INVALID_PARAMS, "Invalid legacy initialize parameters.")
         self.connection_state = "initialize_responded"
         return {"protocolVersion": PROTOCOL_VERSION, "capabilities": {"tools": {}}, "serverInfo": {"name": self.contract["mcp"]["server_name"], "version": CONTRACT_VERSION}}
 
@@ -325,6 +329,18 @@ class McpServer:
             raise ToolError("capability_contract_mismatch", "Open Ephys capabilities do not exactly match the pinned Core R0 contract.")
         return actual
 
+    def _raise_mutation_outcome_unknown(self, requested: dict[str, Any], put_error: ToolError, path: str, validator) -> None:
+        details: dict[str, Any] = {"requested": requested, "put_error": put_error.payload()["error"]}
+        try:
+            details["observed"] = validator(self.api.request("GET", path))
+        except ToolError as readback_error:
+            details["readback_error"] = readback_error.payload()["error"]
+        raise ToolError(
+            "mutation_outcome_unknown",
+            "Open Ephys may have committed the mutation, but the write response was not authoritative.",
+            **details,
+        )
+
     def _execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         capabilities = self._verify_capabilities()
         if name == "oe_get_capabilities": return capabilities
@@ -338,14 +354,29 @@ class McpServer:
             before, desired = validate_status(self.api.request("GET", "/api/status")), arguments["mode"]
             if desired == "RECORD" and arguments.get("approve_recording") is not True:
                 raise ToolError("recording_approval_required", "Entering RECORD requires approve_recording=true in this call.")
-            response = validate_status(self.api.request("PUT", "/api/status", {"mode": desired}))
+            requested = {"mode": desired}
+            try:
+                response = validate_status(self.api.request("PUT", "/api/status", requested))
+            except ApiHttpError as exc:
+                if exc.details["status"] is not None:
+                    raise
+                self._raise_mutation_outcome_unknown(requested, exc, "/api/status", validate_status)
+            except ToolError as exc:
+                self._raise_mutation_outcome_unknown(requested, exc, "/api/status", validate_status)
             after = validate_status(self.api.request("GET", "/api/status"))
             if response["mode"] != desired or after["mode"] != desired:
                 raise ToolError("postcondition_failed", "Open Ephys did not confirm the requested status after mutation.", requested_mode=desired, actual_mode=after["mode"])
-            return {"before": before, "requested": {"mode": desired}, "after": after}
+            return {"before": before, "requested": requested, "after": after}
         if name == "oe_set_recording_options":
             before = validate_options(self.api.request("GET", "/api/recording/options"))
-            response = validate_options(self.api.request("PUT", "/api/recording/options", arguments), mutation_response=True)
+            try:
+                response = validate_options(self.api.request("PUT", "/api/recording/options", arguments), mutation_response=True)
+            except ApiHttpError as exc:
+                if exc.details["status"] is not None:
+                    raise
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording/options", validate_options)
+            except ToolError as exc:
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording/options", validate_options)
             after = validate_options(self.api.request("GET", "/api/recording/options"))
             expected = {**before, **arguments}
             if response != expected or after != expected:
@@ -353,7 +384,14 @@ class McpServer:
             return {"before": before, "requested": arguments, "after": after}
         if name == "oe_set_recording_filename":
             before = filename_projection(self.api.request("GET", "/api/recording"))
-            response = filename_projection(self.api.request("PUT", "/api/recording", arguments))
+            try:
+                response = filename_projection(self.api.request("PUT", "/api/recording", arguments))
+            except ApiHttpError as exc:
+                if exc.details["status"] is not None:
+                    raise
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", filename_projection)
+            except ToolError as exc:
+                self._raise_mutation_outcome_unknown(arguments, exc, "/api/recording", filename_projection)
             after = filename_projection(self.api.request("GET", "/api/recording"))
             expected = {**before, **arguments}
             if response != expected or after != expected:

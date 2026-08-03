@@ -9,6 +9,8 @@ BUNDLE_PATH = ROOT / "agent_native" / "open_ephys_agent_release_bundle.json"
 CONTRACT_PATH = ROOT / "agent_native" / "open_ephys_agent_contract_v1_0_2_r0_1_0.json"
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "tests.yml"
 README_PATH = ROOT / "agent_native" / "README.md"
+SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
+HTTP_SERVER_PATH = ROOT / "Source" / "Utils" / "OpenEphysHttpServer.h"
 
 
 def artifact_path(root, value):
@@ -31,6 +33,7 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertEqual(bundle["contract"]["version"], contract["contract"]["version"])
         self.assertEqual(bundle["verification"], {"level": "offline-contract-and-ci", "hardware_verified": False, "scientific_verified": False})
         self.assertFalse(bundle["mcp"]["modern_protocol_supported"])
+        self.assertEqual(bundle["limitations"], {"mcp_loopback_scope": "outbound-client-only", "raw_api_bind_address": "0.0.0.0", "raw_api_can_bypass_mcp_recording_approval": True, "deployment_requirement": "trusted-network-or-firewall"})
         for component in bundle["components"].values(): self.assertTrue(artifact_path(ROOT, component["artifact"]).is_file())
 
     def test_provenance_is_ancestral_and_workflow_runs_r0_tests(self):
@@ -53,7 +56,15 @@ class ReleaseBundleTests(unittest.TestCase):
         readme = README_PATH.read_text(encoding="utf-8")
         for required in ("v1.0.2", "r0.1.0", "2024-11-05", "exactly ten", "hardware_verified:false", "scientific_verified:false"):
             self.assertIn(required, readme)
-        self.assertNotIn("raw API", readme)
+
+    def test_exposure_boundary_is_explicit_in_source_and_operator_docs(self):
+        source = HTTP_SERVER_PATH.read_text(encoding="utf-8")
+        self.assertIn('svr_->listen ("0.0.0.0", PORT)', source)
+        for document in (README_PATH.read_text(encoding="utf-8"), SKILL_PATH.read_text(encoding="utf-8")):
+            with self.subTest(document=document[:40]):
+                normalized = " ".join(document.split())
+                for required in ("MCP bridge outbound client", "0.0.0.0", "raw Open Ephys API", "bypass MCP RECORD approval", "trusted network or firewall", "no listener or C++ change"):
+                    self.assertIn(required, normalized)
 
 
 if __name__ == "__main__": unittest.main()

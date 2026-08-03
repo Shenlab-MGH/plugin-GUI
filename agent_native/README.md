@@ -6,7 +6,10 @@ v1.0.2 baseline. It pins agent contract r0.1.0 and MCP protocol 2024-11-05.
 It publishes exactly ten explicit Core R0 tools for capabilities, status,
 recording options, recording filename components, CPU, disk, and elapsed time.
 Every call verifies the exact pinned capability document before accessing Open
-Ephys. The HTTP transport is loopback-only and refuses redirects.
+Ephys. Only the MCP bridge outbound client is loopback-only and refuses
+redirects. The raw Open Ephys API listener still binds `0.0.0.0`, remains
+network-exposed, and can bypass MCP RECORD approval. Run it only on a trusted
+network or firewall. There is no listener or C++ change in this slice.
 
 Status, options, and filename mutations use pre-read, write, and post-read
 verification. RECORD requires same-call `approve_recording:true`, which is

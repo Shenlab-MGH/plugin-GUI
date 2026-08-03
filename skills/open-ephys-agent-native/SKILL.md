@@ -14,8 +14,11 @@ Use only these tools: `oe_get_capabilities`, `oe_get_status`, `oe_set_status`,
 `oe_get_disk`, and `oe_get_time`.
 
 Read the relevant state before a mutation and inspect its returned readback.
-Every tool independently verifies the exact nine Core R0 capabilities. The
-transport is loopback HTTP only and rejects redirects.
+Every tool independently verifies the exact nine Core R0 capabilities. Only
+the MCP bridge outbound client is loopback-only and rejects redirects. The raw
+Open Ephys API listener binds `0.0.0.0`, remains network-exposed, and can bypass
+MCP RECORD approval. Use a trusted network or firewall. This slice makes no
+listener or C++ change.
 
 To request `RECORD`, include `approve_recording:true` in that same
 `oe_set_status` call. This approval is local safety metadata and is never sent

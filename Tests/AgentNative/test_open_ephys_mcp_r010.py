@@ -190,12 +190,20 @@ class McpR010Tests(unittest.TestCase):
                 self.assertEqual(self.server.handle(request)["error"]["code"], -32602)
 
     def test_newer_legacy_client_can_negotiate_pinned_server_protocol(self):
-        response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "mcp", "version": "0.1.0"}, "_meta": {}}})
+        response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "mcp", "version": "0.1.0", "title": "Official MCP Python SDK"}, "_meta": {}}})
         self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
 
     def test_initialize_rejects_nonobject_meta(self):
-        response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {}, "_meta": []}})
+        response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "mcp", "version": "0.1.0"}, "_meta": []}})
         self.assertEqual(response["error"]["code"], -32602)
+
+    def test_initialize_requires_nonempty_string_client_identity(self):
+        invalid_client_info = ({}, {"name": "mcp"}, {"version": "0.1.0"}, {"name": "", "version": "0.1.0"}, {"name": "mcp", "version": ""}, {"name": 1, "version": "0.1.0"}, {"name": "mcp", "version": []})
+        for index, client_info in enumerate(invalid_client_info):
+            with self.subTest(client_info=client_info):
+                server = self.module.McpServer(CONTRACT_PATH, self.api.base_url)
+                response = server.handle({"jsonrpc": "2.0", "id": index, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": client_info}})
+                self.assertEqual(response["error"]["code"], -32602)
 
     def test_loopback_only_and_redirects_are_rejected(self):
         with self.assertRaises(ValueError): self.module.ApiClient("https://example.invalid")
@@ -248,6 +256,70 @@ class McpR010Tests(unittest.TestCase):
         self.api.recording_put_response = (200, self.api.recording)
         self.assert_error("oe_set_recording_filename", {"base_text": "unreadback"}, "postcondition_failed")
 
+    def test_committed_mutations_with_transport_failure_report_unknown_outcome(self):
+        self.ready_server()
+        cases = (
+            ("oe_set_status", {"mode": "ACQUIRE"}, "/api/status", "mode", "ACQUIRE"),
+            ("oe_set_recording_options", {"expanded": True}, "/api/recording/options", "expanded", True),
+            ("oe_set_recording_filename", {"base_text": "mouse"}, "/api/recording", "base_text", "mouse"),
+        )
+        for name, arguments, path, field, expected in cases:
+            with self.subTest(name=name):
+                original = self.server.api.request
+                def uncertain_request(method, request_path, body=None, *, _original=original, _path=path):
+                    result = _original(method, request_path, body)
+                    if method == "PUT" and request_path == _path:
+                        raise self.module.ApiHttpError(None, "connection lost after commit")
+                    return result
+                self.server.api.request = uncertain_request
+                result, payload = self.call(name, arguments)
+                self.server.api.request = original
+                self.assertTrue(result["isError"])
+                self.assertEqual(payload["error"]["code"], "mutation_outcome_unknown")
+                self.assertEqual(payload["error"]["requested"], arguments)
+                self.assertEqual(payload["error"]["observed"][field], expected)
+
+    def test_committed_mutations_with_invalid_put_response_report_unknown_outcome(self):
+        self.ready_server()
+        cases = (
+            ("oe_set_status", {"mode": "ACQUIRE"}, "/api/status", "mode", "ACQUIRE"),
+            ("oe_set_recording_options", {"expanded": True}, "/api/recording/options", "expanded", True),
+            ("oe_set_recording_filename", {"base_text": "mouse"}, "/api/recording", "base_text", "mouse"),
+        )
+        for name, arguments, path, field, expected in cases:
+            with self.subTest(name=name):
+                original = self.server.api.request
+                def invalid_response(method, request_path, body=None, *, _original=original, _path=path):
+                    result = _original(method, request_path, body)
+                    return {} if method == "PUT" and request_path == _path else result
+                self.server.api.request = invalid_response
+                result, payload = self.call(name, arguments)
+                self.server.api.request = original
+                self.assertTrue(result["isError"])
+                self.assertEqual(payload["error"]["code"], "mutation_outcome_unknown")
+                self.assertEqual(payload["error"]["requested"], arguments)
+                self.assertEqual(payload["error"]["observed"][field], expected)
+
+    def test_unknown_mutation_outcome_includes_readback_failure_details(self):
+        self.ready_server()
+        original = self.server.api.request
+        committed = False
+        def uncertain_and_unreadable(method, path, body=None):
+            nonlocal committed
+            if committed and method == "GET" and path == "/api/status":
+                raise self.module.ApiHttpError(None, "readback unavailable")
+            result = original(method, path, body)
+            if method == "PUT" and path == "/api/status":
+                committed = True
+                raise self.module.ApiHttpError(None, "connection lost after commit")
+            return result
+        self.server.api.request = uncertain_and_unreadable
+        result, payload = self.call("oe_set_status", {"mode": "ACQUIRE"})
+        self.assertTrue(result["isError"])
+        self.assertEqual(payload["error"]["code"], "mutation_outcome_unknown")
+        self.assertEqual(payload["error"]["readback_error"]["code"], "api_http_error")
+        self.assertNotIn("observed", payload["error"])
+
     def test_filename_validation_precedes_http_mutation(self):
         self.ready_server()
         for value in ("C:\\data", "../data", "mouse/probe", "mouse\x00probe", "mouse*probe", "CON", "COM\u00b9", "mouse."):
@@ -259,7 +331,7 @@ class McpR010Tests(unittest.TestCase):
         for request_id in (True, None, [], {}, 1.5, math.nan, math.inf):
             response = self.server.handle({"jsonrpc": "2.0", "id": request_id, "method": "tools/list", "params": {}})
             self.assertIsNone(response["id"]); self.assertEqual(response["error"]["code"], -32600)
-        stdin, stdout = io.StringIO("not json\n" + json.dumps({"jsonrpc": "2.0", "id": 9, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {}}}) + "\n"), io.StringIO()
+        stdin, stdout = io.StringIO("not json\n" + json.dumps({"jsonrpc": "2.0", "id": 9, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}}) + "\n"), io.StringIO()
         old_stdin, old_stdout = self.module.sys.stdin, self.module.sys.stdout
         try:
             self.module.sys.stdin, self.module.sys.stdout = stdin, stdout; self.module.run_stdio(self.module.McpServer(CONTRACT_PATH, self.api.base_url))

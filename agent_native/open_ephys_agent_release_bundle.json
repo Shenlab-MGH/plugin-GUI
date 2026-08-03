@@ -21,6 +21,12 @@
     "protocol_version": "2024-11-05",
     "modern_protocol_supported": false
   },
+  "limitations": {
+    "mcp_loopback_scope": "outbound-client-only",
+    "raw_api_bind_address": "0.0.0.0",
+    "raw_api_can_bypass_mcp_recording_approval": true,
+    "deployment_requirement": "trusted-network-or-firewall"
+  },
   "components": {
     "capabilities": { "artifact": "Source/Utils/ControlCapability.cpp", "contract_evidence": "source-pinned" },
     "mcp": { "artifact": "agent_native/open_ephys_mcp_server.py", "contract_evidence": "machine-synchronized" },
