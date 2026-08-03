@@ -53,7 +53,7 @@ using json = nlohmann::json;
  * The API is "RESTful", such that the resource URLs are:
  * 
  * - GET /api/capabilities :
- *          returns a discovery-only JSON capability manifest (contract_version 0.1.1).
+ *          returns a discovery-only JSON capability manifest (contract_version 0.0.1).
  *          This surface does not authorize or prove mutation behavior.
  *
  * - GET /api/config :

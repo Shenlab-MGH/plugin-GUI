@@ -22,7 +22,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/capabilities":
-            payload = json.loads((ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_r0_1_0.json").read_text(encoding="utf-8"))["api"]["expected_capabilities_response"]
+            payload = json.loads((ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_0_0_1.json").read_text(encoding="utf-8"))["api"]["expected_capabilities_response"]
         elif self.path == "/api/status":
             payload = {"mode": "IDLE"}
         else:

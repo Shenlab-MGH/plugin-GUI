@@ -1,4 +1,4 @@
-# Open Ephys v1.1.0 agent-native core r0.1.0
+# Open Ephys v1.1.0 agent-native core 0.0.1
 
 This directory contains the smallest Windows MCP surface for the Open Ephys
 v1.1.0 agent-native prerelease. It exposes existing Open Ephys operations only:
@@ -7,8 +7,8 @@ capability discovery, status, recording filename text, and CPU usage.
 ## Pins
 
 - Open Ephys baseline: `v1.1.0`
-- agent contract and bundle: `r0.1.0`
-- API capability contract: `0.1.1`
+- agent contract and bundle: `0.0.1`
+- API capability contract: `0.0.1`
 - MCP protocol: legacy `2024-11-05`
 - modern MCP: not supported
 
@@ -39,7 +39,7 @@ fixture. Mutations perform pre-read, mutation, and post-read. Entering RECORD
 requires the explicit `approve_recording=true` argument. HTTP 400/409,
 unexpected schemas, and failed postconditions become MCP tool errors.
 
-The upstream recording endpoint is not transactional. For r0.1.0 the filename
+The upstream recording endpoint is not transactional. For 0.0.1 the filename
 tool therefore accepts exactly one component per call and rejects Windows path,
 traversal, control-character, reserved-name, and invalid-character forms before
 HTTP. This keeps the required filename SET capability without claiming atomic

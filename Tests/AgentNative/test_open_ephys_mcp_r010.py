@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_r0_1_0.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_0_0_1.json"
 BUNDLE_PATH = AGENT_DIR / "open_ephys_agent_release_bundle.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
@@ -151,9 +151,9 @@ class McpR010Tests(unittest.TestCase):
         return response["result"], json.loads(response["result"]["content"][0]["text"])
 
     def test_contract_pins_release_protocol_and_exact_tools(self):
-        self.assertEqual(self.contract["schema_version"], "r0.1.0")
-        self.assertEqual(self.contract["contract"]["version"], "r0.1.0")
-        self.assertEqual(self.contract["bundle"]["version"], "r0.1.0")
+        self.assertEqual(self.contract["schema_version"], "0.0.1")
+        self.assertEqual(self.contract["contract"]["version"], "0.0.1")
+        self.assertEqual(self.contract["bundle"]["version"], "0.0.1")
         self.assertEqual(self.contract["baseline"]["version"], "1.1.0")
         self.assertEqual(
             self.contract["baseline"]["fork_source_commit"],
@@ -173,8 +173,8 @@ class McpR010Tests(unittest.TestCase):
 
     def test_release_bundle_pins_the_same_contract_and_legacy_boundary(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(bundle["format_version"], "r0.1.0")
-        self.assertEqual(bundle["bundle"]["version"], "r0.1.0")
+        self.assertEqual(bundle["format_version"], "0.0.1")
+        self.assertEqual(bundle["bundle"]["version"], "0.0.1")
         self.assertEqual(bundle["official_upstream"]["tag"], "v1.1.0")
         self.assertEqual(
             bundle["fork_source_commit"],
@@ -454,7 +454,7 @@ class McpR010Tests(unittest.TestCase):
 
     def test_skill_is_pinned_to_the_same_minimal_surface(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        self.assertIn("contract: r0.1.0", skill)
+        self.assertIn("contract: 0.0.1", skill)
         self.assertIn("Open Ephys baseline: 1.1.0", skill)
         for tool in self.contract["tools"]:
             self.assertIn(f"`{tool['name']}`", skill)

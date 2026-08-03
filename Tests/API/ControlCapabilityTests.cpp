@@ -204,7 +204,7 @@ TEST (ControlCapabilityTests, SerialisesDiscoveryOnlyCapabilityContract)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
 
-    EXPECT_EQ (document["contract_version"], "0.1.1");
+    EXPECT_EQ (document["contract_version"], "0.0.1");
     EXPECT_EQ (document["surface"], "discovery_only");
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), expectedCapabilities.size());

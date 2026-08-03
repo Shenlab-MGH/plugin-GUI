@@ -1,13 +1,13 @@
 ---
 name: open-ephys-agent-native
-description: Safely inspect and control the Open Ephys v1.1.0 core through the r0.1.0 MCP tools. Use for capability discovery, acquisition or recording mode changes, recording filename changes, and CPU/status reads on the Windows Open Ephys agent-native build.
+description: Safely inspect and control the Open Ephys v1.1.0 core through the 0.0.1 MCP tools. Use for capability discovery, acquisition or recording mode changes, recording filename changes, and CPU/status reads on the Windows Open Ephys agent-native build.
 ---
 
 # Open Ephys Agent Native
 
 Use only the MCP tools declared here. This skill is pinned to:
 
-- contract: r0.1.0
+- contract: 0.0.1
 - Open Ephys baseline: 1.1.0
 - MCP protocol: legacy 2024-11-05
 
@@ -32,4 +32,4 @@ Use only the MCP tools declared here. This skill is pinned to:
 - `oe_set_recording_filename`: update exactly one validated filename component with readback.
 - `oe_get_cpu`: read CPU usage from 0.0 to 1.0.
 
-Do not assume tools, controls, or workflows outside this list exist in r0.1.0.
+Do not assume tools, controls, or workflows outside this list exist in 0.0.1.

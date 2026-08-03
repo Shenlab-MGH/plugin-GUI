@@ -1,5 +1,5 @@
 {
-  "schema_version": "r0.1.0",
+  "schema_version": "0.0.1",
   "baseline": {
     "version": "1.1.0",
     "upstream_release_commit": "c2ce076f5b2d4182222f9d0fd9bb9b97a60582e7"

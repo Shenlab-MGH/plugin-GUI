@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal legacy MCP bridge for the Open Ephys v1.1.0 r0.1.0 core."""
+"""Minimal legacy MCP bridge for the Open Ephys v1.1.0 core 0.0.1."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from typing import Any
 
 
 PROTOCOL_VERSION = "2024-11-05"
-CONTRACT_VERSION = "r0.1.0"
-DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_r0_1_0.json")
+CONTRACT_VERSION = "0.0.1"
+DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_0_0_1.json")
 EXPECTED_TOOL_NAMES = [
     "oe_get_capabilities",
     "oe_get_status",
@@ -82,7 +82,7 @@ def load_contract(path: Path) -> dict[str, Any]:
         "baseline_version": "1.1.0",
         "protocol_version": PROTOCOL_VERSION,
         "modern_protocol_supported": False,
-        "capabilities_contract_version": "0.1.1",
+        "capabilities_contract_version": CONTRACT_VERSION,
         "tool_names": EXPECTED_TOOL_NAMES,
     }
     actual = {
@@ -96,13 +96,13 @@ def load_contract(path: Path) -> dict[str, Any]:
         "tool_names": [tool.get("name") for tool in contract.get("tools", []) if isinstance(tool, dict)],
     }
     if actual != expected:
-        raise ValueError(f"Contract pins do not match the r0.1.0 server: {actual!r}")
+        raise ValueError(f"Contract pins do not match the 0.0.1 server: {actual!r}")
 
     capabilities = (contract.get("api") or {}).get("expected_capabilities_response")
     if not isinstance(capabilities, dict):
         raise ValueError("Contract is missing api.expected_capabilities_response.")
-    if capabilities.get("contract_version") != "0.1.1":
-        raise ValueError("Capability fixture must pin API contract 0.1.1.")
+    if capabilities.get("contract_version") != CONTRACT_VERSION:
+        raise ValueError("Capability fixture must pin API contract 0.0.1.")
     return contract
 
 
@@ -365,7 +365,7 @@ class McpServer:
         if actual != expected:
             raise ToolError(
                 "capability_contract_mismatch",
-                "Open Ephys capabilities do not exactly match the pinned r0.1.0 contract.",
+                "Open Ephys capabilities do not exactly match the pinned 0.0.1 contract.",
             )
         return actual
 
