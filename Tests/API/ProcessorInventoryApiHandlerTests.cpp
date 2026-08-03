@@ -1,12 +1,88 @@
 #include "../../Source/Utils/ProcessorInventoryApiHandler.h"
+#include "../../Source/Processors/EmptyProcessor/EmptyProcessor.h"
+#include "../../Source/UI/EditorViewport.h"
 #include "gtest/gtest.h"
 
 #include <chrono>
 #include <functional>
 #include <stdexcept>
+#include <vector>
 
 using json = nlohmann::json;
 using namespace std::chrono_literals;
+
+namespace
+{
+class ProcessorInventoryTestProcessor : public GenericProcessor
+{
+public:
+    explicit ProcessorInventoryTestProcessor (const String& name)
+        : GenericProcessor (name, true)
+    {
+    }
+
+    void process (AudioBuffer<float>&) override {}
+};
+} // namespace
+
+TEST (ProcessorInventoryApiHandlerTests,
+      BuildsApiSnapshotInUiOrderWhileExcludingEmptyAndDuplicateNodes)
+{
+    ProcessorInventoryTestProcessor firstRoot ("Probe 1");
+    ProcessorInventoryTestProcessor sharedDownstream ("Shared record node");
+    EmptyProcessor placeholder;
+    ProcessorInventoryTestProcessor eighthRoot ("Probe 8");
+    firstRoot.setNodeId (101);
+    sharedDownstream.setNodeId (303);
+    placeholder.setProcessorType (Plugin::Processor::EMPTY);
+    placeholder.setNodeId (777);
+    eighthRoot.setNodeId (801);
+    sharedDownstream.setSourceNode (&firstRoot);
+
+    const Array<GenericProcessor*> graphOrder {
+        &eighthRoot,
+        &sharedDownstream,
+        &placeholder,
+        nullptr,
+        &firstRoot,
+        &sharedDownstream
+    };
+
+    const auto apiDocument = buildProcessorInventoryDocument (
+        graphOrder,
+        [] (GenericProcessor* processor)
+        {
+            json item {
+                { "id", processor->getNodeId() },
+                { "name", processor->getName().toStdString() },
+                { "parameters", json::array() },
+                { "streams", json::array() }
+            };
+            const auto* predecessor = processor->getSourceNode();
+            item["predecessor"] = predecessor == nullptr
+                                      ? json (nullptr)
+                                      : json (predecessor->getNodeId());
+            return item;
+        });
+    const auto uiSnapshot = buildProcessorAccessibilitySnapshot (graphOrder);
+    const std::vector<int> expectedNodeIds { 801, 303, 101 };
+
+    ASSERT_TRUE (apiDocument.contains ("processors"));
+    ASSERT_EQ (apiDocument["processors"].size(), expectedNodeIds.size());
+    ASSERT_EQ (uiSnapshot.size(), expectedNodeIds.size());
+    for (size_t index = 0; index < expectedNodeIds.size(); ++index)
+    {
+        EXPECT_EQ (apiDocument["processors"][index]["id"], expectedNodeIds[index]);
+        EXPECT_EQ (uiSnapshot[index].nodeId, expectedNodeIds[index]);
+        EXPECT_EQ (apiDocument["processors"][index]["name"],
+                   uiSnapshot[index].name.toStdString());
+        const auto apiPredecessor = apiDocument["processors"][index]["predecessor"];
+        if (uiSnapshot[index].predecessorNodeId.has_value())
+            EXPECT_EQ (apiPredecessor, *uiSnapshot[index].predecessorNodeId);
+        else
+            EXPECT_TRUE (apiPredecessor.is_null());
+    }
+}
 
 TEST (ProcessorInventoryApiHandlerTests, DispatchesReadAndPreservesTheExistingOfficialSchema)
 {
