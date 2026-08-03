@@ -15,6 +15,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         "oe.control.recording.new_directory",
         "oe.control.recording.force_new_directory",
         "oe.control.signal_chain.configuration",
+        "oe.control.signal_chain.processors",
         "oe.status.cpu_usage",
         "oe.status.disk_usage",
         "oe.status.elapsed_time"
@@ -27,10 +28,8 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
         const auto* capability = findControlCapability (id);
         ASSERT_NE (capability, nullptr) << id;
         EXPECT_EQ (capability->id, id);
-        if (id == "oe.control.signal_chain.configuration")
-            EXPECT_TRUE (capability->uiaAutomationId.isEmpty());
-        else
-            EXPECT_EQ (capability->uiaAutomationId, id);
+        EXPECT_EQ (capability->uiaAutomationId,
+                   id == "oe.control.signal_chain.configuration" ? String() : id);
         EXPECT_TRUE (capability->name.isNotEmpty());
         EXPECT_TRUE (capability->description.isNotEmpty());
         EXPECT_FALSE (capability->operations.empty());
@@ -40,9 +39,9 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
 TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
-    EXPECT_EQ (document["contract_version"], "0.1.3");
+    EXPECT_EQ (document["contract_version"], "0.1.4");
     ASSERT_TRUE (document["capabilities"].is_array());
-    ASSERT_EQ (document["capabilities"].size(), 11);
+    ASSERT_EQ (document["capabilities"].size(), 12);
 
     const auto acquisition = std::find_if (document["capabilities"].begin(),
                                            document["capabilities"].end(),
@@ -52,6 +51,22 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
     EXPECT_EQ ((*acquisition)["uia"]["automation_id"], "oe.control.acquisition");
     EXPECT_EQ ((*acquisition)["api"][0]["path"], "/api/status");
     EXPECT_EQ ((*acquisition)["api"][0]["method"], "GET");
+}
+
+TEST (ControlCapabilityTests, DefinesLoadedProcessorsAsReadOnlyExistingRouteInventory)
+{
+    const auto* inventory = findControlCapability ("oe.control.signal_chain.processors");
+    ASSERT_NE (inventory, nullptr);
+    EXPECT_EQ (inventory->kind, ControlCapabilityKind::collection);
+    EXPECT_EQ (inventory->uiaAutomationId, "oe.control.signal_chain.processors");
+    ASSERT_EQ (inventory->operations.size(), (size_t) 1);
+
+    const auto& read = inventory->operations[0];
+    EXPECT_EQ (read.operation, "read");
+    EXPECT_EQ (read.method, "GET");
+    EXPECT_EQ (read.path, "/api/processors");
+    EXPECT_TRUE (read.requestFields.isEmpty());
+    EXPECT_EQ (read.responseFields, StringArray ({ "processors" }));
 }
 
 TEST (ControlCapabilityTests, DefinesReadOnlySignalChainConfigurationWithTransparentUiaGap)

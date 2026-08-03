@@ -63,6 +63,7 @@ class FakeOpenEphysApi:
         }
         self.cpu = {"usage": 0.25}
         self.config = {"info": "<SETTINGS><SIGNALCHAIN /></SETTINGS>"}
+        self.processors = {"processors": []}
         self.disk = {"capability": "oe.status.disk_usage", "usage": 0.5, "minimum": 0.0, "maximum": 1.0, "read_only": True}
         self.time = {"capability": "oe.status.elapsed_time", "display": "00:00:00", "elapsed_milliseconds": 0, "mode": "IDLE", "reference": "acquisition", "running": False, "recording": False, "read_only": True}
         self.status_put_response = None
@@ -96,6 +97,7 @@ class FakeOpenEphysApi:
                     return
                 payloads = {"/api/status": {"mode": owner.mode}, "/api/recording/options": owner.options,
                             "/api/recording": owner.recording, "/api/config": owner.config,
+                            "/api/processors": owner.processors,
                             "/api/cpu": owner.cpu,
                             "/api/disk": owner.disk, "/api/time": owner.time}
                 self.send_json(200, payloads[self.path]) if self.path in payloads else self.send_json(404, {"error": "not found"})

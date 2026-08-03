@@ -5,6 +5,7 @@ add_sources(${COMPONENT_NAME}_tests
         ControlReadTests.cpp
         ControlStatusJsonTests.cpp
         MessageThreadCallTests.cpp
+        ProcessorInventoryApiHandlerTests.cpp
         RecordingOptionsControlTests.cpp
         StatusApiHandlerTests.cpp
         StatusControlTests.cpp
