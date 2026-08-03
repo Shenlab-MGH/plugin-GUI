@@ -114,3 +114,85 @@ TEST (SignalChainAccessibilityTests, BuildsValueOnlySnapshotInApiOrderWhileSkipp
     EXPECT_EQ (snapshot[2].name, "Probe 1");
     EXPECT_EQ (snapshot[2].predecessorNodeId, std::nullopt);
 }
+
+TEST (SignalChainAccessibilityTests,
+      RefreshesVisibleGenericEditorPredecessorWhilePreservingRicherDescriptionAndTitle)
+{
+    AccessibilityTestProcessor processor ("Bandpass Filter");
+    processor.setNodeId (22);
+    GenericEditor editor (&processor);
+    editor.setDisplayName ("Mouse probe filter");
+
+    const auto richDescriptionSeed = editor.getDescription();
+    ASSERT_TRUE (richDescriptionSeed.contains ("Constructor-time processor name: Bandpass Filter."));
+    ASSERT_TRUE (richDescriptionSeed.contains ("Display name: Mouse probe filter."));
+    ASSERT_FALSE (richDescriptionSeed.contains ("Predecessor node ID:"));
+    ASSERT_EQ (editor.getTitle(), "Mouse probe filter");
+
+    SignalChainTabComponent tabs;
+    auto* viewport = new EditorViewport (&tabs);
+    viewport->updateVisibleEditors (Array<GenericEditor*> { &editor }, 1, 0);
+
+    viewport->updateAccessibleProcessorInventory (
+        { { 22, "Mouse probe filter", 11 } });
+
+    EXPECT_EQ (editor.getTitle(), "Mouse probe filter");
+    EXPECT_EQ (editor.getComponentID(), "oe.processor.22");
+    EXPECT_TRUE (editor.getDescription().contains (
+        "Constructor-time processor name: Bandpass Filter."));
+    EXPECT_TRUE (editor.getDescription().contains ("Display name: Mouse probe filter."));
+    EXPECT_TRUE (editor.getDescription().contains ("Predecessor node ID: 11."));
+    EXPECT_FALSE (editor.getDescription().contains ("Predecessor node ID: none."));
+
+    // Same node, mutated predecessor only: replace the clause, keep richer text/title.
+    viewport->updateAccessibleProcessorInventory (
+        { { 22, "Mouse probe filter", 99 } });
+
+    EXPECT_EQ (editor.getTitle(), "Mouse probe filter");
+    EXPECT_EQ (editor.getComponentID(), "oe.processor.22");
+    EXPECT_TRUE (editor.getDescription().contains (
+        "Constructor-time processor name: Bandpass Filter."));
+    EXPECT_TRUE (editor.getDescription().contains ("Display name: Mouse probe filter."));
+    EXPECT_TRUE (editor.getDescription().contains ("Predecessor node ID: 99."));
+    EXPECT_FALSE (editor.getDescription().contains ("Predecessor node ID: 11."));
+
+    viewport->updateAccessibleProcessorInventory (
+        { { 22, "Mouse probe filter", std::nullopt } });
+
+    EXPECT_EQ (editor.getTitle(), "Mouse probe filter");
+    EXPECT_TRUE (editor.getDescription().contains (
+        "Constructor-time processor name: Bandpass Filter."));
+    EXPECT_TRUE (editor.getDescription().contains ("Display name: Mouse probe filter."));
+    EXPECT_TRUE (editor.getDescription().contains ("Predecessor node ID: none."));
+    EXPECT_FALSE (editor.getDescription().contains ("Predecessor node ID: 99."));
+}
+
+TEST (SignalChainAccessibilityTests, UpdatesProxyPredecessorDescriptionOnInventoryMutation)
+{
+    SignalChainTabComponent tabs;
+    auto* viewport = new EditorViewport (&tabs);
+
+    viewport->updateAccessibleProcessorInventory (
+        { { 801, "Probe 8", std::nullopt } });
+
+    auto traverser = viewport->createFocusTraverser();
+    ASSERT_NE (traverser, nullptr);
+    auto* proxy = traverser->getDefaultComponent (viewport);
+    ASSERT_NE (proxy, nullptr);
+    EXPECT_EQ (proxy->getComponentID(), "oe.processor.801");
+    EXPECT_EQ (proxy->getTitle(), "Probe 8");
+    EXPECT_TRUE (proxy->getDescription().contains ("Node ID: 801."));
+    EXPECT_TRUE (proxy->getDescription().contains ("Predecessor node ID: none."));
+
+    viewport->updateAccessibleProcessorInventory (
+        { { 801, "Probe 8", 100 } });
+
+    traverser = viewport->createFocusTraverser();
+    proxy = traverser->getDefaultComponent (viewport);
+    ASSERT_NE (proxy, nullptr);
+    EXPECT_EQ (proxy->getComponentID(), "oe.processor.801");
+    EXPECT_EQ (proxy->getTitle(), "Probe 8");
+    EXPECT_TRUE (proxy->getDescription().contains ("Node ID: 801."));
+    EXPECT_TRUE (proxy->getDescription().contains ("Predecessor node ID: 100."));
+    EXPECT_FALSE (proxy->getDescription().contains ("Predecessor node ID: none."));
+}

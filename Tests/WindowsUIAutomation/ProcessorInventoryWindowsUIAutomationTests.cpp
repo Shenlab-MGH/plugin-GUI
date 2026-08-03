@@ -445,3 +445,64 @@ TEST_F (ProcessorInventoryWindowsUIAutomationTests, ExternalClientSeesEveryLoade
     window.setVisible (false);
     MessageManager::getInstance()->runDispatchLoopUntil (50);
 }
+
+TEST_F (ProcessorInventoryWindowsUIAutomationTests,
+        ExternalClientSeesRefreshedPredecessorOnVisibleGenericEditor)
+{
+    SmokeTestProcessor processor;
+    processor.setNodeId (4242);
+    GenericEditor editor (&processor);
+    editor.setDisplayName ("Mouse 8 recorder");
+    // Seed richer description before inventory wiring appends/replaces the clause.
+    ASSERT_TRUE (editor.getDescription().contains ("Constructor-time processor name:"));
+    ASSERT_FALSE (editor.getDescription().contains ("Predecessor node ID:"));
+
+    auto tabs = std::make_unique<SignalChainTabComponent>();
+    auto* viewport = new EditorViewport (tabs.get());
+    DocumentWindow window ("Mutable predecessor UIA", Colours::black, 0);
+    window.setContentOwned (tabs.release(), true);
+    window.centreWithSize (700, 300);
+    window.setVisible (true);
+    ASSERT_NE (window.getPeer(), nullptr);
+    MessageManager::getInstance()->runDispatchLoopUntil (100);
+
+    viewport->updateVisibleEditors (Array<GenericEditor*> { &editor }, 1, 0);
+    viewport->updateAccessibleProcessorInventory (
+        { { 4242, "Mouse 8 recorder", 11 } });
+    MessageManager::getInstance()->runDispatchLoopUntil (100);
+
+    const auto first = observeWhilePumpingMessages (
+        static_cast<HWND> (window.getPeer()->getNativeHandle()));
+    ASSERT_TRUE (SUCCEEDED (first.result)) << std::hex << first.result;
+    ASSERT_TRUE (first.itemFound);
+    ASSERT_EQ (first.directProcessorItems.size(), 1u);
+    EXPECT_EQ (first.directProcessorItems[0].name, "Mouse 8 recorder");
+    EXPECT_TRUE (first.directProcessorItems[0].fullDescription.contains (
+        "Constructor-time processor name:"));
+    EXPECT_TRUE (first.directProcessorItems[0].fullDescription.contains (
+        "Predecessor node ID: 11."));
+
+    viewport->updateAccessibleProcessorInventory (
+        { { 4242, "Mouse 8 recorder", 99 } });
+    MessageManager::getInstance()->runDispatchLoopUntil (100);
+
+    const auto second = observeWhilePumpingMessages (
+        static_cast<HWND> (window.getPeer()->getNativeHandle()));
+    ASSERT_TRUE (SUCCEEDED (second.result)) << std::hex << second.result;
+    ASSERT_TRUE (second.itemFound);
+    ASSERT_EQ (second.directProcessorItems.size(), 1u);
+    EXPECT_EQ (second.directProcessorItems[0].name, "Mouse 8 recorder");
+    EXPECT_TRUE (second.directProcessorItems[0].fullDescription.contains (
+        "Constructor-time processor name:"));
+    EXPECT_TRUE (second.directProcessorItems[0].fullDescription.contains (
+        "Predecessor node ID: 99."));
+    EXPECT_FALSE (second.directProcessorItems[0].fullDescription.contains (
+        "Predecessor node ID: 11."));
+    EXPECT_TRUE (editor.getDescription().contains (
+        "Constructor-time processor name:"));
+    EXPECT_TRUE (editor.getDescription().contains ("Predecessor node ID: 99."));
+    EXPECT_FALSE (editor.getDescription().contains ("Predecessor node ID: 11."));
+
+    window.setVisible (false);
+    MessageManager::getInstance()->runDispatchLoopUntil (50);
+}
