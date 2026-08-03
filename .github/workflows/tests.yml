@@ -17,6 +17,7 @@ on:
       - 'development'
       - 'testing'
       - 'agent-native-v102-record-safety'
+      - 'agent-native-v102-core-r0-release'
 
 jobs:
   unit-tests:
