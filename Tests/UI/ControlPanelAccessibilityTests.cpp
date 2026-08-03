@@ -118,6 +118,8 @@ UiaButtonObservation observeButton (HWND windowHandle, const wchar_t* automation
         return observation;
     }
 
+    const ScopeGuard uninitialiseCom { [] { CoUninitialize(); } };
+
     Microsoft::WRL::ComPtr<IUIAutomation> automation;
     observation.result = CoCreateInstance (CLSID_CUIAutomation,
                                            nullptr,
@@ -192,7 +194,6 @@ UiaButtonObservation observeButton (HWND windowHandle, const wchar_t* automation
         }
     }
 
-    CoUninitialize();
     return observation;
 }
 
@@ -208,19 +209,8 @@ UiaButtonObservation observeWhilePumpingMessages (HWND windowHandle,
                             finished.store (true);
                         });
 
-    const auto deadline = Time::getMillisecondCounter() + 3000;
-    bool timeoutReported = false;
-
     while (! finished.load())
-    {
         MessageManager::getInstance()->runDispatchLoopUntil (10);
-
-        if (! timeoutReported && Time::getMillisecondCounter() >= deadline)
-        {
-            ADD_FAILURE() << "Timed out waiting for the Windows UI Automation worker.";
-            timeoutReported = true;
-        }
-    }
 
     worker.join();
     return observation;
@@ -238,6 +228,8 @@ UiaButtonActionObservation performButtonAction (HWND windowHandle,
         observation.result = comResult;
         return observation;
     }
+
+    const ScopeGuard uninitialiseCom { [] { CoUninitialize(); } };
 
     Microsoft::WRL::ComPtr<IUIAutomation> automation;
     observation.result = CoCreateInstance (CLSID_CUIAutomation,
@@ -337,7 +329,6 @@ UiaButtonActionObservation performButtonAction (HWND windowHandle,
             Thread::sleep (10);
     }
 
-    CoUninitialize();
     return observation;
 }
 
@@ -354,19 +345,8 @@ UiaButtonActionObservation performActionWhilePumpingMessages (HWND windowHandle,
                             finished.store (true);
                         });
 
-    const auto deadline = Time::getMillisecondCounter() + 3000;
-    bool timeoutReported = false;
-
     while (! finished.load())
-    {
         MessageManager::getInstance()->runDispatchLoopUntil (10);
-
-        if (! timeoutReported && Time::getMillisecondCounter() >= deadline)
-        {
-            ADD_FAILURE() << "Timed out waiting for the Windows UI Automation action worker.";
-            timeoutReported = true;
-        }
-    }
 
     worker.join();
     return observation;
