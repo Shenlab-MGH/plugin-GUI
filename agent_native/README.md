@@ -1,14 +1,15 @@
-# Open Ephys v1.1.0 agent-native core 0.0.1
+# Open Ephys v1.1.0 agent-native 0.0.2
 
 This directory contains the smallest Windows MCP surface for the Open Ephys
 v1.1.0 agent-native prerelease. It exposes existing Open Ephys operations only:
-capability discovery, status, recording filename text, and CPU usage.
+capability discovery, status, recording options, filename and parent-directory
+control, plus CPU, disk, and elapsed-time reads.
 
 ## Pins
 
 - Open Ephys baseline: `v1.1.0`
-- agent contract and bundle: `0.0.1`
-- API capability contract: `0.0.1`
+- agent contract and bundle: `0.0.2`
+- API capability contract: `0.0.2`
 - MCP protocol: legacy `2024-11-05`
 - modern MCP: not supported
 
@@ -39,16 +40,23 @@ fixture. Mutations perform pre-read, mutation, and post-read. Entering RECORD
 requires the explicit `approve_recording=true` argument. HTTP 400/409,
 unexpected schemas, and failed postconditions become MCP tool errors.
 
-The upstream recording endpoint is not transactional. For 0.0.1 the filename
+The upstream recording endpoint is not transactional. The filename
 tool therefore accepts exactly one component per call and rejects Windows path,
 traversal, control-character, reserved-name, and invalid-character forms before
 HTTP. This keeps the required filename SET capability without claiming atomic
 multi-component mutation.
 
+The 0.0.2 directory setter accepts only a non-empty absolute Windows path and
+normalizes it before PUT. It refuses to mutate while the observed mode is
+RECORD, does not preflight existence, and requires a Windows-path-equivalent PUT
+response and GET readback. If Open Ephys returns 200 without applying the path,
+the tool reports a failed postcondition. A transport failure or non-authoritative
+write response reports an uncertain mutation outcome and must not be retried.
+
 Run the dependency-independent tests with:
 
 ```powershell
-python -m unittest Tests.AgentNative.test_open_ephys_mcp_r010 -v
+python -m unittest Tests.AgentNative.test_open_ephys_mcp_v002 -v
 ```
 
 Official `mcp==2.0.0` remains absent from the instrument host. The separate

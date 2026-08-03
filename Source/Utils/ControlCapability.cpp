@@ -26,7 +26,7 @@
 
 const std::vector<ControlCapability>& getCoreControlCapabilities()
 {
-    // Agent Core 0.0.1: full cross-lane capability set shared with v1.0.2.
+    // Agent 0.0.2: full cross-lane capability set shared with v1.0.2.
     // Order is stable. Operations use shared route descriptors (same Method+path
     // as server registration). UIA AutomationIds match the machine contract.
     const ControlModeSemantics acquisitionModeSemantics {
@@ -68,6 +68,10 @@ const std::vector<ControlCapability>& getCoreControlCapabilities()
           { { "read", OpenEphysHttpApi::kRecordingGet, {}, { "prepend_text", "base_text", "append_text" } },
             { "set", OpenEphysHttpApi::kRecordingPut, { "prepend_text", "base_text", "append_text" },
               { "prepend_text", "base_text", "append_text" } } } },
+        { "oe.control.recording.directory", "Recording directory", "Read or edit the recording parent directory.",
+          ControlCapabilityKind::value, "oe.control.recording.directory",
+          { { "read", OpenEphysHttpApi::kRecordingGet, {}, { "parent_directory" } },
+            { "set", OpenEphysHttpApi::kRecordingPut, { "parent_directory" }, { "parent_directory" } } } },
         { "oe.control.recording.new_directory", "New recording directory", "Start a new data directory for the next recording.",
           ControlCapabilityKind::toggle, "oe.control.recording.new_directory",
           { { "read", OpenEphysHttpApi::kRecordingOptionsGet, {}, { "new_directory_requested" } },

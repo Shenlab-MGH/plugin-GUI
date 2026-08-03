@@ -80,7 +80,7 @@ inline void setControlErrorResponse (httplib::Response& response,
  * The API is "RESTful", such that the resource URLs are:
  * 
  * - GET /api/capabilities :
- *          returns a JSON capability manifest (contract_version 0.0.1).
+ *          returns a JSON capability manifest (contract_version 0.0.2).
  *
  * - GET /api/config :
  *          returns an XML string with the current configuration of the GUI
