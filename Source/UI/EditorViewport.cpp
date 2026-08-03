@@ -30,6 +30,7 @@
 #include "../Processors/ProcessorGraph/ProcessorGraphActions.h"
 #include "GraphViewer.h"
 #include "ProcessorList.h"
+#include "SemanticComponent.h"
 
 const int BORDER_SIZE = 6;
 const int TAB_SIZE = 30;
@@ -47,6 +48,12 @@ EditorViewport::EditorViewport (SignalChainTabComponent* s_)
       signalChainTabComponent (s_),
       dragProcType (Plugin::Processor::INVALID)
 {
+    applySemanticMetadata (*this,
+                           "oe.control.signal_chain.processors",
+                           "Loaded processors",
+                           "Read-only inventory of processors loaded in the signal chain.");
+    setFocusContainerType (FocusContainerType::focusContainer);
+
     addMouseListener (this, true);
 
     sourceDropImage = ImageCache::getFromMemory (BinaryData::SourceDrop_png,
@@ -60,6 +67,11 @@ EditorViewport::EditorViewport (SignalChainTabComponent* s_)
     editorNamingLabel.setBounds (0, 0, 100, 20);
     editorNamingLabel.setFont (FontOptions ("Inter", "Regular", 16.0f));
     editorNamingLabel.addListener (this);
+}
+
+std::unique_ptr<AccessibilityHandler> EditorViewport::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (*this, AccessibilityRole::list);
 }
 
 EditorViewport::~EditorViewport()

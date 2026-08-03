@@ -25,6 +25,7 @@
 #define __EDITORVIEWPORT_H_80260F3F__
 
 #include "../../JuceLibraryCode/JuceHeader.h"
+#include "../TestableExport.h"
 #include "../Processors/Editors/GenericEditor.h"
 #include "../Processors/Merger/MergerEditor.h"
 #include "../Processors/ProcessorGraph/ProcessorGraph.h"
@@ -69,10 +70,13 @@ class EditorViewport : public Component,
 {
 public:
     /** Constructor. Adds the buttons for browsing through the signal chains.*/
-    EditorViewport (SignalChainTabComponent*);
+    TESTABLE EditorViewport (SignalChainTabComponent*);
 
     /** Destructor. */
-    ~EditorViewport();
+    TESTABLE ~EditorViewport();
+
+    /** Exposes the loaded signal-chain editors as an accessibility list. */
+    TESTABLE std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
 
     /** Highlights the given editor. */
     void highlightEditor (GenericEditor* editor);
@@ -171,9 +175,9 @@ public:
     void lockSignalChain (bool shouldLock);
 
     /** Updates visible editors (called after Processor Graph modifications)*/
-    void updateVisibleEditors (Array<GenericEditor*> visibleEditors,
-                               int numberOfTabs = 1,
-                               int selectedTab = 0);
+    TESTABLE void updateVisibleEditors (Array<GenericEditor*> visibleEditors,
+                                        int numberOfTabs = 1,
+                                        int selectedTab = 0);
 
     /** Removes an editor from the editor array after it's processor has been deleted*/
     void removeEditor (GenericEditor* editor);
@@ -334,8 +338,8 @@ class SignalChainTabComponent : public Component,
                                 public Button::Listener
 {
 public:
-    SignalChainTabComponent();
-    ~SignalChainTabComponent();
+    TESTABLE SignalChainTabComponent();
+    TESTABLE ~SignalChainTabComponent();
 
     /** Updates the boundaries and visibility of all the tabs in the signal chain. */
     void refreshTabs (int, int, bool internal = false);

@@ -31,6 +31,7 @@
 #include "../../UI/EditorViewport.h"
 #include "../../UI/GraphViewer.h"
 #include "../../UI/ProcessorList.h"
+#include "../../UI/SemanticComponent.h"
 #include "../ProcessorGraph/ProcessorGraph.h"
 #include "../RecordNode/RecordNode.h"
 #include "../Settings/InfoObject.h"
@@ -73,6 +74,8 @@ GenericEditor::GenericEditor (GenericProcessor* owner) : AudioProcessorEditor (o
     }
 
     backgroundColour = Colour (10, 10, 10);
+
+    updateAgentNativeAccessibility();
 }
 
 GenericEditor::~GenericEditor()
@@ -85,6 +88,7 @@ GenericEditor::~GenericEditor()
 void GenericEditor::updateName()
 {
     nodeId = getProcessor()->getNodeId();
+    updateAgentNativeAccessibility();
     repaint();
 }
 
@@ -92,9 +96,34 @@ void GenericEditor::setDisplayName (const String& string)
 {
     displayName = string;
 
+    updateAgentNativeAccessibility();
+
     getProcessor()->updateDisplayName (displayName);
 
-    CoreServices::updateSignalChain (this);
+    if (AccessClass::getProcessorGraph() != nullptr)
+        CoreServices::updateSignalChain (this);
+}
+
+std::unique_ptr<AccessibilityHandler> GenericEditor::createAccessibilityHandler()
+{
+    return std::make_unique<AccessibilityHandler> (*this, AccessibilityRole::listItem);
+}
+
+void GenericEditor::updateAgentNativeAccessibility()
+{
+    const auto processorId = getProcessor()->getNodeId();
+    String description = "Constructor-time processor name: " + name
+                         + ". Node ID: " + String (processorId) + ". ";
+
+    if (displayName == name)
+        description += "Display name matches constructor-time processor name.";
+    else
+        description += "Display name: " + displayName + ".";
+
+    applySemanticMetadata (*this,
+                           "oe.processor." + String (processorId),
+                           displayName,
+                           description);
 }
 
 String GenericEditor::getDisplayName()
@@ -760,6 +789,7 @@ void GenericEditor::loadFromXml (XmlElement* xml)
 
     displayName = xml->getStringAttribute ("displayName", name);
     getProcessor()->updateDisplayName (displayName);
+    updateAgentNativeAccessibility();
 
     loadCustomParametersFromXml (xml);
 
