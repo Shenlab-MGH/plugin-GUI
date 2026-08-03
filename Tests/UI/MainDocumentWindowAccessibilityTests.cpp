@@ -182,9 +182,18 @@ UiaObservation observeWhilePumpingMessages (HWND windowHandle,
                         });
 
     const auto deadline = Time::getMillisecondCounter() + 3000;
+    bool timeoutReported = false;
 
-    while (! finished.load() && Time::getMillisecondCounter() < deadline)
+    while (! finished.load())
+    {
         MessageManager::getInstance()->runDispatchLoopUntil (10);
+
+        if (! timeoutReported && Time::getMillisecondCounter() >= deadline)
+        {
+            ADD_FAILURE() << "Timed out waiting for the Windows UI Automation worker.";
+            timeoutReported = true;
+        }
+    }
 
     worker.join();
     return observation;
@@ -203,6 +212,7 @@ void showTestWindow (MainDocumentWindow& window,
 #endif
 } // namespace
 
+#if JUCE_WINDOWS
 TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheWindowAndItsContentToAccessibilityClients)
 {
     MainDocumentWindow window;
@@ -213,6 +223,18 @@ TEST_F (MainDocumentWindowAccessibilityTests, ExposesTheWindowAndItsContentToAcc
     EXPECT_TRUE (window.isAccessible());
     EXPECT_TRUE (contentButton.isAccessible());
 }
+#else
+TEST_F (MainDocumentWindowAccessibilityTests, PreservesTheHiddenAccessibilityTreeOnOtherPlatforms)
+{
+    MainDocumentWindow window;
+    TextButton contentButton ("Hidden child");
+
+    window.setContentNonOwned (&contentButton, false);
+
+    EXPECT_FALSE (window.isAccessible());
+    EXPECT_FALSE (contentButton.isAccessible());
+}
+#endif
 
 #if JUCE_WINDOWS
 TEST_F (MainDocumentWindowAccessibilityTests, UsesComponentIdAsTheWindowsAutomationId)
