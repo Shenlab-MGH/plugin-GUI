@@ -95,6 +95,101 @@ TEST (ControlCapabilityTests, SerialisesApiAndUiaMetadataByCanonicalId)
                "default_record_engine");
 }
 
+TEST (ControlCapabilityTests,
+      FreezesTheStatusApiFieldsOnExactlyTwoCanonicalCapabilities)
+{
+    const auto& capabilities =
+        getCoreControlCapabilities();
+    StringArray statusCapabilityIds;
+
+    const StringArray expectedReadFields {
+        "capabilities",
+        "mode",
+        "acquisition_active",
+        "recording_active",
+        "record_node_count",
+        "active_record_node_count",
+        "writer_thread_running_count",
+        "recording_consistent",
+        "read_only"
+    };
+    const StringArray expectedMutationFields {
+        "requested_mode",
+        "mode",
+        "changed",
+        "acquisition_active",
+        "recording_active",
+        "record_node_count",
+        "active_record_node_count",
+        "writer_thread_running_count",
+        "recording_consistent",
+        "unsynchronized_confirmed"
+    };
+
+    for (const auto& capability : capabilities)
+    {
+        const auto usesStatusApi = std::any_of (
+            capability.operations.begin(),
+            capability.operations.end(),
+            [] (const auto& operation)
+            {
+                return operation.path == "/api/status";
+            });
+        if (usesStatusApi)
+            statusCapabilityIds.add (capability.id);
+    }
+
+    EXPECT_EQ (
+        statusCapabilityIds,
+        (StringArray {
+            "oe.control.acquisition",
+            "oe.control.recording"
+        }));
+    EXPECT_EQ (
+        findControlCapability ("oe.status.global"),
+        nullptr);
+
+    const auto* acquisition =
+        findControlCapability (
+            "oe.control.acquisition");
+    const auto* recording =
+        findControlCapability (
+            "oe.control.recording");
+    ASSERT_NE (acquisition, nullptr);
+    ASSERT_NE (recording, nullptr);
+    ASSERT_EQ (acquisition->operations.size(), 2u);
+    ASSERT_EQ (recording->operations.size(), 2u);
+
+    EXPECT_TRUE (
+        acquisition->operations[0].requestFields
+            .isEmpty());
+    EXPECT_EQ (
+        acquisition->operations[0].responseFields,
+        expectedReadFields);
+    EXPECT_EQ (
+        acquisition->operations[1].requestFields,
+        (StringArray { "mode" }));
+    EXPECT_EQ (
+        acquisition->operations[1].responseFields,
+        expectedMutationFields);
+
+    EXPECT_TRUE (
+        recording->operations[0].requestFields
+            .isEmpty());
+    EXPECT_EQ (
+        recording->operations[0].responseFields,
+        expectedReadFields);
+    EXPECT_EQ (
+        recording->operations[1].requestFields,
+        (StringArray {
+            "mode",
+            "confirm_unsynchronized"
+        }));
+    EXPECT_EQ (
+        recording->operations[1].responseFields,
+        expectedMutationFields);
+}
+
 TEST (ControlCapabilityTests, CalculatesBoundedDiskUsage)
 {
     EXPECT_FLOAT_EQ (CoreServices::calculateDiskUsage (25, 100), 0.75f);
