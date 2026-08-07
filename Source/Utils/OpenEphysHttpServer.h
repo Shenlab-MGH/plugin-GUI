@@ -885,7 +885,7 @@ private:
                        res.set_content (ret.dump(), "application/json");
                    });
 
-        svr_->Put ("/api/processors/([0-9]+)/config", [this] (const httplib::Request& req, httplib::Response& res)
+        svr_->Put ("/api/processors/([0-9]+)/config", [this, &generation] (const httplib::Request& req, httplib::Response& res)
                    {
             std::string message_str;
             LOGD( "Received PUT request" );
@@ -916,7 +916,8 @@ private:
                 {
                     return graph_->sendConfigMessage (processor, String (message_str));
                 },
-                std::chrono::seconds (2));
+                std::chrono::seconds (2),
+                generation);
 
             if (OpenEphysHttpDetail::setLegacyDispatchErrorResponse (res, dispatchResult))
                 return;
