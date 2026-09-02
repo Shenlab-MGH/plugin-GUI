@@ -2,6 +2,7 @@ include(../ComponentRules.cmake)
 add_sources(${COMPONENT_NAME}_tests
         ControlCapabilityTests.cpp
         ControlReadTests.cpp
+        ConfigSnapshotApiHandlerTests.cpp
         ControlStatusJsonTests.cpp
         MessageThreadCallTests.cpp
         RecordingOptionsControlTests.cpp
