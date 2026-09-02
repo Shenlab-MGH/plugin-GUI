@@ -46,8 +46,9 @@ traversal, control-character, reserved-name, and invalid-character forms before
 HTTP. This keeps the required filename SET capability without claiming atomic
 multi-component mutation.
 
-The 0.0.2 directory setter accepts only a non-empty absolute Windows path and
-normalizes it before PUT. It refuses to mutate while the observed mode is
+The 0.0.2 directory setter accepts only a non-empty drive-letter-rooted Windows
+path and normalizes it before PUT. UNC, device, and extended namespace paths
+are rejected before HTTP. It refuses to mutate while the observed mode is
 RECORD, does not preflight existence, and requires a Windows-path-equivalent PUT
 response and GET readback. If Open Ephys returns 200 without applying the path,
 the tool reports a failed postcondition. A transport failure or non-authoritative

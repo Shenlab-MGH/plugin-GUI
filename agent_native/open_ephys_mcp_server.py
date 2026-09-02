@@ -213,13 +213,31 @@ def directory_projection(payload: Any) -> dict[str, str]:
     return {"parent_directory": recording["parent_directory"]}
 
 
+def is_reserved_windows_device_name(value: str) -> bool:
+    suffixes = {*(str(i) for i in range(1, 10)), "¹", "²", "³"}
+    reserved = {"CON", "PRN", "AUX", "NUL", *{f"COM{x}" for x in suffixes}, *{f"LPT{x}" for x in suffixes}}
+    return value.rstrip(" .").split(".", 1)[0].upper() in reserved
+
+
 def normalize_windows_directory(value: str) -> str:
     if not value:
-        raise ToolError("invalid_arguments", "parent_directory must be a non-empty absolute Windows path.")
+        raise ToolError("invalid_arguments", "parent_directory must be a non-empty drive-letter-rooted Windows path.")
     normalized = ntpath.normpath(value)
-    drive, _ = ntpath.splitdrive(normalized)
-    if not drive or not ntpath.isabs(normalized):
-        raise ToolError("invalid_arguments", "parent_directory must be a non-empty absolute Windows path.")
+    drive, tail = ntpath.splitdrive(normalized)
+    is_drive_letter = (
+        len(drive) == 2
+        and drive[0].isascii()
+        and drive[0].isalpha()
+        and drive[1] == ":"
+    )
+    has_reserved_device_component = any(
+        is_reserved_windows_device_name(component)
+        for component in tail.split("\\")
+        if component
+    )
+    if (not is_drive_letter or not tail.startswith("\\") or not ntpath.isabs(normalized)
+            or ":" in tail or has_reserved_device_component):
+        raise ToolError("invalid_arguments", "parent_directory must be a non-empty drive-letter-rooted Windows path.")
     return normalized
 
 
@@ -264,9 +282,7 @@ def validate_filename_component(value: str) -> None:
         raise ToolError("invalid_arguments", "Filename components must not contain paths or Windows-invalid characters.")
     if value.endswith((" ", ".")):
         raise ToolError("invalid_arguments", "Filename components cannot end with a space or dot.")
-    suffixes = {*(str(i) for i in range(1, 10)), "¹", "²", "³"}
-    reserved = {"CON", "PRN", "AUX", "NUL", *{f"COM{x}" for x in suffixes}, *{f"LPT{x}" for x in suffixes}}
-    if value.split(".", 1)[0].upper() in reserved:
+    if is_reserved_windows_device_name(value):
         raise ToolError("invalid_arguments", "Filename component is a reserved Windows device name.")
 
 

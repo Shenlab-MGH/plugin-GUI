@@ -337,7 +337,27 @@ class McpV002Tests(unittest.TestCase):
 
     def test_directory_rejects_unsafe_paths_before_http_and_accepts_windows_equivalence(self):
         self.ready_server()
-        for value in ("", "../relative", "D:relative", "/current-drive-rooted"):
+        for value in (
+            "",
+            "../relative",
+            "D:relative",
+            "/current-drive-rooted",
+            r"\\attacker.invalid\share",
+            "//attacker.invalid/share",
+            r"\\.\pipe\oe-test",
+            r"\\?\C:\Open Ephys",
+            r"\\?\UNC\attacker.invalid\share",
+            "//?/GLOBALROOT/Device/HarddiskVolumeShadowCopy1",
+            r"C:\NUL",
+            r"C:\Windows\NUL",
+            "C:\\NUL.",
+            "C:\\NUL ",
+            r"C:\recordings\CON.txt",
+            r"C:\recordings\COM1",
+            r"C:\NUL:",
+            r"C:\Windows\NUL:",
+            r"C:\recordings:stream",
+        ):
             with self.subTest(value=value):
                 self.api.requests.clear()
                 self.assert_error("oe_set_recording_directory", {"parent_directory": value}, "invalid_arguments")
@@ -492,7 +512,7 @@ class McpV002Tests(unittest.TestCase):
 
     def test_skill_pins_contract_and_safety_boundary(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        for required in ("0.0.2", "1.1.0", "2024-11-05", "approve_recording=true", "hardware_verified:false", "scientific_verified:false", "non-empty absolute Windows path", "equivalent PUT response and GET readback"):
+        for required in ("0.0.2", "1.1.0", "2024-11-05", "approve_recording=true", "hardware_verified:false", "scientific_verified:false", "drive-letter-rooted Windows path", "equivalent PUT response and GET readback"):
             self.assertIn(required, skill)
         for forbidden in ("oe_api_request", "uia locator", "processor", "parameter", "stream"):
             self.assertNotIn(forbidden, skill.lower())
