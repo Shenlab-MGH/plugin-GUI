@@ -404,7 +404,9 @@ JUCE_COMRESULT AccessibilityNativeHandle::GetPropertyValue (PROPERTYID propertyI
                 VariantHelpers::setBool (accessibilityHandler.hasFocus (true), pRetVal);
                 break;
             case UIA_IsOffscreenPropertyId:
-                VariantHelpers::setBool (! accessibilityHandler.isVisibleWithinParent(), pRetVal);
+                VariantHelpers::setBool (state.isAccessibleOffscreen()
+                                             || ! accessibilityHandler.isVisibleWithinParent(),
+                                         pRetVal);
                 break;
             case UIA_IsPasswordPropertyId:
                 if (auto* textInterface = accessibilityHandler.getTextInterface())

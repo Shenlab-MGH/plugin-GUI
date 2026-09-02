@@ -43,6 +43,7 @@
 #include "ConfigSnapshotApiHandler.h"
 #include "ControlRead.h"
 #include "OpenEphysHttpApiRoutes.h"
+#include "ProcessorInventoryApiHandler.h"
 #include "RecordingOptionsControl.h"
 #include "StatusApiHandler.h"
 #include "Utils.h"
@@ -81,7 +82,7 @@ inline void setControlErrorResponse (httplib::Response& response,
  * The API is "RESTful", such that the resource URLs are:
  * 
  * - GET /api/capabilities :
- *          returns a JSON capability manifest (contract_version 0.0.3).
+ *          returns a JSON capability manifest (contract_version 0.0.4).
  *
  * - GET /api/config :
  *          returns an XML string with the current configuration of the GUI
@@ -750,20 +751,26 @@ public:
 
             res.set_content(ret.dump(), "application/json"); });
 
-        svr_->Get ("/api/processors", [this] (const httplib::Request&, httplib::Response& res)
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kProcessorsGet,
+                   [this] (const httplib::Request& req, httplib::Response& res)
                    {
-            Array<GenericProcessor*> processors = graph_->getListOfProcessors();
-
-            std::vector<json> processors_json;
-            for (const auto& processor : processors) {
-                json processor_json;
-                processor_to_json(processor, &processor_json);
-                processors_json.push_back(processor_json);
-            }
-            json ret;
-            ret["processors"] = processors_json;
-
-            res.set_content(ret.dump(), "application/json"); });
+            handleProcessorInventoryGet (
+                req,
+                res,
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [this]
+                {
+                    const auto processors = graph_->getListOfProcessors();
+                    return buildProcessorInventoryDocument (
+                        processors,
+                        [] (GenericProcessor* processor)
+                        {
+                            json processorJson;
+                            processor_to_json (processor, &processorJson);
+                            return processorJson;
+                        });
+                },
+                std::chrono::seconds (2)); });
 
         svr_->Get (R"(/api/processors/([0-9]+))", [this] (const httplib::Request& req, httplib::Response& res)
                    {
