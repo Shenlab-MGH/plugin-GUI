@@ -5,9 +5,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WINDOWS_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "windows.yml"
+UI_CMAKE_PATH = ROOT / "Tests" / "UI" / "CMakeLists.txt"
 
 
 class WindowsUiaWorkflowTests(unittest.TestCase):
+    def test_windows_uia_cases_run_in_fresh_processes(self):
+        cmake = UI_CMAKE_PATH.read_text(encoding="utf-8")
+        workflow = WINDOWS_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("set(COMPONENT_REGISTER_AGGREGATE_TEST OFF)", cmake)
+        self.assertIn("gtest_discover_tests(", cmake)
+        self.assertIn('TEST_PREFIX "${COMPONENT_NAME}_tests_"', cmake)
+        self.assertNotIn("DISCOVERY_MODE PRE_TEST", cmake)
+        self.assertIn("PROPERTIES TIMEOUT 30", cmake)
+        self.assertNotIn("UIA_TEST_CASES", cmake)
+        self.assertIn("-R '^UI_tests_'", workflow)
+
     def test_windows_workflow_tracks_ui_tests_for_push_and_pull_request_changes(self):
         workflow = WINDOWS_WORKFLOW_PATH.read_text(encoding="utf-8")
 
@@ -39,7 +52,7 @@ class WindowsUiaWorkflowTests(unittest.TestCase):
         )
         ui_test_command = (
             "ctest --test-dir BuildContractTests -C Release "
-            "-R '^UI_tests$' --output-on-failure --no-tests=error"
+            "-R '^UI_tests_' --output-on-failure --no-tests=error"
         )
 
         commands = (

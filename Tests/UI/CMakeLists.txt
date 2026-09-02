@@ -1,4 +1,8 @@
 
+if(WIN32)
+	set(COMPONENT_REGISTER_AGGREGATE_TEST OFF)
+endif()
+
 include(../ComponentRules.cmake)
 add_sources(${COMPONENT_NAME}_tests
 		ControlPanelAccessibilityTests.cpp
@@ -12,14 +16,15 @@ target_include_directories(
 		"${SOURCE_DIRECTORY}"
 )
 
-set_tests_properties(${COMPONENT_NAME}_tests PROPERTIES TIMEOUT 30)
-
-get_test_property(${COMPONENT_NAME}_tests TIMEOUT UI_TEST_TIMEOUT)
-
-if(NOT UI_TEST_TIMEOUT)
-	message(FATAL_ERROR "${COMPONENT_NAME}_tests must have an external process timeout")
+if(WIN32)
+	include(GoogleTest)
+	gtest_discover_tests(
+		${COMPONENT_NAME}_tests
+		TEST_PREFIX "${COMPONENT_NAME}_tests_"
+		PROPERTIES TIMEOUT 30
+	)
+else()
+	set_tests_properties(${COMPONENT_NAME}_tests PROPERTIES TIMEOUT 30)
 endif()
 
-if(UI_TEST_TIMEOUT GREATER 30)
-	message(FATAL_ERROR "${COMPONENT_NAME}_tests timeout must not exceed 30 seconds")
-endif()
+unset(COMPONENT_REGISTER_AGGREGATE_TEST)

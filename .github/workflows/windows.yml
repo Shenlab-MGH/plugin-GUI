@@ -53,7 +53,7 @@ jobs:
     - name: build Windows UI contract tests
       run: cmake --build BuildContractTests --config Release --target UI_tests --parallel 8
     - name: run Windows UI contract tests
-      run: ctest --test-dir BuildContractTests -C Release -R '^UI_tests$' --output-on-failure --no-tests=error
+      run: ctest --test-dir BuildContractTests -C Release -R '^UI_tests_' --output-on-failure --no-tests=error
     - name: deploy
       if: github.repository == 'open-ephys/plugin-GUI'
       env:

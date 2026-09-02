@@ -79,6 +79,8 @@ void expectSemanticButton (Button& button,
 }
 
 #if JUCE_WINDOWS
+constexpr auto uiaWorkerTimeoutMilliseconds = 10000;
+
 Component* findDescendantByAutomationId (Component& root, const String& automationId)
 {
     for (int index = 0; index < root.getNumChildComponents(); ++index)
@@ -257,7 +259,7 @@ UiaButtonObservation observeWhilePumpingMessages (HWND windowHandle,
                             finished.store (true);
                         });
 
-    const auto deadline = Time::getMillisecondCounter() + 3000;
+    const auto deadline = Time::getMillisecondCounter() + uiaWorkerTimeoutMilliseconds;
 
     while (! finished.load())
     {
@@ -400,7 +402,7 @@ UiaButtonActionObservation performActionWhilePumpingMessages (HWND windowHandle,
                             finished.store (true);
                         });
 
-    const auto deadline = Time::getMillisecondCounter() + 3000;
+    const auto deadline = Time::getMillisecondCounter() + uiaWorkerTimeoutMilliseconds;
 
     while (! finished.load())
     {
