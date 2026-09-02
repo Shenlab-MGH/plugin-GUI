@@ -9,6 +9,7 @@ add_sources(
   ControlCapability.cpp
   ControlCapabilityJson.h
   ControlCapabilityJson.cpp
+  ConfigSnapshotApiHandler.h
   ControlStatus.h
   ControlStatusJson.h
   ControlStatusJson.cpp
