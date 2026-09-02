@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Narrow legacy MCP bridge for Open Ephys v1.1.0 agent contract 0.0.2."""
+"""Narrow legacy MCP bridge for Open Ephys v1.1.0 agent contract 0.0.3."""
 
 from __future__ import annotations
 
@@ -11,25 +11,28 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 from typing import Any
 
 
 PROTOCOL_VERSION = "2024-11-05"
-CONTRACT_VERSION = "0.0.2"
-DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_v0_0_2.json")
+CONTRACT_VERSION = "0.0.3"
+DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_v0_0_3.json")
 TOOL_NAMES = (
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
     "oe_get_recording_options", "oe_set_recording_options",
     "oe_get_recording_filename", "oe_set_recording_filename",
     "oe_get_recording_directory", "oe_set_recording_directory",
+    "oe_get_config",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 )
 CAPABILITY_IDS = (
     "oe.control.acquisition", "oe.control.recording", "oe.control.recording.options",
     "oe.control.recording.filename", "oe.control.recording.directory",
     "oe.control.recording.new_directory",
-    "oe.control.recording.force_new_directory", "oe.status.cpu_usage",
+    "oe.control.recording.force_new_directory", "oe.control.signal_chain.configuration",
+    "oe.status.cpu_usage",
     "oe.status.disk_usage", "oe.status.elapsed_time",
 )
 ALLOWED_MODES = {"IDLE", "ACQUIRE", "RECORD"}
@@ -107,7 +110,7 @@ def load_contract(path: Path) -> dict[str, Any]:
         "mcp_server_name": (contract.get("mcp") or {}).get("server_name"),
     }
     if actual != expected:
-        raise ValueError(f"Contract pins do not match the v1.1.0 0.0.2 server: {actual!r}")
+        raise ValueError(f"Contract pins do not match the v1.1.0 0.0.3 server: {actual!r}")
     tools = contract.get("tools")
     if not isinstance(tools, list) or [tool.get("name") for tool in tools if isinstance(tool, dict)] != list(TOOL_NAMES):
         raise ValueError("Contract tool names do not match the narrow Core R0 surface.")
@@ -117,11 +120,11 @@ def load_contract(path: Path) -> dict[str, Any]:
             raise ValueError("Every Core R0 tool requires a closed input schema.")
     api = contract.get("api")
     capabilities = api.get("expected_capabilities_response") if isinstance(api, dict) else None
-    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.0.2":
-        raise ValueError("Capability fixture must pin API contract 0.0.2.")
+    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.0.3":
+        raise ValueError("Capability fixture must pin API contract 0.0.3.")
     items = capabilities.get("capabilities")
     if not isinstance(items, list) or [item.get("id") for item in items if isinstance(item, dict)] != list(CAPABILITY_IDS):
-        raise ValueError("Capability fixture does not match the exact ten 0.0.2 capabilities.")
+        raise ValueError("Capability fixture does not match the exact eleven 0.0.3 capabilities.")
     if contract.get("verification") != {
         "hardware_verified": False,
         "scientific_verified": False,
@@ -217,6 +220,20 @@ def is_reserved_windows_device_name(value: str) -> bool:
     suffixes = {*(str(i) for i in range(1, 10)), "¹", "²", "³"}
     reserved = {"CON", "PRN", "AUX", "NUL", *{f"COM{x}" for x in suffixes}, *{f"LPT{x}" for x in suffixes}}
     return value.rstrip(" .").split(".", 1)[0].upper() in reserved
+
+
+def validate_config(payload: Any) -> dict[str, str]:
+    value = expect_object(payload, "Config")
+    info = value.get("info")
+    if not isinstance(info, str):
+        raise ToolError("response_schema_mismatch", "Config response must contain string info.")
+    try:
+        root = ElementTree.fromstring(info)
+    except ElementTree.ParseError as exc:
+        raise ToolError("response_schema_mismatch", "Config info must contain well-formed XML.") from exc
+    if root.tag != "SETTINGS":
+        raise ToolError("response_schema_mismatch", "Config XML root must be SETTINGS.")
+    return {"info": info}
 
 
 def normalize_windows_directory(value: str) -> str:
@@ -366,7 +383,7 @@ class McpServer:
 
     @staticmethod
     def _validate_arguments(name: str, arguments: dict[str, Any]) -> None:
-        if name in {"oe_get_capabilities", "oe_get_status", "oe_get_recording_options", "oe_get_recording_filename", "oe_get_recording_directory", "oe_get_cpu", "oe_get_disk", "oe_get_time"}:
+        if name in {"oe_get_capabilities", "oe_get_status", "oe_get_recording_options", "oe_get_recording_filename", "oe_get_recording_directory", "oe_get_config", "oe_get_cpu", "oe_get_disk", "oe_get_time"}:
             if arguments: raise ToolError("invalid_arguments", f"{name} does not accept arguments.")
         elif name == "oe_set_status":
             if not set(arguments).issubset({"mode", "approve_recording"}) or not isinstance(arguments.get("mode"), str) or arguments["mode"] not in ALLOWED_MODES or ("approve_recording" in arguments and not isinstance(arguments["approve_recording"], bool)):
@@ -416,6 +433,7 @@ class McpServer:
         if name == "oe_get_recording_options": return validate_options(self.api.request("GET", "/api/recording/options"))
         if name == "oe_get_recording_filename": return filename_projection(self.api.request("GET", "/api/recording"))
         if name == "oe_get_recording_directory": return directory_projection(self.api.request("GET", "/api/recording"))
+        if name == "oe_get_config": return validate_config(self.api.request("GET", "/api/config"))
         if name == "oe_get_cpu": return validate_cpu(self.api.request("GET", "/api/cpu"))
         if name == "oe_get_disk": return validate_disk(self.api.request("GET", "/api/disk"))
         if name == "oe_get_time": return validate_time(self.api.request("GET", "/api/time"))

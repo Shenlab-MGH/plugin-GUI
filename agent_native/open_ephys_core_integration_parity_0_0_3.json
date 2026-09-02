@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.0.2",
+  "schema_version": "0.0.3",
   "baseline": {
     "version": "1.1.0",
     "upstream_release_commit": "c2ce076f5b2d4182222f9d0fd9bb9b97a60582e7"
@@ -54,6 +54,13 @@
       "api": { "read": { "method": "GET", "path": "/api/recording/options" }, "set": { "method": "PUT", "path": "/api/recording/options" }, "fields": ["force_new_directory"] },
       "uia": { "platform": "windows", "automation_id": "oe.control.recording.force_new_directory" },
       "mcp_tools": ["oe_get_recording_options", "oe_set_recording_options"]
+    },
+    {
+      "id": "oe.control.signal_chain.configuration",
+      "parity": "API_MCP_ONLY",
+      "api": { "read": { "method": "GET", "path": "/api/config", "field": "info" } },
+      "uia": null,
+      "mcp_tools": ["oe_get_config"]
     },
     {
       "id": "oe.status.cpu_usage",

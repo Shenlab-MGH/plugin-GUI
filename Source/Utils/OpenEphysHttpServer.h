@@ -80,7 +80,7 @@ inline void setControlErrorResponse (httplib::Response& response,
  * The API is "RESTful", such that the resource URLs are:
  * 
  * - GET /api/capabilities :
- *          returns a JSON capability manifest (contract_version 0.0.2).
+ *          returns a JSON capability manifest (contract_version 0.0.3).
  *
  * - GET /api/config :
  *          returns an XML string with the current configuration of the GUI
@@ -188,7 +188,7 @@ public:
             const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
             res.set_content (document.dump(), "application/json"); });
 
-        svr_->Get ("/api/config", [this] (const httplib::Request&, httplib::Response& res)
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kConfigGet, [this] (const httplib::Request&, httplib::Response& res)
                    {
             std::unique_ptr<XmlElement> xmlElement = std::make_unique<XmlElement> ("SETTINGS");
             graph_->saveToXml (xmlElement.get());

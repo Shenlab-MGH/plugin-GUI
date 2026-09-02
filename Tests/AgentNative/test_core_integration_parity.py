@@ -4,8 +4,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT = ROOT / "agent_native" / "open_ephys_core_integration_parity_0_0_2.json"
-CONTRACT = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_2.json"
+REPORT = ROOT / "agent_native" / "open_ephys_core_integration_parity_0_0_3.json"
+CONTRACT = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_3.json"
 
 
 class CoreIntegrationParityTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class CoreIntegrationParityTests(unittest.TestCase):
         report = json.loads(REPORT.read_text(encoding="utf-8"))
         contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
 
-        self.assertEqual(report["schema_version"], "0.0.2")
+        self.assertEqual(report["schema_version"], "0.0.3")
         self.assertEqual(report["baseline"], {
             "version": "1.1.0",
             "upstream_release_commit": "c2ce076f5b2d4182222f9d0fd9bb9b97a60582e7",
@@ -58,6 +58,13 @@ class CoreIntegrationParityTests(unittest.TestCase):
         )
         self.assertEqual(capabilities["oe.control.recording.new_directory"]["parity"], "BOTH")
         self.assertEqual(capabilities["oe.control.recording.force_new_directory"]["parity"], "BOTH")
+        self.assertEqual(capabilities["oe.control.signal_chain.configuration"], {
+            "id": "oe.control.signal_chain.configuration",
+            "parity": "API_MCP_ONLY",
+            "api": {"read": {"method": "GET", "path": "/api/config", "field": "info"}},
+            "uia": None,
+            "mcp_tools": ["oe_get_config"],
+        })
         self.assertEqual(capabilities["oe.status.cpu_usage"]["parity"], "BOTH")
         self.assertEqual(capabilities["oe.status.cpu_usage"]["uia"], {
             "platform": "windows",

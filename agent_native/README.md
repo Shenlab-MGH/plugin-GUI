@@ -1,15 +1,16 @@
-# Open Ephys v1.1.0 agent-native 0.0.2
+# Open Ephys v1.1.0 agent-native 0.0.3
 
 This directory contains the smallest Windows MCP surface for the Open Ephys
 v1.1.0 agent-native prerelease. It exposes existing Open Ephys operations only:
 capability discovery, status, recording options, filename and parent-directory
-control, plus CPU, disk, and elapsed-time reads.
+control, a read-only signal-chain configuration snapshot, plus CPU, disk, and
+elapsed-time reads.
 
 ## Pins
 
 - Open Ephys baseline: `v1.1.0`
-- agent contract and bundle: `0.0.2`
-- API capability contract: `0.0.2`
+- agent contract and bundle: `0.0.3`
+- API capability contract: `0.0.3`
 - MCP protocol: legacy `2024-11-05`
 - modern MCP: not supported
 
@@ -46,7 +47,7 @@ traversal, control-character, reserved-name, and invalid-character forms before
 HTTP. This keeps the required filename SET capability without claiming atomic
 multi-component mutation.
 
-The 0.0.2 directory setter accepts only a non-empty drive-letter-rooted Windows
+The 0.0.3 directory setter accepts only a non-empty drive-letter-rooted Windows
 path and normalizes it before PUT. UNC, device, and extended namespace paths
 are rejected before HTTP. It refuses to mutate while the observed mode is
 RECORD, does not preflight existence, and requires a Windows-path-equivalent PUT
@@ -57,7 +58,7 @@ write response reports an uncertain mutation outcome and must not be retried.
 Run the dependency-independent tests with:
 
 ```powershell
-python -m unittest Tests.AgentNative.test_open_ephys_mcp_v002 -v
+python -m unittest Tests.AgentNative.test_open_ephys_mcp_v003 -v
 ```
 
 Official `mcp==2.0.0` remains absent from the instrument host. The separate

@@ -58,6 +58,7 @@ inline constexpr Route kRecordingGet { Method::Get, "/api/recording" };
 inline constexpr Route kRecordingPut { Method::Put, "/api/recording" };
 inline constexpr Route kRecordingOptionsGet { Method::Get, "/api/recording/options" };
 inline constexpr Route kRecordingOptionsPut { Method::Put, "/api/recording/options" };
+inline constexpr Route kConfigGet { Method::Get, "/api/config" };
 inline constexpr Route kCpuGet { Method::Get, "/api/cpu" };
 inline constexpr Route kDiskGet { Method::Get, "/api/disk" };
 inline constexpr Route kTimeGet { Method::Get, "/api/time" };

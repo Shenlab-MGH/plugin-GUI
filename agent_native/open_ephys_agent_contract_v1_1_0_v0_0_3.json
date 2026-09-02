@@ -1,7 +1,7 @@
 {
-  "schema_version": "0.0.2",
-  "contract": { "id": "open-ephys-agent", "version": "0.0.2" },
-  "bundle": { "id": "open-ephys-agent-native", "version": "0.0.2", "platform": "windows" },
+  "schema_version": "0.0.3",
+  "contract": { "id": "open-ephys-agent", "version": "0.0.3" },
+  "bundle": { "id": "open-ephys-agent-native", "version": "0.0.3", "platform": "windows" },
   "baseline": {
     "upstream": "open-ephys/plugin-GUI",
     "version": "1.1.0",
@@ -16,9 +16,9 @@
   },
   "transport": { "http_base_url": "http://127.0.0.1:37497" },
   "api": {
-    "capabilities_contract_version": "0.0.2",
+    "capabilities_contract_version": "0.0.3",
     "expected_capabilities_response": {
-      "contract_version": "0.0.2",
+      "contract_version": "0.0.3",
       "capabilities": [
         { "id": "oe.control.acquisition", "name": "Acquisition", "description": "Start or stop data acquisition.", "kind": "toggle", "uia": { "automation_id": "oe.control.acquisition" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/status", "request_fields": [], "response_fields": ["mode"] }, { "operation": "set", "method": "PUT", "path": "/api/status", "request_fields": ["mode"], "response_fields": ["mode"] }], "mode_semantics": { "field": "mode", "allowed_values": ["IDLE", "ACQUIRE", "RECORD"], "on_values": ["ACQUIRE", "RECORD"], "off_values": ["IDLE"], "commands": { "on": { "mode": "ACQUIRE" }, "off": { "mode": "IDLE" } }, "response_meaning": "actual_gui_state" } },
         { "id": "oe.control.recording", "name": "Recording", "description": "Start or stop writing data to disk.", "kind": "toggle", "uia": { "automation_id": "oe.control.recording" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/status", "request_fields": [], "response_fields": ["mode"] }, { "operation": "set", "method": "PUT", "path": "/api/status", "request_fields": ["mode"], "response_fields": ["mode"] }], "mode_semantics": { "field": "mode", "allowed_values": ["IDLE", "ACQUIRE", "RECORD"], "on_values": ["RECORD"], "off_values": ["IDLE", "ACQUIRE"], "commands": { "on": { "mode": "RECORD" }, "off": { "mode": "ACQUIRE" } }, "response_meaning": "actual_gui_state" } },
@@ -27,6 +27,7 @@
         { "id": "oe.control.recording.directory", "name": "Recording directory", "description": "Read or edit the recording parent directory.", "kind": "value", "uia": { "automation_id": "oe.control.recording.directory" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/recording", "request_fields": [], "response_fields": ["parent_directory"] }, { "operation": "set", "method": "PUT", "path": "/api/recording", "request_fields": ["parent_directory"], "response_fields": ["parent_directory"] }] },
         { "id": "oe.control.recording.new_directory", "name": "New recording directory", "description": "Start a new data directory for the next recording.", "kind": "toggle", "uia": { "automation_id": "oe.control.recording.new_directory" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/recording/options", "request_fields": [], "response_fields": ["new_directory_requested"] }, { "operation": "set", "method": "PUT", "path": "/api/recording/options", "request_fields": ["new_directory_requested"], "response_fields": ["new_directory_requested"] }] },
         { "id": "oe.control.recording.force_new_directory", "name": "Force new recording directories", "description": "Force a new data directory for each recording.", "kind": "toggle", "uia": { "automation_id": "oe.control.recording.force_new_directory" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/recording/options", "request_fields": [], "response_fields": ["force_new_directory"] }, { "operation": "set", "method": "PUT", "path": "/api/recording/options", "request_fields": ["force_new_directory"], "response_fields": ["force_new_directory"] }] },
+        { "id": "oe.control.signal_chain.configuration", "name": "Signal chain configuration", "description": "Read the current signal chain configuration.", "kind": "collection", "api": [{ "operation": "read", "method": "GET", "path": "/api/config", "request_fields": [], "response_fields": ["info"] }] },
         { "id": "oe.status.cpu_usage", "name": "CPU usage", "description": "Fraction of available processing time used by the signal chain.", "kind": "range", "uia": { "automation_id": "oe.status.cpu_usage" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/cpu", "request_fields": [], "response_fields": ["usage"] }] },
         { "id": "oe.status.disk_usage", "name": "Disk usage", "description": "Fraction of recording-volume space currently used.", "kind": "range", "uia": { "automation_id": "oe.status.disk_usage" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/disk", "request_fields": [], "response_fields": ["usage"] }] },
         { "id": "oe.status.elapsed_time", "name": "Elapsed time", "description": "Elapsed acquisition or recording time.", "kind": "status", "uia": { "automation_id": "oe.status.elapsed_time" }, "api": [{ "operation": "read", "method": "GET", "path": "/api/time", "request_fields": [], "response_fields": ["display"] }] }
@@ -43,6 +44,7 @@
     { "name": "oe_set_recording_filename", "description": "Set exactly one valid Windows filename component.", "inputSchema": { "type": "object", "minProperties": 1, "maxProperties": 1, "properties": { "prepend_text": { "type": "string" }, "base_text": { "type": "string" }, "append_text": { "type": "string" } }, "additionalProperties": false } },
     { "name": "oe_get_recording_directory", "description": "Read the recording parent directory.", "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } },
     { "name": "oe_set_recording_directory", "description": "Normalize and set one non-empty drive-letter-rooted Windows recording parent directory with readback.", "inputSchema": { "type": "object", "required": ["parent_directory"], "properties": { "parent_directory": { "type": "string", "minLength": 1 } }, "additionalProperties": false } },
+    { "name": "oe_get_config", "description": "Read the current signal chain configuration as SETTINGS XML.", "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } },
     { "name": "oe_get_cpu", "description": "Read CPU usage.", "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } },
     { "name": "oe_get_disk", "description": "Read disk usage.", "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } },
     { "name": "oe_get_time", "description": "Read elapsed time.", "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } }

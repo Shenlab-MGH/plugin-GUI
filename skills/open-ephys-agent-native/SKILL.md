@@ -1,13 +1,13 @@
 ---
 name: open-ephys-agent-native
-description: Safely inspect and control Open Ephys v1.1.0 through the 0.0.2 MCP tools. Use for capability discovery, acquisition or recording mode changes, recording options, filename or parent-directory changes, and CPU/disk/time status reads on the Windows Open Ephys agent-native build.
+description: Safely inspect and control Open Ephys v1.1.0 through the 0.0.3 MCP tools. Use for capability discovery, acquisition or recording mode changes, recording options, filename or parent-directory changes, configuration snapshots, and CPU/disk/time status reads on the Windows Open Ephys agent-native build.
 ---
 
 # Open Ephys Agent Native
 
 Use only the MCP tools declared here. This skill is pinned to:
 
-- contract: 0.0.2
+- contract: 0.0.3
 - Open Ephys baseline: 1.1.0
 - MCP protocol: legacy 2024-11-05
 - hardware_verified:false
@@ -21,6 +21,7 @@ Use only the MCP tools declared here. This skill is pinned to:
    - Call `oe_get_recording_options` for expanded / new_directory_requested / force_new_directory.
    - Call `oe_get_recording_filename` for prepend, base, and append text.
    - Call `oe_get_recording_directory` for the recording parent directory.
+   - Call `oe_get_config` for the current signal-chain configuration as SETTINGS XML.
    - Call `oe_get_cpu` for CPU usage.
    - Call `oe_get_disk` for disk usage.
    - Call `oe_get_time` for elapsed acquisition/recording time.
@@ -42,8 +43,9 @@ Use only the MCP tools declared here. This skill is pinned to:
 - `oe_set_recording_filename`: update exactly one validated filename component with readback.
 - `oe_get_recording_directory`: read the recording parent directory.
 - `oe_set_recording_directory`: normalize and update one drive-letter-rooted Windows parent directory with readback.
+- `oe_get_config`: read and validate the current signal-chain SETTINGS XML.
 - `oe_get_cpu`: read CPU usage from 0.0 to 1.0.
 - `oe_get_disk`: read disk usage from 0.0 to 1.0.
 - `oe_get_time`: read elapsed time display and related status fields.
 
-Do not assume tools, controls, or workflows outside this list exist in 0.0.2.
+Do not assume tools, controls, or workflows outside this list exist in 0.0.3.
