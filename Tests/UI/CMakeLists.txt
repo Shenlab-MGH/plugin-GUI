@@ -9,6 +9,7 @@ add_sources(${COMPONENT_NAME}_tests
 		DataViewportTests.cpp
 		MainDocumentWindowAccessibilityTests.cpp
 		SemanticComponentTests.cpp
+		SignalChainAccessibilityTests.cpp
 )
 target_include_directories(
 		${COMPONENT_NAME}_tests

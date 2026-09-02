@@ -10,12 +10,13 @@ from mcp.client import Client
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "agent_native" / "open_ephys_mcp_server.py"
+CONTRACT = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_4.json"
 EXPECTED = [
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
     "oe_get_recording_options", "oe_set_recording_options",
     "oe_get_recording_filename", "oe_set_recording_filename",
     "oe_get_recording_directory", "oe_set_recording_directory",
-    "oe_get_config",
+    "oe_get_config", "oe_get_processors",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 ]
 
@@ -26,7 +27,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/capabilities":
-            payload = json.loads((ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_3.json").read_text(encoding="utf-8"))["api"]["expected_capabilities_response"]
+            payload = json.loads(CONTRACT.read_text(encoding="utf-8"))["api"]["expected_capabilities_response"]
+        elif self.path == "/api/config":
+            payload = {"info": "<SETTINGS />"}
+        elif self.path == "/api/processors":
+            payload = {"processors": [
+                {
+                    "id": 11, "name": "File Reader",
+                    "parameters": [{"name": "path", "type": "String", "value": "C:/data"}],
+                    "streams": [{
+                        "name": "Neuropixels AP", "source_id": 11,
+                        "sample_rate": 30000.0, "channel_count": 384,
+                        "parameters": [],
+                    }],
+                    "predecessor": None,
+                },
+                {
+                    "id": 22, "name": "Mouse probe filter",
+                    "parameters": [], "streams": [], "predecessor": 11,
+                },
+            ]}
+        elif self.path == "/api/recording":
+            payload = {
+                "parent_directory": "C:/data", "prepend_text": "", "base_text": "Record Node",
+                "append_text": "", "default_record_engine": "Binary", "record_nodes": [],
+            }
         elif self.path == "/api/status":
             payload = {"mode": "IDLE"}
         else:
@@ -37,14 +62,36 @@ class Handler(BaseHTTPRequestHandler):
 
 
 async def verify(base_url: str) -> None:
-    params = StdioServerParameters(command=sys.executable, args=[str(SERVER), "--base-url", base_url], cwd=ROOT)
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[str(SERVER), "--contract", str(CONTRACT), "--base-url", base_url],
+        cwd=ROOT,
+    )
     async with Client(stdio_client(params), mode="auto") as client:
         tools = await client.list_tools()
         names = [tool.name for tool in tools.tools]
         assert names == EXPECTED, names
+        capabilities_tool = next(tool for tool in tools.tools if tool.name == "oe_get_capabilities")
+        assert capabilities_tool.description == (
+            "Read and verify the exact Open Ephys 0.0.4 core capability contract."
+        )
+        assert all("r0.1.2" not in (tool.description or "") for tool in tools.tools)
+        assert all("r0.1.3" not in (tool.description or "") for tool in tools.tools)
         result = await client.call_tool("oe_get_status", {})
         assert not result.is_error
         assert json.loads(result.content[0].text) == {"mode": "IDLE"}
+        directory = await client.call_tool("oe_get_recording_directory", {})
+        assert not directory.is_error
+        assert json.loads(directory.content[0].text) == {"parent_directory": "C:/data"}
+        config = await client.call_tool("oe_get_config", {})
+        assert not config.is_error
+        assert json.loads(config.content[0].text) == {"info": "<SETTINGS />"}
+        processors = await client.call_tool("oe_get_processors", {})
+        assert not processors.is_error
+        assert json.loads(processors.content[0].text) == {"processors": [
+            {"id": 11, "name": "File Reader", "predecessor": None},
+            {"id": 22, "name": "Mouse probe filter", "predecessor": 11},
+        ]}
 
 
 def main() -> None:

@@ -501,9 +501,9 @@ class McpV003Tests(unittest.TestCase):
 
     def test_skill_pins_contract_and_safety_boundary(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        for required in ("0.0.3", "1.1.0", "2024-11-05", "approve_recording=true", "hardware_verified:false", "scientific_verified:false", "drive-letter-rooted Windows path", "equivalent PUT response and GET readback"):
+        for required in ("0.0.4", "1.1.0", "2024-11-05", "approve_recording=true", "hardware_verified:false", "scientific_verified:false", "drive-letter-rooted Windows path", "equivalent PUT response and GET readback", "oe_get_config", "read-only processor inventory"):
             self.assertIn(required, skill)
-        for forbidden in ("oe_api_request", "uia locator", "processor", "parameter", "stream"):
+        for forbidden in ("oe_api_request", "uia locator"):
             self.assertNotIn(forbidden, skill.lower())
 
 

@@ -31,3 +31,13 @@ target_compile_definitions(
 		PRIVATE
 		RESOURCES_DIRECTORY="${RESOURCES_DIRECTORY}"
 )
+
+if(WIN32)
+	# Compile the production AccessClass implementation once, with one test-only
+	# setter added in the same translation unit so ProcessorGraph uses the real state.
+	get_target_property(gui_testable_sources gui_testable_source SOURCES)
+	set(access_class_source "${SOURCE_DIRECTORY}/AccessClass.cpp")
+	list(REMOVE_ITEM gui_testable_sources "${access_class_source}")
+	set_property(TARGET gui_testable_source PROPERTY SOURCES "${gui_testable_sources}")
+	target_sources(gui_testable_source PRIVATE ${CMAKE_CURRENT_LIST_DIR}/TestableAccessClass.cpp)
+endif()
