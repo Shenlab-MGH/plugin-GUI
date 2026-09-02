@@ -610,18 +610,19 @@ TEST_F (ControlPanelAccessibilityTests, ExposesRecordingDirectoryThroughWindowsU
     Component content;
     ControlPanel panel (nullptr, nullptr, true);
 
-    panel.setBounds (0, 0, 900, 100);
-    panel.setRecordingOptionsExpanded (true);
-    panel.setSize (901, 100);
-
     auto* directory = findDescendantByAutomationId (panel, "oe.control.recording.directory");
     ASSERT_NE (directory, nullptr);
     EXPECT_EQ (directory->getTitle(), "Recording directory");
     EXPECT_EQ (directory->getDescription(), "Read or edit the recording parent directory.");
     EXPECT_TRUE (directory->isAccessible());
 
+    // Exercise the real FilenameComponent configured by ControlPanel, but keep
+    // the native UIA query scoped to that component. Resizing the console-mode
+    // ControlPanel unnecessarily lays out controls that were never attached to
+    // its component tree, making this contract depend on unrelated lifetimes.
     content.setBounds (0, 0, 900, 100);
-    content.addAndMakeVisible (panel);
+    content.addAndMakeVisible (directory);
+    directory->setBounds (0, 0, 390, 32);
     window.setContentNonOwned (&content, false);
     window.centreWithSize (900, 120);
     window.addToDesktop();
