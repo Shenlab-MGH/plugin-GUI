@@ -54,6 +54,8 @@ protected:
 };
 
 #if JUCE_WINDOWS
+constexpr auto uiaWorkerTimeoutMilliseconds = 10000;
+
 struct UiaObservation
 {
     bool found = false;
@@ -181,7 +183,7 @@ UiaObservation observeWhilePumpingMessages (HWND windowHandle,
                             finished.store (true);
                         });
 
-    const auto deadline = Time::getMillisecondCounter() + 3000;
+    const auto deadline = Time::getMillisecondCounter() + uiaWorkerTimeoutMilliseconds;
     bool timeoutReported = false;
 
     while (! finished.load())

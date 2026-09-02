@@ -21,7 +21,7 @@ struct ExpectedCapability
     std::vector<ExpectedApiOperation> operations;
 };
 
-// Full Core 0.0.1 capability set shared with v1.0.2. Order is stable.
+// Full 0.0.2 capability set shared with v1.0.2. Order is stable.
 // Operations reference shared route descriptors.
 const std::vector<ExpectedCapability> expectedCapabilities {
     { "oe.control.acquisition", "oe.control.acquisition",
@@ -34,6 +34,9 @@ const std::vector<ExpectedCapability> expectedCapabilities {
       { { "read", OpenEphysHttpApi::kRecordingOptionsGet },
         { "set", OpenEphysHttpApi::kRecordingOptionsPut } } },
     { "oe.control.recording.filename", "oe.control.recording.filename",
+      { { "read", OpenEphysHttpApi::kRecordingGet },
+        { "set", OpenEphysHttpApi::kRecordingPut } } },
+    { "oe.control.recording.directory", "oe.control.recording.directory",
       { { "read", OpenEphysHttpApi::kRecordingGet },
         { "set", OpenEphysHttpApi::kRecordingPut } } },
     { "oe.control.recording.new_directory", "oe.control.recording.new_directory",
@@ -126,7 +129,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
     const auto& capabilities = getCoreControlCapabilities();
 
     ASSERT_EQ (capabilities.size(), expectedCapabilities.size());
-    ASSERT_EQ (expectedCapabilities.size(), (size_t) 9);
+    ASSERT_EQ (expectedCapabilities.size(), (size_t) 10);
 
     for (size_t i = 0; i < capabilities.size(); ++i)
     {
@@ -162,7 +165,7 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
 {
     const auto& capabilities = getCoreControlCapabilities();
 
-    ASSERT_EQ (capabilities.size(), (size_t) 9);
+    ASSERT_EQ (capabilities.size(), (size_t) 10);
 
     for (const auto& capability : capabilities)
     {
@@ -191,11 +194,11 @@ TEST (ControlCapabilityTests, SerialisesFullCapabilityContractWithUia)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
 
-    EXPECT_EQ (document["contract_version"], "0.0.1");
+    EXPECT_EQ (document["contract_version"], "0.0.2");
     EXPECT_FALSE (document.contains ("surface"));
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), expectedCapabilities.size());
-    ASSERT_EQ (document["capabilities"].size(), (size_t) 9);
+    ASSERT_EQ (document["capabilities"].size(), (size_t) 10);
 
     for (size_t i = 0; i < document["capabilities"].size(); ++i)
     {
@@ -223,6 +226,27 @@ TEST (ControlCapabilityTests, SerialisesFullCapabilityContractWithUia)
     }
 }
 
+TEST (ControlCapabilityTests, RecordingDirectoryUsesSharedRouteAndParentDirectoryOnly)
+{
+    const auto* directory = findControlCapability ("oe.control.recording.directory");
+    ASSERT_NE (directory, nullptr);
+    EXPECT_EQ (directory->kind, ControlCapabilityKind::value);
+    EXPECT_EQ (directory->uiaAutomationId, "oe.control.recording.directory");
+    ASSERT_EQ (directory->operations.size(), (size_t) 2);
+
+    const auto& read = directory->operations[0];
+    EXPECT_EQ (read.operation, "read");
+    EXPECT_TRUE (routesEqual (read.route, OpenEphysHttpApi::kRecordingGet));
+    EXPECT_TRUE (read.requestFields.isEmpty());
+    EXPECT_EQ (read.responseFields, StringArray ({ "parent_directory" }));
+
+    const auto& set = directory->operations[1];
+    EXPECT_EQ (set.operation, "set");
+    EXPECT_TRUE (routesEqual (set.route, OpenEphysHttpApi::kRecordingPut));
+    EXPECT_EQ (set.requestFields, StringArray ({ "parent_directory" }));
+    EXPECT_EQ (set.responseFields, StringArray ({ "parent_directory" }));
+}
+
 TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
@@ -238,18 +262,21 @@ TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
     const auto acquisitionResult = findById ("oe.control.acquisition");
     const auto recordingResult = findById ("oe.control.recording");
     const auto filenameResult = findById ("oe.control.recording.filename");
+    const auto directoryResult = findById ("oe.control.recording.directory");
     const auto cpuResult = findById ("oe.status.cpu_usage");
     const auto optionsResult = findById ("oe.control.recording.options");
 
     ASSERT_NE (acquisitionResult, capabilities.end());
     ASSERT_NE (recordingResult, capabilities.end());
     ASSERT_NE (filenameResult, capabilities.end());
+    ASSERT_NE (directoryResult, capabilities.end());
     ASSERT_NE (cpuResult, capabilities.end());
     ASSERT_NE (optionsResult, capabilities.end());
 
     const auto& acquisition = *acquisitionResult;
     const auto& recording = *recordingResult;
     const auto& filename = *filenameResult;
+    const auto& directory = *directoryResult;
     const auto& cpu = *cpuResult;
     const auto& options = *optionsResult;
 
@@ -274,6 +301,7 @@ TEST (ControlCapabilityTests, DefinesStatusModeSemanticsUsingActualGuiState)
     EXPECT_EQ (recording["mode_semantics"]["response_meaning"], "actual_gui_state");
 
     EXPECT_FALSE (filename.contains ("mode_semantics"));
+    EXPECT_FALSE (directory.contains ("mode_semantics"));
     EXPECT_FALSE (cpu.contains ("mode_semantics"));
     EXPECT_FALSE (options.contains ("mode_semantics"));
 }
