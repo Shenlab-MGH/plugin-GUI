@@ -1,5 +1,5 @@
 /*
-    Minimal core bridge for the versioned Neuropixels preset plugin contract.
+    Minimal core bridge for the versioned 0.0.5 Neuropixels preset plugin contract.
     Preset semantics remain plugin-owned; core only validates, forwards, and
     verifies typed JSON on the message thread.
 */

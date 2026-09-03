@@ -30,7 +30,8 @@
     (plus GET /api/capabilities). Used by both OpenEphysHttpServer registration
     and the Core R0 capability manifest so method/path cannot drift.
 
-    Scope is intentionally small: only existing Core R0 routes and discovery.
+    Scope is intentionally small: existing Core R0 routes and discovery plus the
+    additive 0.0.5 Neuropixels preset GET/PUT bridge.
 */
 namespace OpenEphysHttpApi
 {

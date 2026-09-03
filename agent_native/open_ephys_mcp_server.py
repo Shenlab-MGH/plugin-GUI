@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Narrow legacy MCP bridge for Open Ephys v1.1.0 agent contract 0.0.4."""
+"""Additive 0.0.5 MCP bridge over the exact Open Ephys v1.1.0 0.0.4 core."""
 
 from __future__ import annotations
 
