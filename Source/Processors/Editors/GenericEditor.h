@@ -72,6 +72,9 @@ public:
     /** Called when the boundaries of the editor are updated. */
     virtual void resized() override;
 
+    /** Exposes this loaded processor as an item in the signal-chain list. */
+    std::unique_ptr<AccessibilityHandler> createAccessibilityHandler() override;
+
     // =====================================================================
     // =====================================================================
     // =====================================================================
@@ -336,6 +339,8 @@ protected:
     uint16 selectedStream;
 
 private:
+    void updateAgentNativeAccessibility();
+
     class ButtonResponder : public Button::Listener
     {
     public:

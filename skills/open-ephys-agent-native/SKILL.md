@@ -1,13 +1,13 @@
 ---
 name: open-ephys-agent-native
-description: Safely inspect and control Open Ephys v1.1.0 through the 0.0.3 MCP tools. Use for capability discovery, acquisition or recording mode changes, recording options, filename or parent-directory changes, configuration snapshots, and CPU/disk/time status reads on the Windows Open Ephys agent-native build.
+description: Safely inspect and control Open Ephys v1.1.0 through the 0.0.4 MCP tools. Use for capability discovery, acquisition or recording mode changes, recording options, filename or parent-directory changes, configuration snapshots, read-only processor inventory, and CPU/disk/time status reads on the Windows Open Ephys agent-native build.
 ---
 
 # Open Ephys Agent Native
 
 Use only the MCP tools declared here. This skill is pinned to:
 
-- contract: 0.0.3
+- contract: 0.0.4
 - Open Ephys baseline: 1.1.0
 - MCP protocol: legacy 2024-11-05
 - hardware_verified:false
@@ -22,6 +22,7 @@ Use only the MCP tools declared here. This skill is pinned to:
    - Call `oe_get_recording_filename` for prepend, base, and append text.
    - Call `oe_get_recording_directory` for the recording parent directory.
    - Call `oe_get_config` for the current signal-chain configuration as SETTINGS XML.
+   - Call `oe_get_processors` for the read-only processor inventory.
    - Call `oe_get_cpu` for CPU usage.
    - Call `oe_get_disk` for disk usage.
    - Call `oe_get_time` for elapsed acquisition/recording time.
@@ -44,8 +45,11 @@ Use only the MCP tools declared here. This skill is pinned to:
 - `oe_get_recording_directory`: read the recording parent directory.
 - `oe_set_recording_directory`: normalize and update one drive-letter-rooted Windows parent directory with readback.
 - `oe_get_config`: read and validate the current signal-chain SETTINGS XML.
+- `oe_get_processors`: read loaded processors as id, current display name, and current-path predecessor.
 - `oe_get_cpu`: read CPU usage from 0.0 to 1.0.
 - `oe_get_disk`: read disk usage from 0.0 to 1.0.
 - `oe_get_time`: read elapsed time display and related status fields.
 
-Do not assume tools, controls, or workflows outside this list exist in 0.0.3.
+The read-only processor inventory is session/configuration scoped and is not full topology. The MCP projection validates but does not return parameters or streams. This adds no new Open Ephys functionality and no add, delete, load, save, probe, shank, or timer controls. Keep `hardware_verified=false` and `scientific_verified=false` until those gates are directly proven.
+
+Do not assume tools, controls, or workflows outside this list exist in 0.0.4.

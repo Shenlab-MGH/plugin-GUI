@@ -15,6 +15,7 @@ add_sources(
   ControlStatusJson.cpp
   ControlRead.h
   MessageThreadCall.h
+  ProcessorInventoryApiHandler.h
   RecordingOptionsControl.h
   StatusControl.h
   StatusApiHandler.h

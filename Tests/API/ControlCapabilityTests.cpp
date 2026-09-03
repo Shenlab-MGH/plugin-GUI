@@ -47,6 +47,8 @@ const std::vector<ExpectedCapability> expectedCapabilities {
         { "set", OpenEphysHttpApi::kRecordingOptionsPut } } },
     { "oe.control.signal_chain.configuration", "",
       { { "read", OpenEphysHttpApi::kConfigGet } } },
+    { "oe.control.signal_chain.processors", "",
+      { { "read", OpenEphysHttpApi::kProcessorsGet } } },
     { "oe.status.cpu_usage", "oe.status.cpu_usage",
       { { "read", OpenEphysHttpApi::kCpuGet } } },
     { "oe.status.disk_usage", "oe.status.disk_usage",
@@ -63,6 +65,7 @@ const OpenEphysHttpApi::Route coreR0RouteDescriptors[] = {
     OpenEphysHttpApi::kRecordingOptionsGet,
     OpenEphysHttpApi::kRecordingOptionsPut,
     OpenEphysHttpApi::kConfigGet,
+    OpenEphysHttpApi::kProcessorsGet,
     OpenEphysHttpApi::kCpuGet,
     OpenEphysHttpApi::kDiskGet,
     OpenEphysHttpApi::kTimeGet,
@@ -77,6 +80,7 @@ const OpenEphysHttpApi::Route sharedRegisteredRouteDescriptors[] = {
     OpenEphysHttpApi::kRecordingOptionsGet,
     OpenEphysHttpApi::kRecordingOptionsPut,
     OpenEphysHttpApi::kConfigGet,
+    OpenEphysHttpApi::kProcessorsGet,
     OpenEphysHttpApi::kCpuGet,
     OpenEphysHttpApi::kDiskGet,
     OpenEphysHttpApi::kTimeGet,
@@ -120,6 +124,10 @@ TEST (ControlCapabilityTests, SharedRouteDescriptorsHaveExactMethodPathPairs)
     EXPECT_STREQ (OpenEphysHttpApi::kConfigGet.path, "/api/config");
     EXPECT_STREQ (OpenEphysHttpApi::kConfigGet.methodString(), "GET");
 
+    EXPECT_EQ (OpenEphysHttpApi::kProcessorsGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kProcessorsGet.path, "/api/processors");
+    EXPECT_STREQ (OpenEphysHttpApi::kProcessorsGet.methodString(), "GET");
+
     EXPECT_EQ (OpenEphysHttpApi::kDiskGet.method, OpenEphysHttpApi::Method::Get);
     EXPECT_STREQ (OpenEphysHttpApi::kDiskGet.path, "/api/disk");
     EXPECT_STREQ (OpenEphysHttpApi::kDiskGet.methodString(), "GET");
@@ -128,8 +136,8 @@ TEST (ControlCapabilityTests, SharedRouteDescriptorsHaveExactMethodPathPairs)
     EXPECT_STREQ (OpenEphysHttpApi::kTimeGet.path, "/api/time");
     EXPECT_STREQ (OpenEphysHttpApi::kTimeGet.methodString(), "GET");
 
-    ASSERT_EQ (sizeof (sharedRegisteredRouteDescriptors) / sizeof (sharedRegisteredRouteDescriptors[0]), (size_t) 11);
-    ASSERT_EQ (sizeof (coreR0RouteDescriptors) / sizeof (coreR0RouteDescriptors[0]), (size_t) 10);
+    ASSERT_EQ (sizeof (sharedRegisteredRouteDescriptors) / sizeof (sharedRegisteredRouteDescriptors[0]), (size_t) 12);
+    ASSERT_EQ (sizeof (coreR0RouteDescriptors) / sizeof (coreR0RouteDescriptors[0]), (size_t) 11);
 }
 
 TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
@@ -137,7 +145,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
     const auto& capabilities = getCoreControlCapabilities();
 
     ASSERT_EQ (capabilities.size(), expectedCapabilities.size());
-    ASSERT_EQ (expectedCapabilities.size(), (size_t) 11);
+    ASSERT_EQ (expectedCapabilities.size(), (size_t) 12);
 
     for (size_t i = 0; i < capabilities.size(); ++i)
     {
@@ -173,7 +181,7 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
 {
     const auto& capabilities = getCoreControlCapabilities();
 
-    ASSERT_EQ (capabilities.size(), (size_t) 11);
+    ASSERT_EQ (capabilities.size(), (size_t) 12);
 
     for (const auto& capability : capabilities)
     {
@@ -189,14 +197,17 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
 
     const auto* options = findControlCapability ("oe.control.recording.options");
     const auto* configuration = findControlCapability ("oe.control.signal_chain.configuration");
+    const auto* processors = findControlCapability ("oe.control.signal_chain.processors");
     const auto* disk = findControlCapability ("oe.status.disk_usage");
     const auto* time = findControlCapability ("oe.status.elapsed_time");
     ASSERT_NE (options, nullptr);
     ASSERT_NE (configuration, nullptr);
+    ASSERT_NE (processors, nullptr);
     ASSERT_NE (disk, nullptr);
     ASSERT_NE (time, nullptr);
     EXPECT_TRUE (routesEqual (options->operations[0].route, OpenEphysHttpApi::kRecordingOptionsGet));
     EXPECT_TRUE (routesEqual (configuration->operations[0].route, OpenEphysHttpApi::kConfigGet));
+    EXPECT_TRUE (routesEqual (processors->operations[0].route, OpenEphysHttpApi::kProcessorsGet));
     EXPECT_TRUE (routesEqual (disk->operations[0].route, OpenEphysHttpApi::kDiskGet));
     EXPECT_TRUE (routesEqual (time->operations[0].route, OpenEphysHttpApi::kTimeGet));
 }
@@ -205,11 +216,11 @@ TEST (ControlCapabilityTests, SerialisesFullCapabilityContractWithUia)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
 
-    EXPECT_EQ (document["contract_version"], "0.0.3");
+    EXPECT_EQ (document["contract_version"], "0.0.4");
     EXPECT_FALSE (document.contains ("surface"));
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), expectedCapabilities.size());
-    ASSERT_EQ (document["capabilities"].size(), (size_t) 11);
+    ASSERT_EQ (document["capabilities"].size(), (size_t) 12);
 
     for (size_t i = 0; i < document["capabilities"].size(); ++i)
     {

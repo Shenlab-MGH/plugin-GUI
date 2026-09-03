@@ -1,4 +1,4 @@
-"""Gate: official MCP v2 interop EXPECTED must match the live 0.0.3 tool surface.
+"""Gate: official MCP v2 interop EXPECTED must match the live 0.0.4 tool surface.
 
 Fails when EXPECTED drifts (e.g. stale 6-tool list) relative to the product
 contract/MCP server, and when verification claims local interop "passed"
@@ -16,13 +16,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_3.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_4.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 INTEROP_PATH = ROOT / "Tests" / "AgentNative" / "official_mcp_v2_interop.py"
-PARITY_PATH = AGENT_DIR / "open_ephys_core_integration_parity_0_0_3.json"
+PARITY_PATH = AGENT_DIR / "open_ephys_core_integration_parity_v0_0_4.json"
 BUNDLE_PATH = AGENT_DIR / "open_ephys_agent_release_bundle.json"
 
-FULL_CORE_TOOL_COUNT = 13
+FULL_CORE_TOOL_COUNT = 14
 FULL_CORE_TOOL_NAMES = [
     "oe_get_capabilities",
     "oe_get_status",
@@ -34,6 +34,7 @@ FULL_CORE_TOOL_NAMES = [
     "oe_get_recording_directory",
     "oe_set_recording_directory",
     "oe_get_config",
+    "oe_get_processors",
     "oe_get_cpu",
     "oe_get_disk",
     "oe_get_time",
@@ -56,7 +57,8 @@ def _mcp_package_importable() -> bool:
 
 
 class OfficialMcpV2ToolParityTests(unittest.TestCase):
-    def test_expected_matches_exact_thirteen_0_0_3_tools_from_contract_and_server(self) -> None:
+    def test_expected_matches_exact_fourteen_0_0_4_tools_from_contract_and_server(self) -> None:
+        self.assertTrue(CONTRACT_PATH.is_file(), f"0.0.4 contract missing: {CONTRACT_PATH}")
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
         contract_tools = [tool["name"] for tool in contract["tools"]]
         server_source = SERVER_PATH.read_text(encoding="utf-8")
@@ -76,6 +78,7 @@ class OfficialMcpV2ToolParityTests(unittest.TestCase):
 
     def test_local_interop_must_not_claim_passed_when_unrunnable(self) -> None:
         """No unearned 'passed' for official MCP v2 local interop."""
+        self.assertTrue(PARITY_PATH.is_file(), f"0.0.4 parity missing: {PARITY_PATH}")
         report = json.loads(PARITY_PATH.read_text(encoding="utf-8"))
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
         local_status = report["verification"]["official_mcp_v2_local_interop"]

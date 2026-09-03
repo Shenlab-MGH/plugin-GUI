@@ -25,6 +25,7 @@
 #define EMPTYPROCESSOR_H_INCLUDED
 
 #include "../GenericProcessor/GenericProcessor.h"
+#include "../../TestableExport.h"
 #include <JuceHeader.h>
 
 /** 
@@ -33,7 +34,7 @@
 * Data acquisition cannot begin while a EmptyProcessor is in the signal chain.
 
 */
-class EmptyProcessor : public GenericProcessor
+class TESTABLE EmptyProcessor : public GenericProcessor
 {
 public:
     /** Constructor*/

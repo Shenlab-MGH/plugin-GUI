@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Narrow legacy MCP bridge for Open Ephys v1.1.0 agent contract 0.0.3."""
+"""Narrow legacy MCP bridge for Open Ephys v1.1.0 agent contract 0.0.4."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ from typing import Any
 
 
 PROTOCOL_VERSION = "2024-11-05"
-CONTRACT_VERSION = "0.0.3"
-DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_v0_0_3.json")
-TOOL_NAMES = (
+CONTRACT_VERSION = "0.0.4"
+DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_v0_0_4.json")
+V003_TOOL_NAMES = (
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
     "oe_get_recording_options", "oe_set_recording_options",
     "oe_get_recording_filename", "oe_set_recording_filename",
@@ -27,7 +27,8 @@ TOOL_NAMES = (
     "oe_get_config",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 )
-CAPABILITY_IDS = (
+TOOL_NAMES = (*V003_TOOL_NAMES[:10], "oe_get_processors", *V003_TOOL_NAMES[10:])
+V003_CAPABILITY_IDS = (
     "oe.control.acquisition", "oe.control.recording", "oe.control.recording.options",
     "oe.control.recording.filename", "oe.control.recording.directory",
     "oe.control.recording.new_directory",
@@ -35,6 +36,7 @@ CAPABILITY_IDS = (
     "oe.status.cpu_usage",
     "oe.status.disk_usage", "oe.status.elapsed_time",
 )
+CAPABILITY_IDS = (*V003_CAPABILITY_IDS[:8], "oe.control.signal_chain.processors", *V003_CAPABILITY_IDS[8:])
 ALLOWED_MODES = {"IDLE", "ACQUIRE", "RECORD"}
 OPTION_FIELDS = ("expanded", "force_new_directory", "new_directory_requested")
 FILENAME_FIELDS = ("prepend_text", "base_text", "append_text")
@@ -89,11 +91,16 @@ def load_contract(path: Path) -> dict[str, Any]:
         contract = loads_json(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cannot load contract {path}: {exc}") from exc
+    version = contract.get("schema_version")
+    if version not in {"0.0.3", CONTRACT_VERSION}:
+        raise ValueError(f"Unsupported contract version: {version!r}")
+    expected_tool_names = V003_TOOL_NAMES if version == "0.0.3" else TOOL_NAMES
+    expected_capability_ids = V003_CAPABILITY_IDS if version == "0.0.3" else CAPABILITY_IDS
     expected = {
-        "schema_version": CONTRACT_VERSION,
-        "contract": {"id": "open-ephys-agent", "version": CONTRACT_VERSION},
+        "schema_version": version,
+        "contract": {"id": "open-ephys-agent", "version": version},
         "bundle_id": "open-ephys-agent-native",
-        "bundle_version": CONTRACT_VERSION,
+        "bundle_version": version,
         "baseline_version": "1.1.0",
         "mcp_protocol_version": PROTOCOL_VERSION,
         "mcp_modern_protocol_supported": False,
@@ -110,9 +117,9 @@ def load_contract(path: Path) -> dict[str, Any]:
         "mcp_server_name": (contract.get("mcp") or {}).get("server_name"),
     }
     if actual != expected:
-        raise ValueError(f"Contract pins do not match the v1.1.0 0.0.3 server: {actual!r}")
+        raise ValueError(f"Contract pins do not match the v1.1.0 server: {actual!r}")
     tools = contract.get("tools")
-    if not isinstance(tools, list) or [tool.get("name") for tool in tools if isinstance(tool, dict)] != list(TOOL_NAMES):
+    if not isinstance(tools, list) or [tool.get("name") for tool in tools if isinstance(tool, dict)] != list(expected_tool_names):
         raise ValueError("Contract tool names do not match the narrow Core R0 surface.")
     for tool in tools:
         schema = tool.get("inputSchema") if isinstance(tool, dict) else None
@@ -120,11 +127,11 @@ def load_contract(path: Path) -> dict[str, Any]:
             raise ValueError("Every Core R0 tool requires a closed input schema.")
     api = contract.get("api")
     capabilities = api.get("expected_capabilities_response") if isinstance(api, dict) else None
-    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != "0.0.3":
-        raise ValueError("Capability fixture must pin API contract 0.0.3.")
+    if not isinstance(capabilities, dict) or capabilities.get("contract_version") != version:
+        raise ValueError(f"Capability fixture must pin API contract {version}.")
     items = capabilities.get("capabilities")
-    if not isinstance(items, list) or [item.get("id") for item in items if isinstance(item, dict)] != list(CAPABILITY_IDS):
-        raise ValueError("Capability fixture does not match the exact eleven 0.0.3 capabilities.")
+    if not isinstance(items, list) or [item.get("id") for item in items if isinstance(item, dict)] != list(expected_capability_ids):
+        raise ValueError(f"Capability fixture does not match the exact {version} capabilities.")
     if contract.get("verification") != {
         "hardware_verified": False,
         "scientific_verified": False,
@@ -236,6 +243,80 @@ def validate_config(payload: Any) -> dict[str, str]:
     return {"info": info}
 
 
+def _validate_processor_parameter(parameter: Any) -> None:
+    value = expect_object(parameter, "Processor parameter")
+    if set(value) != {"name", "type", "value"} or any(
+        not isinstance(value.get(field), str) for field in value
+    ):
+        raise ToolError(
+            "response_schema_mismatch",
+            "Processor parameters must contain exact string name/type/value fields.",
+        )
+
+
+def _validate_processor_stream(stream: Any) -> None:
+    value = expect_object(stream, "Processor stream")
+    if set(value) != {"name", "source_id", "sample_rate", "channel_count", "parameters"}:
+        raise ToolError("response_schema_mismatch", "Processor streams have an unexpected shape.")
+    if (
+        not isinstance(value["name"], str)
+        or not isinstance(value["source_id"], int)
+        or isinstance(value["source_id"], bool)
+        or value["source_id"] < 0
+        or not _is_number(value["sample_rate"])
+        or not isinstance(value["channel_count"], int)
+        or isinstance(value["channel_count"], bool)
+        or value["channel_count"] < 0
+        or not isinstance(value["parameters"], list)
+    ):
+        raise ToolError("response_schema_mismatch", "Processor stream fields have invalid types or values.")
+    for parameter in value["parameters"]:
+        _validate_processor_parameter(parameter)
+
+
+def processors_projection(payload: Any) -> dict[str, list[dict[str, Any]]]:
+    value = expect_object(payload, "Processors")
+    if set(value) != {"processors"} or not isinstance(value["processors"], list):
+        raise ToolError(
+            "response_schema_mismatch",
+            "Processors response must contain only a processors array.",
+        )
+
+    result = []
+    seen_ids = set()
+    for processor in value["processors"]:
+        item = expect_object(processor, "Processor")
+        if set(item) != {"id", "name", "parameters", "streams", "predecessor"}:
+            raise ToolError("response_schema_mismatch", "Each processor has an unexpected shape.")
+        processor_id = item["id"]
+        predecessor = item["predecessor"]
+        if (
+            not isinstance(processor_id, int)
+            or isinstance(processor_id, bool)
+            or processor_id < 0
+            or processor_id in seen_ids
+            or not isinstance(item["name"], str)
+            or not isinstance(item["parameters"], list)
+            or not isinstance(item["streams"], list)
+            or (
+                predecessor is not None
+                and (
+                    not isinstance(predecessor, int)
+                    or isinstance(predecessor, bool)
+                    or predecessor < 0
+                )
+            )
+        ):
+            raise ToolError("response_schema_mismatch", "Processor fields have invalid types or values.")
+        for parameter in item["parameters"]:
+            _validate_processor_parameter(parameter)
+        for stream in item["streams"]:
+            _validate_processor_stream(stream)
+        seen_ids.add(processor_id)
+        result.append({"id": processor_id, "name": item["name"], "predecessor": predecessor})
+    return {"processors": result}
+
+
 def normalize_windows_directory(value: str) -> str:
     if not value:
         raise ToolError("invalid_arguments", "parent_directory must be a non-empty drive-letter-rooted Windows path.")
@@ -306,6 +387,8 @@ def validate_filename_component(value: str) -> None:
 class McpServer:
     def __init__(self, contract_path: Path = DEFAULT_CONTRACT, base_url: str | None = None):
         self.contract = load_contract(Path(contract_path))
+        self.contract_version = self.contract["contract"]["version"]
+        self.tool_names = tuple(tool["name"] for tool in self.contract["tools"])
         self.api = ApiClient(base_url or self.contract["transport"]["http_base_url"])
         self.connection_state = "new"
 
@@ -364,14 +447,14 @@ class McpServer:
                 or not isinstance(client_info.get("version"), str) or not client_info["version"]):
             raise JsonRpcError(INVALID_PARAMS, "Invalid legacy initialize parameters.")
         self.connection_state = "initialize_responded"
-        return {"protocolVersion": PROTOCOL_VERSION, "capabilities": {"tools": {}}, "serverInfo": {"name": self.contract["mcp"]["server_name"], "version": CONTRACT_VERSION}}
+        return {"protocolVersion": PROTOCOL_VERSION, "capabilities": {"tools": {}}, "serverInfo": {"name": self.contract["mcp"]["server_name"], "version": self.contract_version}}
 
     def _require_ready(self) -> None:
         if self.connection_state != "ready": raise JsonRpcError(SERVER_NOT_INITIALIZED, "Server not initialized")
 
     def _call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         if (not {"name"}.issubset(params) or not set(params).issubset({"name", "arguments", "_meta"})
-                or params.get("name") not in TOOL_NAMES or not isinstance(params.get("arguments", {}), dict)
+                or params.get("name") not in self.tool_names or not isinstance(params.get("arguments", {}), dict)
                 or ("_meta" in params and not isinstance(params["_meta"], dict))):
             raise JsonRpcError(INVALID_PARAMS, "Unknown tool or invalid arguments object.")
         try:
@@ -383,7 +466,7 @@ class McpServer:
 
     @staticmethod
     def _validate_arguments(name: str, arguments: dict[str, Any]) -> None:
-        if name in {"oe_get_capabilities", "oe_get_status", "oe_get_recording_options", "oe_get_recording_filename", "oe_get_recording_directory", "oe_get_config", "oe_get_cpu", "oe_get_disk", "oe_get_time"}:
+        if name in {"oe_get_capabilities", "oe_get_status", "oe_get_recording_options", "oe_get_recording_filename", "oe_get_recording_directory", "oe_get_config", "oe_get_processors", "oe_get_cpu", "oe_get_disk", "oe_get_time"}:
             if arguments: raise ToolError("invalid_arguments", f"{name} does not accept arguments.")
         elif name == "oe_set_status":
             if not set(arguments).issubset({"mode", "approve_recording"}) or not isinstance(arguments.get("mode"), str) or arguments["mode"] not in ALLOWED_MODES or ("approve_recording" in arguments and not isinstance(arguments["approve_recording"], bool)):
@@ -404,7 +487,7 @@ class McpServer:
         actual = self.api.request("GET", "/api/capabilities")
         expected = self.contract["api"]["expected_capabilities_response"]
         if actual != expected:
-            raise ToolError("capability_contract_mismatch", "Open Ephys capabilities do not exactly match the pinned Core R0 contract.")
+            raise ToolError("capability_contract_mismatch", f"Open Ephys capabilities do not exactly match the pinned {self.contract_version} contract.")
         return actual
 
     def _raise_mutation_outcome_unknown(self, requested: dict[str, Any], put_error: ToolError, path: str, validator, *, submitted: dict[str, Any] | None = None) -> None:
@@ -434,6 +517,7 @@ class McpServer:
         if name == "oe_get_recording_filename": return filename_projection(self.api.request("GET", "/api/recording"))
         if name == "oe_get_recording_directory": return directory_projection(self.api.request("GET", "/api/recording"))
         if name == "oe_get_config": return validate_config(self.api.request("GET", "/api/config"))
+        if name == "oe_get_processors": return processors_projection(self.api.request("GET", "/api/processors"))
         if name == "oe_get_cpu": return validate_cpu(self.api.request("GET", "/api/cpu"))
         if name == "oe_get_disk": return validate_disk(self.api.request("GET", "/api/disk"))
         if name == "oe_get_time": return validate_time(self.api.request("GET", "/api/time"))

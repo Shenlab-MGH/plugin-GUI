@@ -1,10 +1,10 @@
 {
-  "format_version": "0.0.4",
+  "format_version": "r0.1.2",
   "bundle": {
     "id": "open-ephys-agent-native",
-    "version": "0.0.4",
+    "version": "r0.1.2",
     "platform": "windows",
-    "coverage": "core-status-recording-options-filename-directory-config-processor-inventory-cpu-disk-time"
+    "coverage": "core-status-recording-filename-directory-config-cpu"
   },
   "official_upstream": {
     "repository": "open-ephys/plugin-GUI",
@@ -12,11 +12,11 @@
     "commit": "c2ce076f5b2d4182222f9d0fd9bb9b97a60582e7",
     "gui_version": "1.1.0"
   },
-  "fork_source_commit": "4ef4b4662c12c9f5fe5d5d7c41fcbee3bd70f9bd",
+  "fork_source_commit": "5808213806be355b889cc7e52bb01c570fdeee08",
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.0.4",
-    "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_4.json"
+    "version": "r0.1.2",
+    "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_r0_1_2.json"
   },
   "components": {
     "mcp": {
@@ -33,8 +33,7 @@
   "verification": {
     "dependency_independent_legacy_protocol": true,
     "official_mcp_v2_auto_fallback": false,
-    "official_mcp_v2_blocker": "Pending importable mcp package and exact-commit Windows gate for official mcp==2.0.0 auto-mode stdio fallback",
-    "hardware_verified": false,
-    "scientific_verified": false
+    "official_mcp_v2_blocker": "Pending successful exact-commit Windows gate for official mcp==2.0.0 auto-mode stdio fallback",
+    "hardware_verified": false
   }
 }

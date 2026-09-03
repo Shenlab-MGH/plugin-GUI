@@ -140,14 +140,15 @@ class ConfigurationSnapshotReleaseVersion003Tests(unittest.TestCase):
         self.assertNotIn("r0.1.0", json.dumps(contract))
         self.assertNotIn("0.1.1", json.dumps(contract))
 
-    def test_release_bundle_product_versions_are_literal_0_0_3(self):
+    def test_successor_bundle_retains_config_and_advances_to_0_0_4(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(bundle["format_version"], PRODUCT_VERSION)
-        self.assertEqual(bundle["bundle"]["version"], PRODUCT_VERSION)
-        self.assertEqual(bundle["contract"]["version"], PRODUCT_VERSION)
+        self.assertEqual(bundle["format_version"], "0.0.4")
+        self.assertEqual(bundle["bundle"]["version"], "0.0.4")
+        self.assertEqual(bundle["contract"]["version"], "0.0.4")
+        self.assertIn("config", bundle["bundle"]["coverage"])
         self.assertEqual(
             bundle["contract"]["fixture"],
-            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_3.json",
+            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_4.json",
         )
         self.assertEqual(
             bundle["components"]["mcp"]["protocol_version"],
@@ -161,7 +162,7 @@ class ConfigurationSnapshotReleaseVersion003Tests(unittest.TestCase):
         self.assertEqual(report["schema_version"], PRODUCT_VERSION)
         self.assertNotIn("r0.1.0", json.dumps(report))
 
-    def test_mcp_server_constants_and_info_are_literal_0_0_3(self):
+    def test_mcp_server_keeps_0_0_3_contract_compatibility(self):
         source = SERVER_PATH.read_text(encoding="utf-8")
         module = ast.parse(source)
         constants: dict[str, object] = {}
@@ -171,41 +172,42 @@ class ConfigurationSnapshotReleaseVersion003Tests(unittest.TestCase):
                     if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
                         constants[target.id] = node.value.value
         self.assertEqual(constants.get("PROTOCOL_VERSION"), MCP_PROTOCOL_VERSION)
-        self.assertEqual(constants.get("CONTRACT_VERSION"), PRODUCT_VERSION)
-        self.assertIn('open_ephys_agent_contract_v1_1_0_v0_0_3.json', source)
+        self.assertEqual(constants.get("CONTRACT_VERSION"), "0.0.4")
+        self.assertTrue(CONTRACT_PATH.is_file())
+        self.assertIn("V003_TOOL_NAMES", source)
         self.assertNotIn("r0.1.0", source)
         self.assertNotIn("0.1.1", source)
         self.assertNotIn("r0_1_0", source)
-        # serverInfo.version is sourced from CONTRACT_VERSION
-        self.assertIn('"version":CONTRACT_VERSION', source.replace(" ", ""))
+        self.assertIn('version not in {"0.0.3", CONTRACT_VERSION}', source)
 
-    def test_skill_and_readme_pin_literal_0_0_3(self):
+    def test_successor_skill_and_readme_retain_config_snapshot(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
         readme = README_PATH.read_text(encoding="utf-8")
-        self.assertIn(f"contract: {PRODUCT_VERSION}", skill)
+        self.assertIn("contract: 0.0.4", skill)
+        self.assertIn("oe_get_config", skill)
         self.assertIn(MCP_PROTOCOL_VERSION, skill)
         self.assertNotIn("r0.1.0", skill)
         self.assertNotIn("0.1.1", skill)
 
-        self.assertIn(f"`{PRODUCT_VERSION}`", readme)
+        self.assertIn("`0.0.4`", readme)
         self.assertRegex(
             readme,
-            re.compile(rf"agent contract and bundle:\s*`{re.escape(PRODUCT_VERSION)}`"),
+            re.compile(r"agent contract and bundle:\s*`0\.0\.4`"),
         )
         self.assertRegex(
             readme,
-            re.compile(rf"API capability contract:\s*`{re.escape(PRODUCT_VERSION)}`"),
+            re.compile(r"API capability contract:\s*`0\.0\.4`"),
         )
         self.assertIn(MCP_PROTOCOL_VERSION, readme)
         self.assertNotIn("r0.1.0", readme)
         self.assertNotIn("0.1.1", readme)
 
-    def test_cpp_api_capabilities_contract_version_is_literal_0_0_3(self):
+    def test_cpp_api_capabilities_advance_to_0_0_4(self):
         cpp = CPP_CAPABILITY_JSON.read_text(encoding="utf-8")
         header = CPP_HTTP_SERVER_H.read_text(encoding="utf-8")
-        self.assertIn(f'result["contract_version"] = "{PRODUCT_VERSION}"', cpp)
+        self.assertIn('result["contract_version"] = "0.0.4"', cpp)
         self.assertNotIn('"0.1.1"', cpp)
-        self.assertIn(f"contract_version {PRODUCT_VERSION}", header)
+        self.assertIn("contract_version 0.0.4", header)
         self.assertNotIn("0.1.1", header)
 
     def test_official_deploy_steps_are_gated_to_canonical_repository(self):

@@ -63,7 +63,7 @@ nlohmann::json stringArrayToJson (const StringArray& values)
 nlohmann::json controlCapabilitiesToJson (const std::vector<ControlCapability>& capabilities)
 {
     nlohmann::json result;
-    result["contract_version"] = "0.0.3";
+    result["contract_version"] = "0.0.4";
     result["capabilities"] = nlohmann::json::array();
 
     for (const auto& capability : capabilities)

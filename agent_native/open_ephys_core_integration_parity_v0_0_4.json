@@ -1,0 +1,101 @@
+{
+  "schema_version": "0.0.4",
+  "baseline": {
+    "version": "1.1.0",
+    "upstream_release_commit": "c2ce076f5b2d4182222f9d0fd9bb9b97a60582e7"
+  },
+  "new_open_ephys_functionality": false,
+  "capabilities": [
+    {
+      "id": "oe.control.acquisition",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/status", "field": "mode" }, "set": { "method": "PUT", "path": "/api/status", "field": "mode" } },
+      "uia": { "platform": "windows", "automation_id": "oe.control.acquisition" },
+      "mcp_tools": ["oe_get_status", "oe_set_status"]
+    },
+    {
+      "id": "oe.control.recording",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/status", "field": "mode" }, "set": { "method": "PUT", "path": "/api/status", "field": "mode" } },
+      "uia": { "platform": "windows", "automation_id": "oe.control.recording" },
+      "mcp_tools": ["oe_get_status", "oe_set_status"]
+    },
+    {
+      "id": "oe.control.recording.options",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/recording/options" }, "set": { "method": "PUT", "path": "/api/recording/options" }, "fields": ["expanded"] },
+      "uia": { "platform": "windows", "automation_id": "oe.control.recording.options" },
+      "mcp_tools": ["oe_get_recording_options", "oe_set_recording_options"]
+    },
+    {
+      "id": "oe.control.recording.filename",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/recording" }, "set": { "method": "PUT", "path": "/api/recording" }, "fields": ["prepend_text", "base_text", "append_text"] },
+      "uia": { "platform": "windows", "automation_id": "oe.control.recording.filename" },
+      "mcp_tools": ["oe_get_recording_filename", "oe_set_recording_filename"]
+    },
+    {
+      "id": "oe.control.recording.directory",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/recording" }, "set": { "method": "PUT", "path": "/api/recording" }, "fields": ["parent_directory"] },
+      "uia": { "platform": "windows", "automation_id": "oe.control.recording.directory" },
+      "mcp_tools": ["oe_get_recording_directory", "oe_set_recording_directory"]
+    },
+    {
+      "id": "oe.control.recording.new_directory",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/recording/options" }, "set": { "method": "PUT", "path": "/api/recording/options" }, "fields": ["new_directory_requested"] },
+      "uia": { "platform": "windows", "automation_id": "oe.control.recording.new_directory" },
+      "mcp_tools": ["oe_get_recording_options", "oe_set_recording_options"]
+    },
+    {
+      "id": "oe.control.recording.force_new_directory",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/recording/options" }, "set": { "method": "PUT", "path": "/api/recording/options" }, "fields": ["force_new_directory"] },
+      "uia": { "platform": "windows", "automation_id": "oe.control.recording.force_new_directory" },
+      "mcp_tools": ["oe_get_recording_options", "oe_set_recording_options"]
+    },
+    {
+      "id": "oe.control.signal_chain.configuration",
+      "parity": "API_MCP_ONLY",
+      "api": { "read": { "method": "GET", "path": "/api/config", "field": "info" } },
+      "uia": null,
+      "mcp_tools": ["oe_get_config"]
+    },
+    {
+      "id": "oe.control.signal_chain.processors",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/processors", "field": "processors" } },
+      "uia": { "platform": "windows", "automation_id": "oe.control.signal_chain.processors", "item_automation_id": "oe.processor.<node_id>" },
+      "mcp_tools": ["oe_get_processors"]
+    },
+    {
+      "id": "oe.status.cpu_usage",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/cpu", "field": "usage" } },
+      "uia": { "platform": "windows", "automation_id": "oe.status.cpu_usage" },
+      "mcp_tools": ["oe_get_cpu"]
+    },
+    {
+      "id": "oe.status.disk_usage",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/disk", "field": "usage" } },
+      "uia": { "platform": "windows", "automation_id": "oe.status.disk_usage" },
+      "mcp_tools": ["oe_get_disk"]
+    },
+    {
+      "id": "oe.status.elapsed_time",
+      "parity": "BOTH",
+      "api": { "read": { "method": "GET", "path": "/api/time", "field": "display" } },
+      "uia": { "platform": "windows", "automation_id": "oe.status.elapsed_time" },
+      "mcp_tools": ["oe_get_time"]
+    }
+  ],
+  "verification": {
+    "processor_inventory": { "windows_uia_runtime": "pending", "mcp_local_interop": "pending" },
+    "windows_uia_runtime": { "status": "passed", "focused_rounds": 30, "tests_per_round": 2 },
+    "official_mcp_v2_local_interop": "pending",
+    "official_mcp_v2_exact_commit": "pending",
+    "hardware": "not_verified"
+  }
+}
