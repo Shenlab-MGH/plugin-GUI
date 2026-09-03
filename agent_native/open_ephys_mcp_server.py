@@ -720,8 +720,14 @@ class McpServer:
         return payload
 
     def _read_preset_inventory(self) -> dict[str, Any]:
-        value = self._validate_preset_payload(
-            "oe_get_electrode_presets", self.api.request("GET", PRESET_INVENTORY_PATH))
+        try:
+            response = self.api.request("GET", PRESET_INVENTORY_PATH)
+        except ApiHttpError as exc:
+            typed_error = self._typed_preset_http_error(exc)
+            if typed_error is not None:
+                raise typed_error
+            raise
+        value = self._validate_preset_payload("oe_get_electrode_presets", response)
         probe_ids = [target["probe_id"] for target in value["targets"]]
         if len(probe_ids) != len(set(probe_ids)):
             raise ToolError("response_schema_mismatch", "Preset inventory contains duplicate probe_id values.")
