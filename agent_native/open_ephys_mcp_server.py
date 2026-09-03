@@ -565,8 +565,10 @@ class McpServer:
                 raise ToolError("capability_contract_mismatch", "Open Ephys base capability meanings do not match the additive 0.0.5 contract.")
         if len(capabilities) == len(base):
             return None
-        if len(capabilities) != len(base) + 1 or document.get("contract_version") != PRESET_CONTRACT_VERSION:
+        if len(capabilities) != len(base) + 1:
             raise ToolError("capability_contract_mismatch", "Open Ephys capability count or version does not match the additive 0.0.5 contract.")
+        if document.get("contract_version") != PRESET_CONTRACT_VERSION:
+            return None
         if capabilities[-1] != expected:
             if (isinstance(capabilities[-1], dict)
                     and capabilities[-1].get("id") == PRESET_CAPABILITY_ID

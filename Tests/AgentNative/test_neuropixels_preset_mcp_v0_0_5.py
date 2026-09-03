@@ -192,7 +192,26 @@ class DiscoveryTests(PresetMcpTestCase):
         server = self.make_server(FakeApi(top_level_version="0.0.4"))
         payload, is_error = self.call_tool(server, "oe_get_electrode_presets")
         self.assertTrue(is_error)
-        self.assertEqual(payload["error"]["code"], "capability_contract_mismatch")
+        self.assertEqual(payload["error"]["code"], "capability_unavailable")
+
+    def test_zero_compatible_processors_is_capability_unavailable(self):
+        api = FakeApi()
+        original_request = api.request
+
+        def request(method, path, body=None):
+            response = original_request(method, path, body)
+            if method == "GET" and path == "/api/capabilities":
+                response["contract_version"] = "0.0.4"
+                response["capabilities"].pop()
+            return response
+
+        api.request = request
+        payload, is_error = self.call_tool(
+            self.make_server(api), "oe_get_electrode_presets")
+        self.assertTrue(is_error)
+        self.assertEqual(payload["error"]["code"], "capability_unavailable")
+        self.assertFalse(any(path == real_server.PRESET_INVENTORY_PATH
+                             for _, path, _ in api.requests))
 
 
 class InventoryTests(PresetMcpTestCase):
@@ -373,6 +392,17 @@ class MutationTests(PresetMcpTestCase):
             self.make_server(api), "oe_set_electrode_preset", self.set_arguments())
         self.assertTrue(is_error)
         self.assertEqual(payload["error"]["code"], "preset_apply_in_progress")
+        self.assertEqual(len([r for r in api.requests if r[0] == "PUT"]), 1)
+
+    def test_ambiguous_target_is_preserved_without_retry(self):
+        api = FakeApi()
+        api.put_error = real_server.ApiHttpError(409, {
+            "error": {"code": "ambiguous_target", "message": "multiple compatible processors"},
+        })
+        payload, is_error = self.call_tool(
+            self.make_server(api), "oe_set_electrode_preset", self.set_arguments())
+        self.assertTrue(is_error)
+        self.assertEqual(payload["error"]["code"], "ambiguous_target")
         self.assertEqual(len([r for r in api.requests if r[0] == "PUT"]), 1)
 
     def test_typed_unknown_409_still_reads_fresh_state_once(self):
