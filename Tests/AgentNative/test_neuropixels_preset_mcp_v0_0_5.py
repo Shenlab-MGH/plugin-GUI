@@ -29,14 +29,7 @@ def capability_document(exact: bool = True, *, top_level_version: str = "0.0.5")
         "version": "0.0.5" if exact else "0.0.4",
         "operations": ["inventory", "set"],
     }
-    capabilities = [{
-        "id": item["id"],
-        "name": item["id"],
-        "description": item["id"],
-        "kind": item["kind"],
-        "api": list(item["api"]),
-        **({"mode_semantics": item["mode_semantics"]} if "mode_semantics" in item else {}),
-    } for item in real_server.REMOTE_BASE_CAPABILITIES]
+    capabilities = copy.deepcopy(list(real_server.REMOTE_BASE_CAPABILITIES))
     capabilities.append(descriptor)
     return {"contract_version": top_level_version, "capabilities": capabilities}
 
@@ -89,6 +82,7 @@ class FakeApi:
         self.top_level_version = top_level_version
         self.mode = "IDLE"
         self.inventory_reads = [inventory()]
+        self.inventory_error = None
         self.requests = []
         self.put_error = None
         self.put_response = mutation_result()
@@ -103,6 +97,8 @@ class FakeApi:
         if method == "GET" and path == "/api/status":
             return {"mode": self.mode}
         if method == "GET" and path == "/api/plugins/neuropixels/presets":
+            if self.inventory_error is not None:
+                raise self.inventory_error
             if len(self.inventory_reads) > 1:
                 return copy.deepcopy(self.inventory_reads.pop(0))
             return copy.deepcopy(self.inventory_reads[0])
@@ -188,6 +184,29 @@ class DiscoveryTests(PresetMcpTestCase):
         self.assertTrue(is_error)
         self.assertEqual(payload["error"]["code"], "capability_contract_mismatch")
 
+    def test_base_capability_extra_or_changed_metadata_is_rejected(self):
+        for mutation in ("extra", "name", "uia"):
+            with self.subTest(mutation=mutation):
+                api = FakeApi()
+                original_request = api.request
+
+                def request(method, path, body=None, *, mutation=mutation):
+                    response = original_request(method, path, body)
+                    if method == "GET" and path == "/api/capabilities":
+                        if mutation == "extra":
+                            response["capabilities"][0]["unexpected"] = True
+                        elif mutation == "name":
+                            response["capabilities"][0]["name"] = "Renamed"
+                        else:
+                            response["capabilities"][0]["uia"]["automation_id"] = "wrong"
+                    return response
+
+                api.request = request
+                payload, is_error = self.call_tool(
+                    self.make_server(api), "oe_get_electrode_presets")
+                self.assertTrue(is_error)
+                self.assertEqual(payload["error"]["code"], "capability_contract_mismatch")
+
     def test_exact_descriptor_under_wrong_top_level_contract_is_unavailable(self):
         server = self.make_server(FakeApi(top_level_version="0.0.4"))
         payload, is_error = self.call_tool(server, "oe_get_electrode_presets")
@@ -238,6 +257,35 @@ class InventoryTests(PresetMcpTestCase):
             self.make_server(api), "oe_get_electrode_presets")
         self.assertTrue(is_error)
         self.assertEqual(payload["error"]["code"], "response_schema_mismatch")
+
+    def test_getter_preserves_every_definitive_typed_core_error(self):
+        for code in sorted(real_server.DEFINITIVE_PRESET_HTTP_ERROR_CODES):
+            with self.subTest(code=code):
+                api = FakeApi()
+                api.inventory_error = real_server.ApiHttpError(409, {
+                    "error": {"code": code, "message": "typed core refusal"},
+                })
+                payload, is_error = self.call_tool(
+                    self.make_server(api), "oe_get_electrode_presets")
+                self.assertTrue(is_error)
+                self.assertEqual(payload["error"]["code"], code)
+
+    def test_real_multi_processor_409_blocks_set_before_any_put(self):
+        api = FakeApi()
+        api.inventory_error = real_server.ApiHttpError(409, {
+            "error": {"code": "ambiguous_target", "message": "multiple compatible processors"},
+        })
+
+        get_payload, get_is_error = self.call_tool(
+            self.make_server(api), "oe_get_electrode_presets")
+        self.assertTrue(get_is_error)
+        self.assertEqual(get_payload["error"]["code"], "ambiguous_target")
+
+        set_payload, set_is_error = self.call_tool(
+            self.make_server(api), "oe_set_electrode_preset", self.set_arguments())
+        self.assertTrue(set_is_error)
+        self.assertEqual(set_payload["error"]["code"], "ambiguous_target")
+        self.assertEqual(len([request for request in api.requests if request[0] == "PUT"]), 0)
 
 
 class MutationTests(PresetMcpTestCase):
