@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -53,6 +54,24 @@ class PresetSurfaceTests(unittest.TestCase):
             "version": "0.0.5",
             "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_5.json",
         })
+        provenance = bundle["integration_provenance"]
+        self.assertEqual(provenance["status"], "implemented_unreleased")
+        revision = provenance["revision"]
+        parent = provenance["parent_commit"]
+        self.assertRegex(revision, r"^[0-9a-f]{40}$")
+        self.assertRegex(parent, r"^[0-9a-f]{40}$")
+        actual_parent = subprocess.run(
+            ["git", "rev-parse", f"{revision}^"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertEqual(actual_parent, parent)
+        self.assertEqual(
+            subprocess.run(
+                ["git", "merge-base", "--is-ancestor", revision, "HEAD"],
+                cwd=ROOT, check=False,
+            ).returncode,
+            0,
+        )
         for path in (README, SKILL):
             text = path.read_text(encoding="utf-8")
             self.assertIn("0.0.5", text)

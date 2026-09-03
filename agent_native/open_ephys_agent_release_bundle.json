@@ -13,6 +13,12 @@
     "gui_version": "1.1.0"
   },
   "fork_source_commit": "4ef4b4662c12c9f5fe5d5d7c41fcbee3bd70f9bd",
+  "integration_provenance": {
+    "repository": "Shenlab-MGH/plugin-GUI",
+    "revision": "3ef67ae5964dd1ce5a7e3d18f57e3d9c93eb77c1",
+    "parent_commit": "42ab0f40be3bbee87ed13e161708c97edb13e621",
+    "status": "implemented_unreleased"
+  },
   "contract": {
     "id": "open-ephys-agent",
     "version": "0.0.5",
