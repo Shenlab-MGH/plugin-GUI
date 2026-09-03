@@ -554,15 +554,8 @@ class McpServer:
         if set(document) != {"contract_version", "capabilities"} or not isinstance(capabilities, list):
             raise ToolError("capability_contract_mismatch", "Open Ephys capability meanings do not match the additive 0.0.5 contract.")
         remote_base = capabilities[:len(base)]
-        if len(remote_base) != len(base):
+        if remote_base != base:
             raise ToolError("capability_contract_mismatch", "Open Ephys capability meanings do not match the additive 0.0.5 contract.")
-        for item, required in zip(remote_base, base):
-            if (not isinstance(item, dict)
-                    or item.get("id") != required["id"]
-                    or item.get("kind") != required["kind"]
-                    or item.get("api") != required["api"]
-                    or item.get("mode_semantics") != required.get("mode_semantics")):
-                raise ToolError("capability_contract_mismatch", "Open Ephys base capability meanings do not match the additive 0.0.5 contract.")
         if len(capabilities) == len(base):
             return None
         if len(capabilities) != len(base) + 1:
