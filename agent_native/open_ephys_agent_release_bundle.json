@@ -15,8 +15,8 @@
   "fork_source_commit": "4ef4b4662c12c9f5fe5d5d7c41fcbee3bd70f9bd",
   "integration_provenance": {
     "repository": "Shenlab-MGH/plugin-GUI",
-    "revision": "c5d9e3acba40ad80f29c536f6b3243bd70b42cee",
-    "parent_commit": "b7ce4f4b5520d1d49badd8c78b5b58664ff64bb2",
+    "revision": "7ade914540eaf6299da59668ee9d0b765910bb67",
+    "parent_commit": "50a18c391f2c768415d87656e60c61fbf5468721",
     "status": "implemented_unreleased"
   },
   "contract": {
