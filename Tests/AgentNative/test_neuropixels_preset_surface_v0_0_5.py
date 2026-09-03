@@ -10,6 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_4.json"
 TARGET = ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_5.json"
+BUNDLE = ROOT / "agent_native" / "open_ephys_agent_release_bundle.json"
+README = ROOT / "agent_native" / "README.md"
+SKILL = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
 
 
 class PresetSurfaceTests(unittest.TestCase):
@@ -40,6 +43,23 @@ class PresetSurfaceTests(unittest.TestCase):
         )
         self.assertTrue(base_capabilities <= target_capabilities)
         self.assertTrue(base_tools <= target_tools)
+
+    def test_bundle_and_portable_skill_select_the_additive_contract(self):
+        bundle = json.loads(BUNDLE.read_text(encoding="utf-8"))
+        self.assertEqual(bundle["format_version"], "0.0.5")
+        self.assertEqual(bundle["bundle"]["version"], "0.0.5")
+        self.assertEqual(bundle["contract"], {
+            "id": "open-ephys-agent",
+            "version": "0.0.5",
+            "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_5.json",
+        })
+        for path in (README, SKILL):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("0.0.5", text)
+            self.assertIn("oe_get_electrode_presets", text)
+            self.assertIn("oe_set_electrode_preset", text)
+            self.assertIn("hardware_verified=false", text)
+            self.assertIn("scientific_verified=false", text)
 
 
 if __name__ == "__main__":
