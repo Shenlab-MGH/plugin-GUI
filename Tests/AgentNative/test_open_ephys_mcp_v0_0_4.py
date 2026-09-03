@@ -218,10 +218,10 @@ class ContractV004Tests(unittest.TestCase):
         self.assertEqual(verification["official_mcp_v2_exact_commit"], "pending")
         self.assertEqual(verification["hardware"], "not_verified")
 
-    def test_v004_bundle_preserves_v11_upstream_and_mcp_v2_provenance(self):
+    def test_successor_bundle_preserves_v004_upstream_and_mcp_v2_provenance(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(bundle["format_version"], "0.0.4")
-        self.assertEqual(bundle["bundle"]["version"], "0.0.4")
+        self.assertEqual(bundle["format_version"], "0.0.5")
+        self.assertEqual(bundle["bundle"]["version"], "0.0.5")
         self.assertIn("processor-inventory", bundle["bundle"]["coverage"])
         self.assertEqual(bundle["official_upstream"], {
             "repository": "open-ephys/plugin-GUI",
@@ -230,7 +230,7 @@ class ContractV004Tests(unittest.TestCase):
             "gui_version": "1.1.0",
         })
         self.assertEqual(bundle["contract"]["fixture"],
-                         "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_4.json")
+                         "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_5.json")
         self.assertEqual(bundle["components"]["mcp"]["protocol_version"], "2024-11-05")
         self.assertEqual(bundle["components"]["mcp"]["protocol_era"], "legacy")
         self.assertIn("official_mcp_v2_auto_fallback", bundle["verification"])
@@ -245,7 +245,10 @@ class ContractV004Tests(unittest.TestCase):
                 self.assertIn("0.0.4", text)
                 self.assertIn("open ephys baseline:", normalized)
                 self.assertIn("1.1.0", normalized)
-                self.assertEqual(documented_tools(text), TOOL_NAMES)
+                self.assertEqual(
+                    documented_tools(text),
+                    [*TOOL_NAMES, "oe_get_electrode_presets", "oe_set_electrode_preset"],
+                )
                 for phrase in (
                     "read-only processor inventory",
                     "id, current display name, and current-path predecessor",

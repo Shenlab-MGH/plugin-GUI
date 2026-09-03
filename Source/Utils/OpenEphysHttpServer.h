@@ -42,11 +42,15 @@
 #include "ControlCapabilityJson.h"
 #include "ConfigSnapshotApiHandler.h"
 #include "ControlRead.h"
+#include "MessageThreadCall.h"
+#include "NeuropixelsPresetApiHandler.h"
 #include "OpenEphysHttpApiRoutes.h"
 #include "ProcessorInventoryApiHandler.h"
 #include "RecordingOptionsControl.h"
 #include "StatusApiHandler.h"
 #include "Utils.h"
+
+#include <thread>
 
 using json = nlohmann::json;
 
@@ -82,7 +86,9 @@ inline void setControlErrorResponse (httplib::Response& response,
  * The API is "RESTful", such that the resource URLs are:
  * 
  * - GET /api/capabilities :
- *          returns a JSON capability manifest (contract_version 0.0.4).
+ *          returns a JSON capability manifest (contract_version 0.0.4 core),
+ *          or its additive 0.0.5 form when the Neuropixels preset capability
+ *          is available.
  *
  * - GET /api/config :
  *          returns an XML string with the current configuration of the GUI
@@ -185,10 +191,38 @@ public:
 
     void run() override
     {
-        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kCapabilitiesGet, [] (const httplib::Request&, httplib::Response& res)
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kCapabilitiesGet, [this] (const httplib::Request&, httplib::Response& res)
                    {
-            const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+            auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
+            appendNeuropixelsPresetCapabilityIfAvailable (document, makePresetApiBackend());
             res.set_content (document.dump(), "application/json"); });
+
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kNeuropixelsPresetsGet,
+                                        [this] (const httplib::Request&, httplib::Response& res)
+                   {
+            const auto result = getNeuropixelsPresets (makePresetApiBackend());
+            res.status = result.httpStatus;
+            res.set_content (result.body.dump(), "application/json"); });
+
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kNeuropixelsPresetSelectedPut,
+                                        [this] (const httplib::Request& req, httplib::Response& res)
+                   {
+            json request;
+            try
+            {
+                request = json::parse (req.body);
+            }
+            catch (const json::parse_error&)
+            {
+                res.status = 400;
+                res.set_content (json ({ { "error", { { "code", "invalid_arguments" },
+                                                        { "message", "Request body must be valid JSON." } } } }).dump(),
+                                 "application/json");
+                return;
+            }
+            const auto result = setNeuropixelsPreset (request, makePresetApiBackend());
+            res.status = result.httpStatus;
+            res.set_content (result.body.dump(), "application/json"); });
 
         OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kConfigGet, [this] (const httplib::Request& req, httplib::Response& res)
                    {
@@ -1433,7 +1467,7 @@ public:
                    });
 
         LOGC ("Beginning HTTP server on port ", PORT);
-        svr_->listen ("0.0.0.0", PORT);
+        svr_->listen (OpenEphysHttpApi::kListenAddress, PORT);
     }
 
     void start()
@@ -1459,6 +1493,68 @@ private:
     std::unique_ptr<httplib::Server> svr_;
     MainWindow* main_;
     ProcessorGraph* graph_;
+
+    PresetApiBackend makePresetApiBackend()
+    {
+        constexpr auto messageThreadTimeout = std::chrono::milliseconds (1000);
+        return {
+            [this, messageThreadTimeout]
+            {
+                const auto result = runDispatchedCall (
+                    [this]
+                    {
+                        std::vector<int> ids;
+                        for (auto* processor : graph_->getListOfProcessors())
+                            if (processor != nullptr && ! processor->isEmpty())
+                                ids.push_back (processor->getNodeId());
+                        return ids;
+                    },
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    messageThreadTimeout);
+                return result.value.value_or (std::vector<int>());
+            },
+            [this, messageThreadTimeout] (int processorId, const json& request) -> std::optional<json>
+            {
+                const auto requestText = request.dump();
+                const auto result = runDispatchedCall (
+                    [this, processorId, requestText]
+                    {
+                        auto* processor = graph_->getProcessorWithNodeId (processorId);
+                        if (processor == nullptr || processor->isEmpty())
+                            return String();
+                        return graph_->sendConfigMessage (processor, String::fromUTF8 (requestText.c_str()));
+                    },
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    messageThreadTimeout);
+                if (! result.value.has_value() || result.value->isEmpty())
+                    return std::nullopt;
+                try
+                {
+                    return json::parse (result.value->toStdString());
+                }
+                catch (const json::parse_error&)
+                {
+                    return std::nullopt;
+                }
+            },
+            [messageThreadTimeout]
+            {
+                const auto result = runDispatchedCall (
+                    []
+                    {
+                        if (CoreServices::getRecordingStatus())
+                            return PresetControlMode::Record;
+                        if (CoreServices::getAcquisitionStatus())
+                            return PresetControlMode::Acquire;
+                        return PresetControlMode::Idle;
+                    },
+                    OpenEphysHttpDetail::dispatchToMessageThread,
+                    messageThreadTimeout);
+                return result.value.value_or (PresetControlMode::Unknown);
+            },
+            [] (std::chrono::milliseconds duration) { std::this_thread::sleep_for (duration); }
+        };
+    }
 
     var json_to_var (const json& value)
     {

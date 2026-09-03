@@ -1,10 +1,10 @@
 {
-  "format_version": "0.0.4",
+  "format_version": "0.0.5",
   "bundle": {
     "id": "open-ephys-agent-native",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "platform": "windows",
-    "coverage": "core-status-recording-options-filename-directory-config-processor-inventory-cpu-disk-time"
+    "coverage": "core-status-recording-options-filename-directory-config-processor-inventory-cpu-disk-time-neuropixels-preset"
   },
   "official_upstream": {
     "repository": "open-ephys/plugin-GUI",
@@ -13,10 +13,16 @@
     "gui_version": "1.1.0"
   },
   "fork_source_commit": "4ef4b4662c12c9f5fe5d5d7c41fcbee3bd70f9bd",
+  "integration_provenance": {
+    "repository": "Shenlab-MGH/plugin-GUI",
+    "revision": "11fcdeb61c1857d57ecd97d60d4be3f9d500c0f4",
+    "parent_commit": "e2b3bab1d9fde361faa18196f3e65f87a50dc919",
+    "status": "implemented_unreleased"
+  },
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.0.4",
-    "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_4.json"
+    "version": "0.0.5",
+    "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_5.json"
   },
   "components": {
     "mcp": {

@@ -30,10 +30,13 @@
     (plus GET /api/capabilities). Used by both OpenEphysHttpServer registration
     and the Core R0 capability manifest so method/path cannot drift.
 
-    Scope is intentionally small: only existing Core R0 routes and discovery.
+    Scope is intentionally small: existing Core R0 routes and discovery plus the
+    additive 0.0.5 Neuropixels preset GET/PUT bridge.
 */
 namespace OpenEphysHttpApi
 {
+inline constexpr const char* kListenAddress = "127.0.0.1";
+
 enum class Method
 {
     Get,
@@ -60,6 +63,8 @@ inline constexpr Route kRecordingOptionsGet { Method::Get, "/api/recording/optio
 inline constexpr Route kRecordingOptionsPut { Method::Put, "/api/recording/options" };
 inline constexpr Route kConfigGet { Method::Get, "/api/config" };
 inline constexpr Route kProcessorsGet { Method::Get, "/api/processors" };
+inline constexpr Route kNeuropixelsPresetsGet { Method::Get, "/api/plugins/neuropixels/presets" };
+inline constexpr Route kNeuropixelsPresetSelectedPut { Method::Put, "/api/plugins/neuropixels/presets/selected" };
 inline constexpr Route kCpuGet { Method::Get, "/api/cpu" };
 inline constexpr Route kDiskGet { Method::Get, "/api/disk" };
 inline constexpr Route kTimeGet { Method::Get, "/api/time" };

@@ -1,16 +1,18 @@
-# Open Ephys v1.1.0 agent-native 0.0.4
+# Open Ephys v1.1.0 agent-native 0.0.5
 
 This directory contains the smallest Windows MCP surface for the Open Ephys
 v1.1.0 agent-native prerelease. It exposes existing Open Ephys operations only:
 capability discovery, status, recording options, filename and parent-directory
 control, a read-only signal-chain configuration snapshot, read-only processor
-inventory, plus CPU, disk, and elapsed-time reads.
+inventory, CPU/disk/elapsed-time reads, and the optional fail-closed
+Neuropixels preset bridge.
 
 ## Pins
 
 - Open Ephys baseline: `v1.1.0`
-- agent contract and bundle: `0.0.4`
-- API capability contract: `0.0.4`
+- agent contract and bundle: `0.0.5`
+- API capability contract: `0.0.5` when the exact preset descriptor is live;
+  otherwise the unchanged core remains `0.0.4`
 - MCP protocol: legacy `2024-11-05`
 - modern MCP: not supported
 
@@ -50,6 +52,8 @@ use the paired skill at `skills/open-ephys-agent-native/SKILL.md`.
 - `oe_get_cpu`: read CPU usage from 0.0 to 1.0.
 - `oe_get_disk`: read disk usage from 0.0 to 1.0.
 - `oe_get_time`: read elapsed time display and related status fields.
+- `oe_get_electrode_presets`: read the exact preset inventory for one compatible processor.
+- `oe_set_electrode_preset`: in IDLE, compare-and-set one exact processor/probe/preset identity and verify fresh readback.
 
 ## Safety and verification
 
@@ -80,10 +84,20 @@ functionality and provides no add, delete, load, save, probe, shank, or timer
 controls. `hardware_verified=false` and `scientific_verified=false` remain
 explicit until the corresponding gates are run.
 
+Preset discovery is additive: all 12 core capabilities and all 14 core tools
+remain present, while an exact live plugin descriptor adds one capability and
+two tools. Zero compatible processors or a preset-version mismatch reports
+`capability_unavailable`. Multiple compatible processors still publish the
+descriptor, but both GET and PUT fail with `ambiguous_target`; PUT is rejected
+before plugin mutation. No GUI action is used as a fallback.
+
+The historical compatibility fixture remains: agent contract and bundle: `0.0.4`;
+API capability contract: `0.0.4`.
+
 Run the dependency-independent tests with:
 
 ```powershell
-python -m unittest Tests.AgentNative.test_open_ephys_mcp_v0_0_4 -v
+python -m unittest discover -s Tests/AgentNative -p "test_*.py"
 ```
 
 Official `mcp==2.0.0` remains absent from the instrument host. The separate

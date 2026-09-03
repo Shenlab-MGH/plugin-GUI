@@ -75,14 +75,14 @@ class PublicProductVersion004Tests(unittest.TestCase):
         for stale in ("r0.1.3", "0.1.4", "0.1.0", "r0.1.2"):
             self.assertNotIn(stale, caps_tool["description"])
 
-    def test_active_release_bundle_pins_literal_0_0_4(self):
+    def test_successor_release_bundle_preserves_0_0_4_compatibility(self):
         bundle = json.loads(RELEASE_BUNDLE.read_text(encoding="utf-8"))
-        self.assertEqual(bundle["format_version"], PUBLIC_PRODUCT_VERSION)
-        self.assertEqual(bundle["bundle"]["version"], PUBLIC_PRODUCT_VERSION)
-        self.assertEqual(bundle["contract"]["version"], PUBLIC_PRODUCT_VERSION)
+        self.assertEqual(bundle["format_version"], "0.0.5")
+        self.assertEqual(bundle["bundle"]["version"], "0.0.5")
+        self.assertEqual(bundle["contract"]["version"], "0.0.5")
         self.assertEqual(
             bundle["contract"]["fixture"],
-            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_4.json",
+            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_5.json",
         )
         self.assertEqual(
             bundle["components"]["mcp"]["protocol_version"], PROTOCOL_VERSION

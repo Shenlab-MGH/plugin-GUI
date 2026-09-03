@@ -15,6 +15,8 @@ add_sources(
   ControlStatusJson.cpp
   ControlRead.h
   MessageThreadCall.h
+  NeuropixelsPresetApiHandler.h
+  NeuropixelsPresetApiHandler.cpp
   ProcessorInventoryApiHandler.h
   RecordingOptionsControl.h
   StatusControl.h

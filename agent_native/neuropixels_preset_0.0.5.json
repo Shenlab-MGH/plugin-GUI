@@ -1,0 +1,266 @@
+{
+  "contract_version": "0.0.5",
+  "status": "implemented_unreleased",
+  "capability_id": "oe.control.neuropixels.preset",
+  "compatible_processor_cardinality": {
+    "supported": "exactly_one",
+    "zero": "capability_unavailable",
+    "multiple": "ambiguous_target"
+  },
+  "discovery": {
+    "source": "remote_open_ephys_api",
+    "exact_capability_required": true,
+    "local_contract_alone_is_not_evidence": true,
+    "on_missing": "block_before_subject_mount"
+  },
+  "remote_api": {
+    "capability_document": {
+      "method": "GET",
+      "path": "/api/capabilities",
+      "required_descriptor": {
+        "id": "oe.control.neuropixels.preset",
+        "version": "0.0.5",
+        "operations": ["inventory", "set"]
+      }
+    },
+    "operations": {
+      "inventory": {
+        "method": "GET",
+        "path": "/api/plugins/neuropixels/presets",
+        "request_schema": "tools.oe_get_electrode_presets.inputSchema",
+        "response_schema": "tools.oe_get_electrode_presets.outputSchema"
+      },
+      "set": {
+        "method": "PUT",
+        "path": "/api/plugins/neuropixels/presets/selected",
+        "request_schema": "tools.oe_set_electrode_preset.inputSchema",
+        "response_schema": "tools.oe_set_electrode_preset.outputSchema"
+      }
+    },
+    "security": {
+      "mcp_http_base_url": "http://127.0.0.1:37497",
+      "required_network_boundary": "loopback_or_authenticated",
+      "fail_closed_if_boundary_unverified": true,
+      "direct_unauthenticated_non_loopback_mutation_forbidden": true
+    }
+  },
+  "probe_id": {
+    "type": "opaque_string",
+    "stability_scope": "open_ephys_process_and_config_generation",
+    "unique_within_inventory": true,
+    "setter_resolution": "fresh_processor_id_plus_probe_id_then_expected_serial_match",
+    "zero_matches": "probe_not_found",
+    "multiple_matches": "ambiguous_target",
+    "default_first_match_forbidden": true
+  },
+  "inventory_generation": {
+    "covers": ["probe_identity", "probe_configuration", "preset_catalog"],
+    "excludes": ["current_selected_preset", "current_electrode_map"],
+    "stable_across_successful_preset_selection": true,
+    "change_during_mutation": "postcondition_failed"
+  },
+  "tools": [
+    {
+      "name": "oe_get_electrode_presets",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "inventory_generation": {"type": "string", "minLength": 1},
+          "targets": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/target"}
+          }
+        },
+        "required": ["inventory_generation", "targets"],
+        "additionalProperties": false,
+        "$defs": {
+          "preset": {
+            "type": "object",
+            "properties": {
+              "preset_id": {"type": "string", "minLength": 1},
+              "preset_label": {"type": "string", "minLength": 1},
+              "electrode_map_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            },
+            "required": ["preset_id", "preset_label", "electrode_map_hash"],
+            "additionalProperties": false
+          },
+          "selected": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "selection_kind": {"const": "preset"},
+                  "preset_id": {"type": "string", "minLength": 1},
+                  "preset_label": {"type": "string", "minLength": 1},
+                  "electrode_map_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+                },
+                "required": ["selection_kind", "preset_id", "preset_label", "electrode_map_hash"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "selection_kind": {"const": "custom"},
+                  "preset_id": {"type": "null"},
+                  "preset_label": {"type": "null"},
+                  "electrode_map_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+                },
+                "required": ["selection_kind", "preset_id", "preset_label", "electrode_map_hash"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "processor_id": {"type": "integer"},
+              "probe_id": {"type": "string", "minLength": 1},
+              "probe_serial": {"type": "string", "minLength": 1},
+              "slot": {"type": "integer", "minimum": 0},
+              "port": {"type": "integer", "minimum": 0},
+              "dock": {"type": "integer", "minimum": 0},
+              "available_presets": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/preset"}
+              },
+              "selected": {"$ref": "#/$defs/selected"}
+            },
+            "required": ["processor_id", "probe_id", "probe_serial", "slot", "port", "dock", "available_presets", "selected"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "name": "oe_set_electrode_preset",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "processor_id": {"type": "integer"},
+          "probe_id": {"type": "string", "minLength": 1},
+          "expected_probe_serial": {"type": "string", "minLength": 1},
+          "expected_inventory_generation": {"type": "string", "minLength": 1},
+          "preset_id": {"type": "string", "minLength": 1},
+          "expected_electrode_map_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        },
+        "required": ["processor_id", "probe_id", "expected_probe_serial", "expected_inventory_generation", "preset_id", "expected_electrode_map_hash"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "changed": {"type": "boolean"},
+          "before": {"$ref": "#/$defs/readback"},
+          "requested": {"$ref": "#/$defs/requested"},
+          "after": {"$ref": "#/$defs/readback"}
+        },
+        "required": ["changed", "before", "requested", "after"],
+        "additionalProperties": false,
+        "$defs": {
+          "readback": {
+            "type": "object",
+            "properties": {
+              "processor_id": {"type": "integer"},
+              "probe_id": {"type": "string", "minLength": 1},
+              "probe_serial": {"type": "string", "minLength": 1},
+              "preset_id": {"type": ["string", "null"]},
+              "preset_label": {"type": ["string", "null"]},
+              "electrode_map_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            },
+            "required": ["processor_id", "probe_id", "probe_serial", "preset_id", "preset_label", "electrode_map_hash"],
+            "additionalProperties": false
+          },
+          "requested": {
+            "type": "object",
+            "properties": {
+              "processor_id": {"type": "integer"},
+              "probe_id": {"type": "string", "minLength": 1},
+              "expected_probe_serial": {"type": "string", "minLength": 1},
+              "expected_inventory_generation": {"type": "string", "minLength": 1},
+              "preset_id": {"type": "string", "minLength": 1},
+              "expected_electrode_map_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            },
+            "required": ["processor_id", "probe_id", "expected_probe_serial", "expected_inventory_generation", "preset_id", "expected_electrode_map_hash"],
+            "additionalProperties": false
+          }
+        },
+        "after_source": "fresh_getter_over_sdk_acknowledged_committed_state_not_http_put_response"
+      }
+    }
+  ],
+  "readback_semantics": {
+    "state_source": "sdk_acknowledged_committed_configuration",
+    "independent_from_http_put_response": true,
+    "physical_electrode_map_getter_available": false,
+    "physical_hardware_state_proven": false,
+    "omit_target_when_probe_state_is_not_connected": true,
+    "hardware_gate_required": true
+  },
+  "mutation": {
+    "required_mode": "IDLE",
+    "never_auto_idle": true,
+    "target_must_be_unique": true,
+    "expected_probe_serial_must_match": true,
+    "preset_id_must_come_from_fresh_target_inventory": true,
+    "expected_electrode_map_hash_source": "requested_preset_row_in_fresh_inventory",
+    "write_by_label_forbidden": true,
+    "compare_and_set_fields": ["expected_inventory_generation", "expected_electrode_map_hash"],
+    "compare_and_set_must_precede_dispatch": true,
+    "convergence_deadline_ms": 3000,
+    "poll_interval_ms": 100,
+    "convergence_source": "fresh_getter_over_sdk_acknowledged_committed_state",
+    "idempotent_noop_match_fields": ["preset_id", "preset_label", "electrode_map_hash"],
+    "same_target_same_preset_is_idempotent_noop": true,
+    "unknown_outcome_policy": "fresh_getter_no_retry",
+    "postcondition_fields": ["processor_id", "probe_id", "probe_serial", "preset_id", "preset_label", "electrode_map_hash"]
+  },
+  "electrode_map_hash": {
+    "format": "sha256:<64-lowercase-hex>",
+    "schema": "oe.electrode-map.v1",
+    "index_base": 0,
+    "integer_domain": "nonnegative_decimal",
+    "tuple_field_order": ["channel_index", "shank_index", "bank_index", "electrode_index"],
+    "total_sort_key": ["channel_index", "shank_index", "bank_index", "electrode_index"],
+    "serialization": "compact_json_array_no_whitespace",
+    "serialized_value": "array_of_integer_tuples_in_total_sort_order",
+    "encoding": "utf-8"
+  },
+  "outcome_classification": {
+    "dispatch_timeout_disconnect_or_5xx": "mutation_outcome_unknown",
+    "mutation_outcome_unknown_retry": "forbidden_use_fresh_getter",
+    "normal_write_then_readback_mismatch": "postcondition_failed",
+    "definitive_backend_non_application": "preset_apply_failed",
+    "definitive_pre_dispatch_4xx": "no_write"
+  },
+  "errors": [
+    "invalid_arguments",
+    "capability_unavailable",
+    "processor_not_found",
+    "probe_not_found",
+    "ambiguous_target",
+    "probe_identity_mismatch",
+    "inventory_generation_mismatch",
+    "electrode_map_expectation_mismatch",
+    "preset_not_found",
+    "preset_not_supported",
+    "preset_change_requires_idle",
+    "preset_apply_in_progress",
+    "preset_apply_failed",
+    "mutation_outcome_unknown",
+    "postcondition_failed",
+    "response_schema_mismatch",
+    "open_ephys_unreachable",
+    "api_http_error"
+  ],
+  "verification": {
+    "bridge_contract_tests_verified": true,
+    "software_verified": false,
+    "hardware_verified": false,
+    "scientific_verified": false
+  }
+}

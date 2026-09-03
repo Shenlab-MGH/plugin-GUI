@@ -140,15 +140,15 @@ class ConfigurationSnapshotReleaseVersion003Tests(unittest.TestCase):
         self.assertNotIn("r0.1.0", json.dumps(contract))
         self.assertNotIn("0.1.1", json.dumps(contract))
 
-    def test_successor_bundle_retains_config_and_advances_to_0_0_4(self):
+    def test_successor_bundle_retains_config_through_0_0_5(self):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(bundle["format_version"], "0.0.4")
-        self.assertEqual(bundle["bundle"]["version"], "0.0.4")
-        self.assertEqual(bundle["contract"]["version"], "0.0.4")
+        self.assertEqual(bundle["format_version"], "0.0.5")
+        self.assertEqual(bundle["bundle"]["version"], "0.0.5")
+        self.assertEqual(bundle["contract"]["version"], "0.0.5")
         self.assertIn("config", bundle["bundle"]["coverage"])
         self.assertEqual(
             bundle["contract"]["fixture"],
-            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_4.json",
+            "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_5.json",
         )
         self.assertEqual(
             bundle["components"]["mcp"]["protocol_version"],
