@@ -7,7 +7,9 @@ import argparse
 import json
 import math
 import ntpath
+import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +21,8 @@ from typing import Any
 PROTOCOL_VERSION = "2024-11-05"
 CONTRACT_VERSION = "0.0.4"
 DEFAULT_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_v0_0_4.json")
+DEFAULT_ACTIVE_CONTRACT = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_v0_0_5.json")
+DEFAULT_PRESET_CONTRACT = Path(__file__).with_name("neuropixels_preset_0.0.5.json")
 V003_TOOL_NAMES = (
     "oe_get_capabilities", "oe_get_status", "oe_set_status",
     "oe_get_recording_options", "oe_set_recording_options",
@@ -27,7 +31,9 @@ V003_TOOL_NAMES = (
     "oe_get_config",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 )
-TOOL_NAMES = (*V003_TOOL_NAMES[:10], "oe_get_processors", *V003_TOOL_NAMES[10:])
+V004_TOOL_NAMES = (*V003_TOOL_NAMES[:10], "oe_get_processors", *V003_TOOL_NAMES[10:])
+PRESET_TOOL_NAMES = ("oe_get_electrode_presets", "oe_set_electrode_preset")
+TOOL_NAMES = (*V004_TOOL_NAMES, *PRESET_TOOL_NAMES)
 V003_CAPABILITY_IDS = (
     "oe.control.acquisition", "oe.control.recording", "oe.control.recording.options",
     "oe.control.recording.filename", "oe.control.recording.directory",
@@ -36,7 +42,27 @@ V003_CAPABILITY_IDS = (
     "oe.status.cpu_usage",
     "oe.status.disk_usage", "oe.status.elapsed_time",
 )
-CAPABILITY_IDS = (*V003_CAPABILITY_IDS[:8], "oe.control.signal_chain.processors", *V003_CAPABILITY_IDS[8:])
+V004_CAPABILITY_IDS = (*V003_CAPABILITY_IDS[:8], "oe.control.signal_chain.processors", *V003_CAPABILITY_IDS[8:])
+PRESET_CAPABILITY_ID = "oe.control.neuropixels.preset"
+CAPABILITY_IDS = (*V004_CAPABILITY_IDS, PRESET_CAPABILITY_ID)
+PRESET_CONTRACT_VERSION = "0.0.5"
+PRESET_INVENTORY_PATH = "/api/plugins/neuropixels/presets"
+PRESET_SELECTED_PATH = "/api/plugins/neuropixels/presets/selected"
+PRESET_CONVERGENCE_SECONDS = 3.0
+PRESET_POLL_SECONDS = 0.1
+DEFINITIVE_PRESET_HTTP_ERROR_CODES = frozenset({
+    "invalid_arguments", "capability_unavailable", "processor_not_found",
+    "probe_not_found", "ambiguous_target", "probe_identity_mismatch",
+    "inventory_generation_mismatch", "electrode_map_expectation_mismatch",
+    "preset_not_found", "preset_not_supported", "preset_change_requires_idle",
+    "preset_apply_in_progress", "preset_apply_failed", "postcondition_failed",
+})
+DEFINITIVE_PRESET_5XX_ERROR_CODES = frozenset({"capability_unavailable", "preset_apply_failed"})
+_BASE_CONTRACT_PATH = Path(__file__).with_name("open_ephys_agent_contract_v1_1_0_v0_0_4.json")
+REMOTE_BASE_CAPABILITIES = tuple(
+    json.loads(_BASE_CONTRACT_PATH.read_text(encoding="utf-8"))["api"]
+    ["expected_capabilities_response"]["capabilities"]
+)
 ALLOWED_MODES = {"IDLE", "ACQUIRE", "RECORD"}
 OPTION_FIELDS = ("expanded", "force_new_directory", "new_directory_requested")
 FILENAME_FIELDS = ("prepend_text", "base_text", "append_text")
@@ -92,10 +118,14 @@ def load_contract(path: Path) -> dict[str, Any]:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cannot load contract {path}: {exc}") from exc
     version = contract.get("schema_version")
-    if version not in {"0.0.3", CONTRACT_VERSION}:
+    if version not in {"0.0.3", CONTRACT_VERSION} and version != PRESET_CONTRACT_VERSION:
         raise ValueError(f"Unsupported contract version: {version!r}")
-    expected_tool_names = V003_TOOL_NAMES if version == "0.0.3" else TOOL_NAMES
-    expected_capability_ids = V003_CAPABILITY_IDS if version == "0.0.3" else CAPABILITY_IDS
+    expected_tool_names = (V003_TOOL_NAMES if version == "0.0.3"
+                           else V004_TOOL_NAMES if version == CONTRACT_VERSION
+                           else TOOL_NAMES)
+    expected_capability_ids = (V003_CAPABILITY_IDS if version == "0.0.3"
+                               else V004_CAPABILITY_IDS if version == CONTRACT_VERSION
+                               else CAPABILITY_IDS)
     expected = {
         "schema_version": version,
         "contract": {"id": "open-ephys-agent", "version": version},
@@ -141,6 +171,110 @@ def load_contract(path: Path) -> dict[str, Any]:
             "and verification.scientific_verified=false."
         )
     return contract
+
+
+def load_preset_contract(path: Path) -> dict[str, Any]:
+    try:
+        contract = loads_json(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot load preset contract {path}: {exc}") from exc
+    expected_descriptor = {
+        "id": PRESET_CAPABILITY_ID,
+        "version": PRESET_CONTRACT_VERSION,
+        "operations": ["inventory", "set"],
+    }
+    remote_api = contract.get("remote_api", {})
+    capability_route = remote_api.get("capability_document", {})
+    operations = remote_api.get("operations", {})
+    routes_match = (
+        capability_route.get("method") == "GET"
+        and capability_route.get("path") == "/api/capabilities"
+        and operations.get("inventory", {}).get("method") == "GET"
+        and operations.get("inventory", {}).get("path") == PRESET_INVENTORY_PATH
+        and operations.get("set", {}).get("method") == "PUT"
+        and operations.get("set", {}).get("path") == PRESET_SELECTED_PATH
+    )
+    tools = contract.get("tools")
+    if (contract.get("contract_version") != PRESET_CONTRACT_VERSION
+            or contract.get("status") != "implemented_unreleased"
+            or capability_route.get("required_descriptor") != expected_descriptor
+            or not routes_match
+            or not isinstance(tools, list)
+            or [tool.get("name") for tool in tools if isinstance(tool, dict)] != list(PRESET_TOOL_NAMES)):
+        raise ValueError("Neuropixels preset requirement does not match the 0.0.5 adapter surface.")
+    if contract.get("compatible_processor_cardinality") != {
+            "supported": "exactly_one", "zero": "capability_unavailable", "multiple": "ambiguous_target"}:
+        raise ValueError("Preset requirement must support exactly one compatible processor.")
+    if contract.get("verification") != {
+            "bridge_contract_tests_verified": True, "software_verified": False,
+            "hardware_verified": False, "scientific_verified": False}:
+        raise ValueError("Preset verification matrix does not preserve product release gates.")
+    for tool in tools:
+        if not isinstance(tool.get("inputSchema"), dict) or not isinstance(tool.get("outputSchema"), dict):
+            raise ValueError("Every preset tool requires input and output schemas.")
+    return contract
+
+
+def _schema_type_matches(value: Any, type_name: str) -> bool:
+    if type_name == "object": return isinstance(value, dict)
+    if type_name == "array": return isinstance(value, list)
+    if type_name == "string": return isinstance(value, str)
+    if type_name == "null": return value is None
+    if type_name == "boolean": return isinstance(value, bool)
+    if type_name == "integer": return isinstance(value, int) and not isinstance(value, bool)
+    if type_name == "number": return _is_number(value)
+    return False
+
+
+def validate_json_schema(value: Any, schema: dict[str, Any], *, root: dict[str, Any] | None = None,
+                         path: str = "$") -> None:
+    root = schema if root is None else root
+    if "$ref" in schema:
+        reference = schema["$ref"]
+        if not isinstance(reference, str) or not reference.startswith("#/$defs/"):
+            raise ValueError(f"{path}: unsupported schema reference")
+        definition = root.get("$defs", {}).get(reference.removeprefix("#/$defs/"))
+        if not isinstance(definition, dict):
+            raise ValueError(f"{path}: unresolved schema reference")
+        validate_json_schema(value, definition, root=root, path=path)
+        return
+    if "oneOf" in schema:
+        matches = 0
+        for option in schema["oneOf"]:
+            try:
+                validate_json_schema(value, option, root=root, path=path)
+                matches += 1
+            except ValueError:
+                pass
+        if matches != 1:
+            raise ValueError(f"{path}: value must match exactly one schema")
+        return
+    if "const" in schema and value != schema["const"]:
+        raise ValueError(f"{path}: value does not match const")
+    declared = schema.get("type")
+    if declared is not None:
+        allowed = declared if isinstance(declared, list) else [declared]
+        if not any(_schema_type_matches(value, name) for name in allowed):
+            raise ValueError(f"{path}: invalid type")
+    if isinstance(value, dict) and declared == "object":
+        properties, required = schema.get("properties", {}), schema.get("required", [])
+        if any(name not in value for name in required):
+            raise ValueError(f"{path}: missing required properties")
+        if schema.get("additionalProperties") is False and not set(value).issubset(properties):
+            raise ValueError(f"{path}: additional properties are forbidden")
+        for name, item in value.items():
+            if name in properties:
+                validate_json_schema(item, properties[name], root=root, path=f"{path}.{name}")
+    if isinstance(value, list) and declared == "array" and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            validate_json_schema(item, schema["items"], root=root, path=f"{path}[{index}]")
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            raise ValueError(f"{path}: string is too short")
+        if "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
+            raise ValueError(f"{path}: string does not match pattern")
+    if _is_number(value) and "minimum" in schema and value < schema["minimum"]:
+        raise ValueError(f"{path}: number is below minimum")
 
 
 class ApiClient:
@@ -385,12 +519,61 @@ def validate_filename_component(value: str) -> None:
 
 
 class McpServer:
-    def __init__(self, contract_path: Path = DEFAULT_CONTRACT, base_url: str | None = None):
+    def __init__(self, contract_path: Path = DEFAULT_ACTIVE_CONTRACT, base_url: str | None = None,
+                 timeout: float = 3.0, *, preset_contract_path: Path = DEFAULT_PRESET_CONTRACT,
+                 api_client: Any | None = None):
         self.contract = load_contract(Path(contract_path))
         self.contract_version = self.contract["contract"]["version"]
         self.tool_names = tuple(tool["name"] for tool in self.contract["tools"])
-        self.api = ApiClient(base_url or self.contract["transport"]["http_base_url"])
+        self.preset_contract = None
+        if self.contract_version == PRESET_CONTRACT_VERSION:
+            self.preset_contract = load_preset_contract(Path(preset_contract_path))
+            contract_tools = {tool["name"]: tool for tool in self.contract["tools"]}
+            for preset_tool in self.preset_contract["tools"]:
+                if contract_tools[preset_tool["name"]].get("inputSchema") != preset_tool["inputSchema"]:
+                    raise ValueError("Main contract and preset requirement input schemas do not match.")
+        if api_client is not None and base_url is not None:
+            raise ValueError("Provide either api_client or base_url, not both.")
+        self.api = api_client or ApiClient(
+            base_url or self.contract["transport"]["http_base_url"], timeout=timeout)
         self.connection_state = "new"
+
+    def _preset_tools(self) -> dict[str, dict[str, Any]]:
+        if self.preset_contract is None:
+            return {}
+        return {tool["name"]: tool for tool in self.preset_contract["tools"]}
+
+    def _remote_capabilities(self) -> dict[str, Any] | None:
+        if self.preset_contract is None:
+            raise ToolError("capability_unavailable", "Preset contract is not active for this server profile.")
+        expected = self.preset_contract["remote_api"]["capability_document"]["required_descriptor"]
+        document = expect_object(self.api.request("GET", "/api/capabilities"), "Capabilities")
+        self._last_capabilities = document
+        capabilities = document.get("capabilities")
+        base = list(REMOTE_BASE_CAPABILITIES)
+        if set(document) != {"contract_version", "capabilities"} or not isinstance(capabilities, list):
+            raise ToolError("capability_contract_mismatch", "Open Ephys capability meanings do not match the additive 0.0.5 contract.")
+        remote_base = capabilities[:len(base)]
+        if len(remote_base) != len(base):
+            raise ToolError("capability_contract_mismatch", "Open Ephys capability meanings do not match the additive 0.0.5 contract.")
+        for item, required in zip(remote_base, base):
+            if (not isinstance(item, dict)
+                    or item.get("id") != required["id"]
+                    or item.get("kind") != required["kind"]
+                    or item.get("api") != required["api"]
+                    or item.get("mode_semantics") != required.get("mode_semantics")):
+                raise ToolError("capability_contract_mismatch", "Open Ephys base capability meanings do not match the additive 0.0.5 contract.")
+        if len(capabilities) == len(base):
+            return None
+        if len(capabilities) != len(base) + 1 or document.get("contract_version") != PRESET_CONTRACT_VERSION:
+            raise ToolError("capability_contract_mismatch", "Open Ephys capability count or version does not match the additive 0.0.5 contract.")
+        if capabilities[-1] != expected:
+            if (isinstance(capabilities[-1], dict)
+                    and capabilities[-1].get("id") == PRESET_CAPABILITY_ID
+                    and capabilities[-1].get("version") != PRESET_CONTRACT_VERSION):
+                return None
+            raise ToolError("capability_contract_mismatch", "Open Ephys preset capability is not the exact 0.0.5 descriptor.")
+        return expected.copy()
 
     @staticmethod
     def _valid_id(value: Any) -> bool:
@@ -464,8 +647,7 @@ class McpServer:
         except ToolError as exc:
             return text_result(exc.payload(), is_error=True)
 
-    @staticmethod
-    def _validate_arguments(name: str, arguments: dict[str, Any]) -> None:
+    def _validate_arguments(self, name: str, arguments: dict[str, Any]) -> None:
         if name in {"oe_get_capabilities", "oe_get_status", "oe_get_recording_options", "oe_get_recording_filename", "oe_get_recording_directory", "oe_get_config", "oe_get_processors", "oe_get_cpu", "oe_get_disk", "oe_get_time"}:
             if arguments: raise ToolError("invalid_arguments", f"{name} does not accept arguments.")
         elif name == "oe_set_status":
@@ -482,6 +664,11 @@ class McpServer:
             if set(arguments) != {"parent_directory"} or not isinstance(arguments["parent_directory"], str):
                 raise ToolError("invalid_arguments", "parent_directory must be the only string argument.")
             normalize_windows_directory(arguments["parent_directory"])
+        elif name in PRESET_TOOL_NAMES:
+            try:
+                validate_json_schema(arguments, self._preset_tools()[name]["inputSchema"])
+            except ValueError as exc:
+                raise ToolError("invalid_arguments", f"{name} arguments do not match the 0.0.5 contract.") from exc
 
     def _verify_capabilities(self) -> dict[str, Any]:
         actual = self.api.request("GET", "/api/capabilities")
@@ -507,11 +694,181 @@ class McpServer:
     @staticmethod
     def _is_authoritative_put_http_error(error: ApiHttpError) -> bool:
         status = error.details["status"]
-        return isinstance(status, int) and 400 <= status < 500
+        return isinstance(status, int) and 400 <= status < 500 and status != 408
+
+    @staticmethod
+    def _typed_preset_http_error(error: ApiHttpError) -> ToolError | None:
+        body = error.details.get("body")
+        payload = body.get("error") if isinstance(body, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        code, message = payload.get("code"), payload.get("message")
+        if (not isinstance(code, str) or not code or not isinstance(message, str) or not message
+                or code not in DEFINITIVE_PRESET_HTTP_ERROR_CODES):
+            return None
+        details = {key: value for key, value in payload.items() if key not in {"code", "message"}}
+        return ToolError(code, message, **details)
+
+    def _validate_preset_payload(self, tool_name: str, payload: Any) -> dict[str, Any]:
+        schema = self._preset_tools()[tool_name]["outputSchema"]
+        try:
+            validate_json_schema(payload, schema)
+        except ValueError as exc:
+            raise ToolError("response_schema_mismatch", f"{tool_name} response does not match the 0.0.5 contract.") from exc
+        return payload
+
+    def _read_preset_inventory(self) -> dict[str, Any]:
+        value = self._validate_preset_payload(
+            "oe_get_electrode_presets", self.api.request("GET", PRESET_INVENTORY_PATH))
+        probe_ids = [target["probe_id"] for target in value["targets"]]
+        if len(probe_ids) != len(set(probe_ids)):
+            raise ToolError("response_schema_mismatch", "Preset inventory contains duplicate probe_id values.")
+        for target in value["targets"]:
+            preset_ids = [preset["preset_id"] for preset in target["available_presets"]]
+            if len(preset_ids) != len(set(preset_ids)):
+                raise ToolError("response_schema_mismatch", "Preset inventory contains duplicate preset IDs.")
+        return value
+
+    @staticmethod
+    def _resolve_preset_target(inventory_value: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+        processor_targets = [target for target in inventory_value["targets"]
+                             if target["processor_id"] == arguments["processor_id"]]
+        if not processor_targets:
+            raise ToolError("processor_not_found", "No preset target has the requested processor_id.")
+        matches = [target for target in processor_targets if target["probe_id"] == arguments["probe_id"]]
+        if not matches:
+            raise ToolError("probe_not_found", "No probe matches processor_id plus probe_id.")
+        if len(matches) != 1:
+            raise ToolError("ambiguous_target", "processor_id plus probe_id does not resolve uniquely.")
+        return matches[0]
+
+    @staticmethod
+    def _preset_readback(target: dict[str, Any]) -> dict[str, Any]:
+        selected = target["selected"]
+        return {
+            "processor_id": target["processor_id"], "probe_id": target["probe_id"],
+            "probe_serial": target["probe_serial"], "preset_id": selected["preset_id"],
+            "preset_label": selected["preset_label"],
+            "electrode_map_hash": selected["electrode_map_hash"],
+        }
+
+    def _preset_preconditions(self, inventory_value: dict[str, Any],
+                              arguments: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        target = self._resolve_preset_target(inventory_value, arguments)
+        if target["probe_serial"] != arguments["expected_probe_serial"]:
+            raise ToolError("probe_identity_mismatch", "The fresh probe serial does not match the expected serial.")
+        if inventory_value["inventory_generation"] != arguments["expected_inventory_generation"]:
+            raise ToolError("inventory_generation_mismatch", "The preset inventory generation changed.")
+        before = self._preset_readback(target)
+        presets = [preset for preset in target["available_presets"]
+                   if preset["preset_id"] == arguments["preset_id"]]
+        if not presets:
+            raise ToolError("preset_not_found", "The requested preset_id is absent from the fresh target inventory.")
+        if len(presets) != 1:
+            raise ToolError("response_schema_mismatch", "The target inventory has duplicate preset_id values.")
+        desired = presets[0]
+        if desired["electrode_map_hash"] != arguments["expected_electrode_map_hash"]:
+            raise ToolError("electrode_map_expectation_mismatch", "The requested preset row hash changed.")
+        return before, desired
+
+    def _fresh_preset_target(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._resolve_preset_target(self._read_preset_inventory(), arguments)
+
+    def _raise_preset_outcome_unknown(self, arguments: dict[str, Any], put_error: ToolError) -> None:
+        details: dict[str, Any] = {"requested": arguments, "put_error": put_error.payload()["error"]}
+        try:
+            details["observed"] = self._fresh_preset_target(arguments)
+        except ToolError as readback_error:
+            details["readback_error"] = readback_error.payload()["error"]
+        raise ToolError(
+            "mutation_outcome_unknown",
+            "Preset write outcome is unknown; use the fresh getter state and do not retry the mutation.",
+            **details,
+        )
+
+    def _set_electrode_preset(self, current: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+        if current["mode"] != "IDLE":
+            raise ToolError("preset_change_requires_idle", "Electrode preset changes require Open Ephys IDLE mode.")
+        before, desired = self._preset_preconditions(self._read_preset_inventory(), arguments)
+        if all(before[field] == desired[field] for field in ("preset_id", "preset_label", "electrode_map_hash")):
+            result = {"changed": False, "before": before, "requested": arguments, "after": before}
+            return self._validate_preset_payload("oe_set_electrode_preset", result)
+        try:
+            put_response = self.api.request("PUT", PRESET_SELECTED_PATH, arguments)
+        except ApiHttpError as exc:
+            typed_error = self._typed_preset_http_error(exc)
+            status = exc.details.get("status")
+            if self._is_authoritative_put_http_error(exc):
+                if typed_error is not None:
+                    raise typed_error
+                body = exc.details.get("body")
+                body_error = body.get("error") if isinstance(body, dict) else None
+                if isinstance(body_error, dict) and body_error.get("code") == "mutation_outcome_unknown":
+                    self._raise_preset_outcome_unknown(arguments, exc)
+                raise exc
+            if (typed_error is not None and isinstance(status, int) and 500 <= status < 600
+                    and typed_error.code in DEFINITIVE_PRESET_5XX_ERROR_CODES):
+                raise typed_error
+            self._raise_preset_outcome_unknown(arguments, exc)
+        except ToolError as exc:
+            self._raise_preset_outcome_unknown(arguments, exc)
+        try:
+            put_result = self._validate_preset_payload("oe_set_electrode_preset", put_response)
+        except ToolError as exc:
+            self._raise_preset_outcome_unknown(arguments, exc)
+        expected_after = {
+            "processor_id": before["processor_id"], "probe_id": before["probe_id"],
+            "probe_serial": before["probe_serial"], "preset_id": desired["preset_id"],
+            "preset_label": desired["preset_label"],
+            "electrode_map_hash": desired["electrode_map_hash"],
+        }
+        valid_noop = put_result["changed"] is True or put_result["before"] == expected_after
+        if (put_result["requested"] != arguments or put_result["after"] != expected_after or not valid_noop):
+            self._raise_preset_outcome_unknown(
+                arguments, ToolError("response_schema_mismatch", "Open Ephys preset PUT response did not match the requested transaction."))
+
+        deadline, after = time.monotonic() + PRESET_CONVERGENCE_SECONDS, None
+        obtained_readback = last_readback_was_authoritative = False
+        while True:
+            try:
+                fresh_inventory = self._read_preset_inventory()
+            except ToolError:
+                last_readback_was_authoritative = False
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(PRESET_POLL_SECONDS)
+                continue
+            obtained_readback = last_readback_was_authoritative = True
+            try:
+                after = self._preset_readback(self._resolve_preset_target(fresh_inventory, arguments))
+            except ToolError as exc:
+                raise ToolError("postcondition_failed", "Probe identity was not uniquely present during authoritative preset readback.", requested=arguments, readback_error=exc.payload()["error"]) from exc
+            if fresh_inventory["inventory_generation"] != arguments["expected_inventory_generation"]:
+                raise ToolError("postcondition_failed", "Preset inventory generation changed while the mutation was converging.", requested=arguments, actual=after, actual_inventory_generation=fresh_inventory["inventory_generation"])
+            if (all(after[field] == desired[field] for field in ("preset_id", "preset_label", "electrode_map_hash"))
+                    and all(after[field] == before[field] for field in ("processor_id", "probe_id", "probe_serial"))):
+                result = {"changed": True, "before": before, "requested": arguments, "after": after}
+                return self._validate_preset_payload("oe_set_electrode_preset", result)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(PRESET_POLL_SECONDS)
+        if not obtained_readback or not last_readback_was_authoritative:
+            self._raise_preset_outcome_unknown(arguments, ToolError("response_schema_mismatch", "Authoritative preset readback was unavailable at the convergence deadline."))
+        raise ToolError("postcondition_failed", "Preset mutation did not converge to authoritative readback.", requested=arguments, actual=after)
 
     def _execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        capabilities = self._verify_capabilities()
+        if self.contract_version == PRESET_CONTRACT_VERSION:
+            descriptor = self._remote_capabilities()
+            capabilities = self._last_capabilities
+        else:
+            descriptor = None
+            capabilities = self._verify_capabilities()
         if name == "oe_get_capabilities": return capabilities
+        if name in PRESET_TOOL_NAMES and descriptor is None:
+            raise ToolError("capability_unavailable", "The exact remote Neuropixels preset capability is unavailable.")
+        if name == "oe_get_electrode_presets": return self._read_preset_inventory()
+        if name == "oe_set_electrode_preset":
+            return self._set_electrode_preset(validate_status(self.api.request("GET", "/api/status")), arguments)
         if name == "oe_get_status": return validate_status(self.api.request("GET", "/api/status"))
         if name == "oe_get_recording_options": return validate_options(self.api.request("GET", "/api/recording/options"))
         if name == "oe_get_recording_filename": return filename_projection(self.api.request("GET", "/api/recording"))
@@ -621,7 +978,7 @@ def run_stdio(server: McpServer) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT); parser.add_argument("--base-url")
+    parser.add_argument("--contract", type=Path, default=DEFAULT_ACTIVE_CONTRACT); parser.add_argument("--base-url")
     args = parser.parse_args(argv)
     try: server = McpServer(args.contract, args.base_url)
     except (OSError, ValueError) as exc:

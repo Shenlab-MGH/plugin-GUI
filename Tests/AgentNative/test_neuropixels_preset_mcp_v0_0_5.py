@@ -38,8 +38,7 @@ def capability_document(exact: bool = True, *, top_level_version: str = "0.0.5")
         **({"mode_semantics": item["mode_semantics"]} if "mode_semantics" in item else {}),
     } for item in real_server.REMOTE_BASE_CAPABILITIES]
     capabilities.append(descriptor)
-    return {"contract_version": top_level_version, "surface": "discovery_only",
-            "capabilities": capabilities}
+    return {"contract_version": top_level_version, "capabilities": capabilities}
 
 def inventory(*, generation: str = "generation-1", selected_id: str = "preset-a") -> dict:
     presets = [
@@ -151,7 +150,7 @@ class DiscoveryTests(PresetMcpTestCase):
         self.assertIn("oe_set_electrode_preset", names)
         payload, is_error = self.call_tool(server, "oe_get_electrode_presets")
         self.assertTrue(is_error)
-        self.assertEqual(payload["error"]["code"], "capability_contract_mismatch")
+        self.assertEqual(payload["error"]["code"], "capability_unavailable")
 
     def test_exact_remote_capability_publishes_legacy_compatible_tool_schemas(self):
         server = self.make_server(FakeApi())
