@@ -21,7 +21,7 @@ struct ExpectedCapability
     std::vector<ExpectedApiOperation> operations;
 };
 
-// Full 0.0.2 capability set shared with v1.0.2. Order is stable.
+// Full 0.0.3 capability set. Order is stable.
 // Operations reference shared route descriptors.
 const std::vector<ExpectedCapability> expectedCapabilities {
     { "oe.control.acquisition", "oe.control.acquisition",
@@ -45,6 +45,8 @@ const std::vector<ExpectedCapability> expectedCapabilities {
     { "oe.control.recording.force_new_directory", "oe.control.recording.force_new_directory",
       { { "read", OpenEphysHttpApi::kRecordingOptionsGet },
         { "set", OpenEphysHttpApi::kRecordingOptionsPut } } },
+    { "oe.control.signal_chain.configuration", "",
+      { { "read", OpenEphysHttpApi::kConfigGet } } },
     { "oe.status.cpu_usage", "oe.status.cpu_usage",
       { { "read", OpenEphysHttpApi::kCpuGet } } },
     { "oe.status.disk_usage", "oe.status.disk_usage",
@@ -60,6 +62,7 @@ const OpenEphysHttpApi::Route coreR0RouteDescriptors[] = {
     OpenEphysHttpApi::kRecordingPut,
     OpenEphysHttpApi::kRecordingOptionsGet,
     OpenEphysHttpApi::kRecordingOptionsPut,
+    OpenEphysHttpApi::kConfigGet,
     OpenEphysHttpApi::kCpuGet,
     OpenEphysHttpApi::kDiskGet,
     OpenEphysHttpApi::kTimeGet,
@@ -73,6 +76,7 @@ const OpenEphysHttpApi::Route sharedRegisteredRouteDescriptors[] = {
     OpenEphysHttpApi::kRecordingPut,
     OpenEphysHttpApi::kRecordingOptionsGet,
     OpenEphysHttpApi::kRecordingOptionsPut,
+    OpenEphysHttpApi::kConfigGet,
     OpenEphysHttpApi::kCpuGet,
     OpenEphysHttpApi::kDiskGet,
     OpenEphysHttpApi::kTimeGet,
@@ -112,6 +116,10 @@ TEST (ControlCapabilityTests, SharedRouteDescriptorsHaveExactMethodPathPairs)
     EXPECT_STREQ (OpenEphysHttpApi::kRecordingOptionsPut.path, "/api/recording/options");
     EXPECT_STREQ (OpenEphysHttpApi::kRecordingOptionsPut.methodString(), "PUT");
 
+    EXPECT_EQ (OpenEphysHttpApi::kConfigGet.method, OpenEphysHttpApi::Method::Get);
+    EXPECT_STREQ (OpenEphysHttpApi::kConfigGet.path, "/api/config");
+    EXPECT_STREQ (OpenEphysHttpApi::kConfigGet.methodString(), "GET");
+
     EXPECT_EQ (OpenEphysHttpApi::kDiskGet.method, OpenEphysHttpApi::Method::Get);
     EXPECT_STREQ (OpenEphysHttpApi::kDiskGet.path, "/api/disk");
     EXPECT_STREQ (OpenEphysHttpApi::kDiskGet.methodString(), "GET");
@@ -120,8 +128,8 @@ TEST (ControlCapabilityTests, SharedRouteDescriptorsHaveExactMethodPathPairs)
     EXPECT_STREQ (OpenEphysHttpApi::kTimeGet.path, "/api/time");
     EXPECT_STREQ (OpenEphysHttpApi::kTimeGet.methodString(), "GET");
 
-    ASSERT_EQ (sizeof (sharedRegisteredRouteDescriptors) / sizeof (sharedRegisteredRouteDescriptors[0]), (size_t) 10);
-    ASSERT_EQ (sizeof (coreR0RouteDescriptors) / sizeof (coreR0RouteDescriptors[0]), (size_t) 9);
+    ASSERT_EQ (sizeof (sharedRegisteredRouteDescriptors) / sizeof (sharedRegisteredRouteDescriptors[0]), (size_t) 11);
+    ASSERT_EQ (sizeof (coreR0RouteDescriptors) / sizeof (coreR0RouteDescriptors[0]), (size_t) 10);
 }
 
 TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
@@ -129,7 +137,7 @@ TEST (ControlCapabilityTests, DefinesStableCoreControlContracts)
     const auto& capabilities = getCoreControlCapabilities();
 
     ASSERT_EQ (capabilities.size(), expectedCapabilities.size());
-    ASSERT_EQ (expectedCapabilities.size(), (size_t) 10);
+    ASSERT_EQ (expectedCapabilities.size(), (size_t) 11);
 
     for (size_t i = 0; i < capabilities.size(); ++i)
     {
@@ -165,7 +173,7 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
 {
     const auto& capabilities = getCoreControlCapabilities();
 
-    ASSERT_EQ (capabilities.size(), (size_t) 10);
+    ASSERT_EQ (capabilities.size(), (size_t) 11);
 
     for (const auto& capability : capabilities)
     {
@@ -180,12 +188,15 @@ TEST (ControlCapabilityTests, ManifestOperationsMatchRegisteredCoreRoutes)
     }
 
     const auto* options = findControlCapability ("oe.control.recording.options");
+    const auto* configuration = findControlCapability ("oe.control.signal_chain.configuration");
     const auto* disk = findControlCapability ("oe.status.disk_usage");
     const auto* time = findControlCapability ("oe.status.elapsed_time");
     ASSERT_NE (options, nullptr);
+    ASSERT_NE (configuration, nullptr);
     ASSERT_NE (disk, nullptr);
     ASSERT_NE (time, nullptr);
     EXPECT_TRUE (routesEqual (options->operations[0].route, OpenEphysHttpApi::kRecordingOptionsGet));
+    EXPECT_TRUE (routesEqual (configuration->operations[0].route, OpenEphysHttpApi::kConfigGet));
     EXPECT_TRUE (routesEqual (disk->operations[0].route, OpenEphysHttpApi::kDiskGet));
     EXPECT_TRUE (routesEqual (time->operations[0].route, OpenEphysHttpApi::kTimeGet));
 }
@@ -194,11 +205,11 @@ TEST (ControlCapabilityTests, SerialisesFullCapabilityContractWithUia)
 {
     const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
 
-    EXPECT_EQ (document["contract_version"], "0.0.2");
+    EXPECT_EQ (document["contract_version"], "0.0.3");
     EXPECT_FALSE (document.contains ("surface"));
     ASSERT_TRUE (document["capabilities"].is_array());
     ASSERT_EQ (document["capabilities"].size(), expectedCapabilities.size());
-    ASSERT_EQ (document["capabilities"].size(), (size_t) 10);
+    ASSERT_EQ (document["capabilities"].size(), (size_t) 11);
 
     for (size_t i = 0; i < document["capabilities"].size(); ++i)
     {
@@ -207,8 +218,15 @@ TEST (ControlCapabilityTests, SerialisesFullCapabilityContractWithUia)
         const auto expectedId = std::string (expected.id);
 
         EXPECT_EQ (item["id"], expectedId);
-        ASSERT_TRUE (item.contains ("uia")) << expectedId;
-        EXPECT_EQ (item["uia"]["automation_id"], expected.uiaAutomationId) << expectedId;
+        if (std::strlen (expected.uiaAutomationId) == 0)
+        {
+            EXPECT_FALSE (item.contains ("uia")) << expectedId;
+        }
+        else
+        {
+            ASSERT_TRUE (item.contains ("uia")) << expectedId;
+            EXPECT_EQ (item["uia"]["automation_id"], expected.uiaAutomationId) << expectedId;
+        }
         ASSERT_TRUE (item["api"].is_array());
         ASSERT_EQ (item["api"].size(), expected.operations.size()) << expectedId;
 

@@ -1,10 +1,10 @@
 {
-  "format_version": "0.0.2",
+  "format_version": "0.0.3",
   "bundle": {
     "id": "open-ephys-agent-native",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "platform": "windows",
-    "coverage": "core-status-recording-options-filename-directory-cpu-disk-time"
+    "coverage": "core-status-recording-options-filename-directory-config-cpu-disk-time"
   },
   "official_upstream": {
     "repository": "open-ephys/plugin-GUI",
@@ -15,8 +15,8 @@
   "fork_source_commit": "4ef4b4662c12c9f5fe5d5d7c41fcbee3bd70f9bd",
   "contract": {
     "id": "open-ephys-agent",
-    "version": "0.0.2",
-    "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_2.json"
+    "version": "0.0.3",
+    "fixture": "agent_native/open_ephys_agent_contract_v1_1_0_v0_0_3.json"
   },
   "components": {
     "mcp": {

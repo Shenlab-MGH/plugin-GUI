@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
 BASE_CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_1.json"
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_2.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_3.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 SKILL_PATH = ROOT / "skills" / "open-ephys-agent-native" / "SKILL.md"
 RELEASE_BASE_SHA = "4ef4b4662c12c9f5fe5d5d7c41fcbee3bd70f9bd"
@@ -24,19 +24,21 @@ TOOL_NAMES = [
     "oe_get_recording_options", "oe_set_recording_options",
     "oe_get_recording_filename", "oe_set_recording_filename",
     "oe_get_recording_directory", "oe_set_recording_directory",
+    "oe_get_config",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 ]
 CAPABILITY_IDS = [
     "oe.control.acquisition", "oe.control.recording", "oe.control.recording.options",
     "oe.control.recording.filename", "oe.control.recording.directory",
     "oe.control.recording.new_directory",
-    "oe.control.recording.force_new_directory", "oe.status.cpu_usage",
+    "oe.control.recording.force_new_directory", "oe.control.signal_chain.configuration",
+    "oe.status.cpu_usage",
     "oe.status.disk_usage", "oe.status.elapsed_time",
 ]
 
 
 def load_server_module():
-    spec = importlib.util.spec_from_file_location("open_ephys_mcp_server_v002", SERVER_PATH)
+    spec = importlib.util.spec_from_file_location("open_ephys_mcp_server_v003", SERVER_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -133,16 +135,16 @@ class FakeOpenEphysApi:
 
 
 class ContractTests(unittest.TestCase):
-    def test_v002_extends_exact_v001_core_by_recording_directory_only(self):
+    def test_v003_extends_exact_v002_core_by_configuration_snapshot_only(self):
         self.assertEqual(subprocess.run(
             ["git", "merge-base", "--is-ancestor", RELEASE_BASE_SHA, "HEAD"],
             cwd=ROOT,
         ).returncode, 0)
         base_contract = json.loads(BASE_CONTRACT_PATH.read_text(encoding="utf-8"))
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(contract["schema_version"], "0.0.2")
-        self.assertEqual(contract["contract"]["version"], "0.0.2")
-        self.assertEqual(contract["bundle"]["version"], "0.0.2")
+        self.assertEqual(contract["schema_version"], "0.0.3")
+        self.assertEqual(contract["contract"]["version"], "0.0.3")
+        self.assertEqual(contract["bundle"]["version"], "0.0.3")
         self.assertEqual(contract["baseline"], {
             "upstream": "open-ephys/plugin-GUI",
             "version": "1.1.0",
@@ -152,36 +154,23 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(contract["mcp"], base_contract["mcp"])
         self.assertEqual([tool["name"] for tool in contract["tools"]], TOOL_NAMES)
         self.assertEqual([item["id"] for item in contract["api"]["expected_capabilities_response"]["capabilities"]], CAPABILITY_IDS)
-        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.0.2")
-        self.assertEqual(contract["api"]["capabilities_contract_version"], "0.0.2")
-        directory_capability = next(
+        self.assertEqual(contract["api"]["expected_capabilities_response"]["contract_version"], "0.0.3")
+        self.assertEqual(contract["api"]["capabilities_contract_version"], "0.0.3")
+        configuration_capability = next(
             item for item in contract["api"]["expected_capabilities_response"]["capabilities"]
-            if item["id"] == "oe.control.recording.directory"
+            if item["id"] == "oe.control.signal_chain.configuration"
         )
         self.assertEqual(
-            directory_capability,
+            configuration_capability,
             {
-                "id": "oe.control.recording.directory",
-                "name": "Recording directory",
-                "description": "Read or edit the recording parent directory.",
-                "kind": "value",
-                "uia": {"automation_id": "oe.control.recording.directory"},
+                "id": "oe.control.signal_chain.configuration",
+                "name": "Signal chain configuration",
+                "description": "Read the current signal chain configuration.",
+                "kind": "collection",
                 "api": [
-                    {"operation": "read", "method": "GET", "path": "/api/recording", "request_fields": [], "response_fields": ["parent_directory"]},
-                    {"operation": "set", "method": "PUT", "path": "/api/recording", "request_fields": ["parent_directory"], "response_fields": ["parent_directory"]},
+                    {"operation": "read", "method": "GET", "path": "/api/config", "request_fields": [], "response_fields": ["info"]},
                 ],
             },
-        )
-        base_capabilities = base_contract["api"]["expected_capabilities_response"]["capabilities"]
-        self.assertEqual(
-            [item for item in contract["api"]["expected_capabilities_response"]["capabilities"]
-             if item["id"] != "oe.control.recording.directory"],
-            base_capabilities,
-        )
-        self.assertEqual(
-            [tool for tool in contract["tools"]
-             if tool["name"] not in {"oe_get_recording_directory", "oe_set_recording_directory"}],
-            base_contract["tools"],
         )
         self.assertEqual(contract["verification"], {"hardware_verified": False, "scientific_verified": False})
         tool_names = [tool["name"] for tool in contract["tools"]]
@@ -198,7 +187,7 @@ class ContractTests(unittest.TestCase):
         })
 
 
-class McpV002Tests(unittest.TestCase):
+class McpV003Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
@@ -512,7 +501,7 @@ class McpV002Tests(unittest.TestCase):
 
     def test_skill_pins_contract_and_safety_boundary(self):
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        for required in ("0.0.2", "1.1.0", "2024-11-05", "approve_recording=true", "hardware_verified:false", "scientific_verified:false", "drive-letter-rooted Windows path", "equivalent PUT response and GET readback"):
+        for required in ("0.0.3", "1.1.0", "2024-11-05", "approve_recording=true", "hardware_verified:false", "scientific_verified:false", "drive-letter-rooted Windows path", "equivalent PUT response and GET readback"):
             self.assertIn(required, skill)
         for forbidden in ("oe_api_request", "uia locator", "processor", "parameter", "stream"):
             self.assertNotIn(forbidden, skill.lower())

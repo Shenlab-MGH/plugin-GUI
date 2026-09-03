@@ -15,6 +15,7 @@ EXPECTED = [
     "oe_get_recording_options", "oe_set_recording_options",
     "oe_get_recording_filename", "oe_set_recording_filename",
     "oe_get_recording_directory", "oe_set_recording_directory",
+    "oe_get_config",
     "oe_get_cpu", "oe_get_disk", "oe_get_time",
 ]
 
@@ -25,7 +26,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/capabilities":
-            payload = json.loads((ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_2.json").read_text(encoding="utf-8"))["api"]["expected_capabilities_response"]
+            payload = json.loads((ROOT / "agent_native" / "open_ephys_agent_contract_v1_1_0_v0_0_3.json").read_text(encoding="utf-8"))["api"]["expected_capabilities_response"]
         elif self.path == "/api/status":
             payload = {"mode": "IDLE"}
         else:

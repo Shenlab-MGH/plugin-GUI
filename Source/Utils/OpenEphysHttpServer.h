@@ -40,6 +40,7 @@
 #include "../UI/ProcessorList.h"
 
 #include "ControlCapabilityJson.h"
+#include "ConfigSnapshotApiHandler.h"
 #include "ControlRead.h"
 #include "OpenEphysHttpApiRoutes.h"
 #include "RecordingOptionsControl.h"
@@ -80,7 +81,7 @@ inline void setControlErrorResponse (httplib::Response& response,
  * The API is "RESTful", such that the resource URLs are:
  * 
  * - GET /api/capabilities :
- *          returns a JSON capability manifest (contract_version 0.0.2).
+ *          returns a JSON capability manifest (contract_version 0.0.3).
  *
  * - GET /api/config :
  *          returns an XML string with the current configuration of the GUI
@@ -188,14 +189,19 @@ public:
             const auto document = controlCapabilitiesToJson (getCoreControlCapabilities());
             res.set_content (document.dump(), "application/json"); });
 
-        svr_->Get ("/api/config", [this] (const httplib::Request&, httplib::Response& res)
+        OpenEphysHttpApi::registerRoute (*svr_, OpenEphysHttpApi::kConfigGet, [this] (const httplib::Request& req, httplib::Response& res)
                    {
-            std::unique_ptr<XmlElement> xmlElement = std::make_unique<XmlElement> ("SETTINGS");
-            graph_->saveToXml (xmlElement.get());
-
-            json ret;
-            ret["info"] = xmlElement.get()->toString().toStdString();
-            res.set_content(ret.dump(), "application/json"); });
+            handleConfigSnapshotGet (
+                req,
+                res,
+                OpenEphysHttpDetail::dispatchToMessageThread,
+                [this]
+                {
+                    XmlElement xmlElement ("SETTINGS");
+                    graph_->saveToXml (&xmlElement);
+                    return xmlElement.toString();
+                },
+                std::chrono::seconds (2)); });
 
         const auto readStatusMode = []
         {

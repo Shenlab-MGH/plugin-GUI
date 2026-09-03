@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 AGENT_DIR = ROOT / "agent_native"
-CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_2.json"
+CONTRACT_PATH = AGENT_DIR / "open_ephys_agent_contract_v1_1_0_v0_0_3.json"
 BUNDLE_PATH = AGENT_DIR / "open_ephys_agent_release_bundle.json"
 SERVER_PATH = AGENT_DIR / "open_ephys_mcp_server.py"
 
